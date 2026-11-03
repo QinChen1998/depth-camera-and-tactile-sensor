@@ -418,11 +418,11 @@ private:
     {
         QString message;
         if (automaticTof=="missing")
-            message=tr("The device was added. Open Settings > Device Manager > Import on-board inference model to install automatic dToF support and check the model.");
+            message=tr("The device was added. Open Settings > Device Manager > Install protected on-board inference to install the required files.");
         else if (automaticTof!="ready")
             message=tr("The device was added. The board capture script is unavailable or unsupported.");
         else if (model=="missing")
-            message=tr("The device was added. To use on-board inference, open Settings > Device Manager and choose Import on-board inference model.");
+            message=tr("The device was added. To use on-board inference, open Settings > Device Manager and choose Install protected on-board inference.");
         else if (model=="mismatch")
             message=tr("The device was added. The existing on-board inference model checksum differs. Review the board model before starting on-board inference.");
         else

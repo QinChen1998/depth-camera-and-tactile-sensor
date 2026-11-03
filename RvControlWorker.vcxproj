@@ -22,5 +22,5 @@
  <Target Name="ValidateRvDependencies" BeforeTargets="ClCompile"><Error Condition="!Exists('$(RvDependencyRoot)\lib\libssh2.lib')" Text="Prepare pinned libssh2/OpenSSL with tools/rv_control/prepare_sdk.ps1."/></Target>
  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
 <ItemGroup><ClInclude Include="sensors\RvDeviceStore.h" /><ClCompile Include="sensors\RvDeviceStore.cpp" /></ItemGroup>
- <ItemGroup><ClInclude Include="sensors\RvTunerProtocol.h"/><ClCompile Include="sensors\RvTunerProtocol.cpp"/><ClInclude Include="tools\dtof_tuner\Worker.inc"/></ItemGroup>
+ <ItemGroup><ClInclude Include="sensors\RvTunerProtocol.h"/><ClCompile Include="sensors\RvTunerProtocol.cpp"/><ClInclude Include="tools\dtof_tuner\Worker.inc"/><ClInclude Include="tools\litesr_board\protected\Worker.inc"/></ItemGroup>
 </Project>

@@ -16,3 +16,4 @@ private_build/
 *.onnx
 *.rknn
 *.dctsm
+/tools/litesr_board/protected/payload/*.bin

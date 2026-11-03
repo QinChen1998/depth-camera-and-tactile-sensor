@@ -336,7 +336,7 @@ int runPortSmokeTests(SensorMainWindow &window,LanguageManager &language,const Q
         auto *save=devices.findChild<QPushButton *>("rvDeviceSave");
         auto *importLiteSr=devices.findChild<QPushButton *>("rvDeviceImportLiteSr");
         check("LITESR_IMPORT_ACTION",importLiteSr&&importLiteSr->isEnabled()
-            &&importLiteSr->text()==QString::fromUtf8("导入板端推理模型…"));
+            &&importLiteSr->text()==QString::fromUtf8("安装板端推理与自动切换…"));
         if(importLiteSr&&qEnvironmentVariable("RV_TEST_OFFLINE_ONLY")=="1"){
             importLiteSr->click();
             bool noImportProcess=true;

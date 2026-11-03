@@ -1,0 +1,28 @@
+DCTS 1.1.2 - source and license information
+
+The DCTS application is licensed under GNU GPL version 3 only. A copy
+is installed in licenses/DCTS-GPL-3.0.txt. You may use, modify and
+redistribute the covered software under that license. See the license
+for warranty terms.
+
+The corresponding application source and build scripts for this setup
+are provided alongside it as DCTS-1.1.2-corresponding-source.zip.
+Public project: https://github.com/QinChen1998/depth-camera-and-tactile-sensor
+
+Qt 6.11.1 source:
+https://download.qt.io/archive/qt/6.11/6.11.1/single/qt-everywhere-src-6.11.1.tar.xz
+Qt Multimedia 6.11.1 FFmpeg build information:
+https://code.qt.io/cgit/qt/qtmultimedia.git/tree/coin?h=v6.11.1
+FFmpeg 7.1.3 release source:
+https://ffmpeg.org/releases/ffmpeg-7.1.3.tar.xz
+VLC source information: licenses/VLC/Source.txt.
+
+See licenses/Third-Party-Notices.txt and licenses/qt-sbom for component
+notices. The encrypted RGB576 FP16 model is provided under its separate
+notice in UniDepthRuntimeWide576FP16/licenses/Proprietary-Model-NOTICE.txt.
+
+The separate LiteSR model is installed onto a compatible RV1103 with
+the included F1/F2 ARM executable, launcher and dToF switching script.
+It stays encrypted on disk. The board uses its firmware-provided RKNN
+and libcrypto libraries. The model is provided for use with compatible
+authorized equipment.

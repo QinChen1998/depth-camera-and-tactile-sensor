@@ -84,6 +84,9 @@ void resources(const QDir &root) {
         && info["executable_sha256"].toString() == sha(QCoreApplication::applicationFilePath()), "Native RV implementation fingerprint mismatch");
     const auto dlls = info["dependencies"].toObject(), files = info["payload_files"].toObject();
     require(dlls.contains("libssh2.dll") && dlls.contains("libcrypto-3-x64.dll") && files.contains("known_hosts"), "Native SSH closure missing");
+    for (const auto *name : {"model.dctsm","litesr-fov1.bin","litesr-fov2.bin","litesr_gui.sh","dtof-switch.sh"})
+        require(files.contains(QString("litesr_board/")+name), "Protected LiteSR payload missing from the runtime manifest");
+
     for (const auto &table : {dlls, files}) for (auto it = table.begin(); it != table.end(); ++it) {
         const auto name = it.key();
         require(!name.isEmpty() && !QDir::isAbsolutePath(name) && !name.contains(':') && !name.contains('\\')
@@ -347,10 +350,14 @@ QJsonObject selfTest(const QByteArray &known) {
     const auto check = [&](const char *name, bool ok) { checks.append(QJsonObject{{"name", name}, {"passed", ok}}); require(ok, QString::fromLatin1(name)); };
     Session session; auto key = QByteArray::fromBase64(Key);
     check("ed25519_crypto_sign_verify", ed25519());
-    check("existing_pinned_key_accepted", pinnedKey(session.value, known, key, LIBSSH2_HOSTKEY_TYPE_ED25519));
-    key[20] ^= 1; check("changed_host_key_rejected", !pinnedKey(session.value, known, key, LIBSSH2_HOSTKEY_TYPE_ED25519));
-    check("unknown_or_added_host_rejected", !pinnedKey(session.value, known + "\nunknown ssh-ed25519 " + Key, QByteArray::fromBase64(Key), LIBSSH2_HOSTKEY_TYPE_ED25519));
-    check("host_key_algorithm_downgrade_rejected", !pinnedKey(session.value, known, QByteArray::fromBase64(Key), LIBSSH2_HOSTKEY_TYPE_RSA));
+    // Exercise the offline fixture without provisioning it as a device trust record.
+    const auto fixture = QByteArray(Host) + " ssh-ed25519 " + Key;
+    check("packaged_legacy_trust_empty", known.trimmed().isEmpty());
+    check("empty_host_trust_rejected", !pinnedKey(session.value, known, key, LIBSSH2_HOSTKEY_TYPE_ED25519));
+    check("existing_pinned_key_accepted", pinnedKey(session.value, fixture, key, LIBSSH2_HOSTKEY_TYPE_ED25519));
+    key[20] ^= 1; check("changed_host_key_rejected", !pinnedKey(session.value, fixture, key, LIBSSH2_HOSTKEY_TYPE_ED25519));
+    check("unknown_or_added_host_rejected", !pinnedKey(session.value, fixture + "\nunknown ssh-ed25519 " + Key, QByteArray::fromBase64(Key), LIBSSH2_HOSTKEY_TYPE_ED25519));
+    check("host_key_algorithm_downgrade_rejected", !pinnedKey(session.value, fixture, QByteArray::fromBase64(Key), LIBSSH2_HOSTKEY_TYPE_RSA));
     auto rejects = [](const std::function<void()> &call, int code = 2) { try { call(); return false; } catch (const Error &e) { return e.code == code; } };
     Configuration c;
     auto oldStart=c;oldStart.recoverFault=true;
@@ -441,59 +448,6 @@ void verifyDevice(Ssh &connection) {
     const auto geometry=connection.execute(QStringLiteral("sha256sum /root/r144_depth/M48_geometry.bin")).simplified().split(' ').value(0);
     require(geometry==device.geometrySha().toLatin1(),"Device GEO2 calibration differs from its profile; capture was not configured");
 }
-QString nearModelScript()
-{
-    return QStringLiteral(R"SH(
-set -eu
-dir=/root/dtof_candidates_20261009
-model="$dir/litesr_near_official10_20261023.rknn"
-expected='%1'
-model_state(){
-    if [ ! -x "$dir/litesr_near_gui" ] || [ ! -r "$dir/litesr_gui.sh" ] ||
-       [ ! -x "$dir/control.sh" ] || [ ! -r "$dir/session.sh" ]; then
-        echo runtime_missing
-    elif [ -L "$model" ]; then
-        echo mismatch
-    elif [ ! -e "$model" ]; then
-        echo missing
-    elif [ -f "$model" ]; then
-        sum=$(sha256sum "$model") || { echo mismatch; return; }
-        if [ "${sum%% *}" = "$expected" ]; then echo ready; else echo mismatch; fi
-    else
-        echo mismatch
-    fi
-}
-)SH").arg(QString::fromLatin1(LiteSrBoardContract::NearModelSha));
-}
-QString nearModelState(Ssh &connection)
-{
-    const auto state=connection.execute(nearModelScript()+"\nmodel_state").trimmed();
-    require(state=="ready"||state=="missing"||state=="mismatch"||state=="runtime_missing",
-        "Invalid LiteSR model status");
-    return QString::fromLatin1(state);
-}
-QString nearModelInstallScript()
-{
-    return nearModelScript()+QStringLiteral(R"SH(
-state=$(model_state)
-if [ "$state" = ready ]; then cat >/dev/null; echo ready; exit 0; fi
-[ "$state" = missing ] || { echo 'DTOF_ERROR:LiteSR runtime missing or existing model differs; no file was replaced'; exit 2; }
-umask 077
-stage=$(mktemp -d "$dir/.dcts-litesr.XXXXXX")
-tmp="$stage/${model##*/}"
-trap 'rm -f "$tmp"; rmdir "$stage"' EXIT
-trap 'exit 2' HUP INT TERM
-cat >"$tmp"
-sum=$(sha256sum "$tmp")
-[ "${sum%% *}" = "$expected" ] || { echo 'DTOF_ERROR:Uploaded LiteSR model checksum mismatch'; exit 2; }
-# Create the final name atomically. ln fails if any file already owns the name.
-if ! ln "$tmp" "$dir/"; then
-    [ "$(model_state)" = ready ] || { echo 'DTOF_ERROR:LiteSR target changed; no file was replaced'; exit 2; }
-fi
-[ "$(model_state)" = ready ]
-echo ready
-)SH");
-}
 QJsonObject withDevice(QJsonObject result) {
     if(deviceStore) { result["trusted_device"]=device.json();result["device_registry_revision"]=deviceStore->revision();result["expected_fov"]=device.fov(); }
     return result;
@@ -501,41 +455,28 @@ QJsonObject withDevice(QJsonObject result) {
 #include "tools/dtof_tuner/Worker.inc"
 // This hook lives in the existing candidate session so the coordinator still
 // owns the same manager and producer PIDs, including on the legacy firmware.
-const QByteArray DctsTofHook = R"SH(# DCTS automatic dToF preset v1
-dcts_tof(){
- preset=$1; mode=$2; shift 2
- case "$preset:$mode" in
-  :*) if [ "$1" = launch_tof ]; then "$@"; else exec "$@"; fi; return;;
-  16:14) distance=5;;
-  48:13) distance=11;;
-  *) return 2;;
- esac
- remaining=$#
- while [ "$remaining" -gt 0 ]; do
-  argument=$1; shift; remaining=$((remaining-1))
-  case "$argument" in
-   -d|-o|-t) [ "$remaining" -gt 0 ] || return 2; shift; remaining=$((remaining-1));;
-   -g|-n) ;;
-   *) set -- "$@" "$argument";;
-  esac
- done
- set -- "$@" -d "$distance" -o 1 -t 0
- if [ "$preset" = 48 ]; then set -- "$@" -g; fi
- if [ "$1" = launch_tof ]; then "$@"; else exec "$@"; fi
+QByteArray boardPayload(const QString &name)
+{
+    return readFile(QDir(QCoreApplication::applicationDirPath()).filePath("litesr_board/"+name), 4*1024*1024);
 }
-)SH";
+const QByteArray &automaticTofHook()
+{
+    static const auto hook=boardPayload("dtof-switch.sh");
+    return hook;
+}
 const QByteArray DctsTofCall = R"SH(dcts_tof "${DCTS_DTOF_PRESET:-}" "$1" )SH";
 const QString CandidateSession = "/root/dtof_candidates_20261009/session.sh";
 
 QByteArray withAutomaticTof(QByteArray session)
 {
-    const auto existing=session.indexOf(DctsTofHook);
+    const auto &hook=automaticTofHook();
+    const auto existing=session.indexOf(hook);
     const auto call=session.indexOf(DctsTofCall);
     if(existing>=0 || call>=0) {
-        require(existing>=0 && call>=existing+DctsTofHook.size(),"Incomplete automatic dToF hook; review the board session script");
+        require(existing>=0 && call>=existing+hook.size(),"Incomplete automatic dToF hook; review the board session script");
         auto original=session;
         original.remove(call,DctsTofCall.size());
-        original.remove(existing,DctsTofHook.size());
+        original.remove(existing,hook.size());
         require(!original.contains("dcts_tof") && withAutomaticTof(original)==session,
                 "Automatic dToF hook differs from the supported version");
         return session;
@@ -549,7 +490,7 @@ QByteArray withAutomaticTof(QByteArray session)
     const auto line=matches.next();
     require(!matches.hasNext(),"Ambiguous board candidate producer");
     session.insert(line.capturedEnd(),DctsTofCall);
-    session.insert(line.capturedStart(),DctsTofHook);
+    session.insert(line.capturedStart(),hook);
     return session;
 }
 
@@ -595,6 +536,8 @@ echo ready
     require(connection.execute(command,30000,after).trimmed()=="ready"
             && tunerRead(connection,CandidateSession)==after,"Automatic dToF installation was not verified");
 }
+
+#include "tools/litesr_board/protected/Worker.inc"
 
 int run(const QStringList &input) {
     auto args=input;
@@ -662,30 +605,13 @@ int run(const QStringList &input) {
         Ssh connection(known);verifyDevice(connection);
         const auto bytes=QJsonDocument(withDevice({{"verified",true},{"litesr_model",nearModelState(connection)},{"automatic_tof",automaticTofState(connection)}})).toJson(QJsonDocument::Compact);std::fwrite(bytes.constData(),1,size_t(bytes.size()),stdout);return 0;
     }
-    if((args.size()==2||args.size()==3)&&args[1]=="--import-litesr-model") {
+    if(args.size()==2&&args[1]=="--import-litesr-model") {
         require(bool(deviceStore)&&qEnvironmentVariable("RV_TEST_OFFLINE_ONLY")!="1",
             "LiteSR import requires a selected device and online mode");
-        constexpr qint64 modelSize=575927;
-        QByteArray model;
-        if(args.size()==3) {
-            QFile modelFile(args[2]);
-            require(modelFile.open(QIODevice::ReadOnly),"Cannot open the selected LiteSR model");
-            model=modelFile.read(modelSize+1);
-            require(model.size()==modelSize&&QCryptographicHash::hash(model,QCryptographicHash::Sha256).toHex()==LiteSrBoardContract::NearModelSha,
-                "The selected file is not the supported LiteSR near INT8 model");
-        }
         pinSelectedProfile=true;
         Ssh connection(known);verifyDevice(connection);
-        auto state=nearModelState(connection);
-        if(!model.isEmpty())
-            require(state=="ready"||state=="missing",
-                "LiteSR runtime missing or existing model differs; no model file was replaced");
-        installAutomaticTof(connection);
-        if(state=="missing"&&!model.isEmpty()) {
-            require(connection.execute(nearModelInstallScript(),30000,model).trimmed()=="ready","LiteSR model installation was not verified");
-            state="ready";
-        }
-        const auto bytes=QJsonDocument(withDevice({{"litesr_model",state},{"automatic_tof","ready"}})).toJson(QJsonDocument::Compact);
+        installProtectedLiteSr(connection);
+        const auto bytes=QJsonDocument(withDevice({{"litesr_model","ready"},{"automatic_tof","ready"}})).toJson(QJsonDocument::Compact);
         std::fwrite(bytes.constData(),1,size_t(bytes.size()),stdout);return 0;
     }
 #ifdef RV_CONTROL_TRANSPORT_TEST

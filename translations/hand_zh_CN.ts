@@ -2093,11 +2093,11 @@ New: %2</source>
         <source>Correct the camera mounting angle before display and model preprocessing. Model input orientation is a separate setting.</source>
         <translation>在显示和模型预处理之前校正摄像头安装角度，模型推理输入方向是独立设置。</translation>
     </message>
-<message><source>Import on-board inference model...</source><translation>导入板端推理模型…</translation></message>
-<message><source>Verified %1. On-board inference model missing. Use Import on-board inference model to copy it to the device.</source><translation>已验证 %1。缺少板端推理模型，请使用“导入板端推理模型”复制。</translation></message>
+<message><source>Install protected on-board inference...</source><translation>安装板端推理与自动切换…</translation></message>
+<message><source>Verified %1. Protected LiteSR is missing. Use Install protected on-board inference.</source><translation>已验证 %1。缺少加密 LiteSR，请点击「安装板端推理与自动切换」。</translation></message>
 <message><source>Verified %1. The existing on-board inference model checksum differs.</source><translation>已验证 %1。现有板端推理模型的校验值不符。</translation></message>
 <message><source>Verified %1. The on-board inference runtime is incomplete.</source><translation>已验证 %1。板端推理运行环境不完整。</translation></message>
-<message><source>Verified %1. On-board inference model checksum matches.</source><translation>已验证 %1。板端推理模型校验值一致。</translation></message>
+<message><source>Verified %1. Protected LiteSR and automatic dToF are ready.</source><translation>已验证 %1。加密 LiteSR 和 dToF 自动切换均已就绪。</translation></message>
 <message><source>Verified %1. On-board inference model status is unavailable.</source><translation>已验证 %1。暂时无法获取板端推理模型状态。</translation></message>
 <message><source>LiteSR model verified on %1. Click Start in the camera panel when ready.</source><translation>已校验 %1 上的 LiteSR 模型。就绪后可在原视频面板点击“开始”。</translation></message>
 <message><source>On-board model import is unavailable in offline mode.</source><translation>离线模式下无法导入板端推理模型。</translation></message>
@@ -2192,7 +2192,7 @@ Projected camera-Z %8 m</source><translation>ToF %1 | ID %2 | 行 %3，列 %4
 <context><name>SensorMainWindow</name>
     <message><source>Host-assisted inference unavailable</source><translation>上位机辅助推理不可用</translation></message>
     <message><source>For now, choose On-board inference under Imaging scheme, then click Start if needed.</source><translation>建议先在「成像方案」中选择「板端推理」，必要时点击「开始」。</translation></message><message><source>About</source><translation>关于</translation></message><message><source>Magnetic tactile sensors</source><translation>磁触觉传感器</translation></message><message><source>Depth Map</source><translation>深度图</translation></message><message><source>Camera raw video</source><translation>摄像头原视频</translation></message><message><source>dToF Parameter Tuning</source><translation>dToF参数设置</translation></message><message><source>File</source><translation>文件</translation></message><message><source>Exit</source><translation>退出</translation></message><message><source>View</source><translation>视图</translation></message><message><source>Reset layout</source><translation>恢复默认布局</translation></message><message><source>Layout Presets</source><translation>布局预设</translation></message><message><source>Save layout...</source><translation>保存布局…</translation></message><message><source>Delete layout...</source><translation>删除布局…</translation></message><message><source>Settings</source><translation>设置</translation></message><message><source>Device Manager...</source><translation>设备管理…</translation></message><message><source>Rendering Mode</source><translation>渲染设置</translation></message><message><source>Standard Mode</source><translation>标准模式</translation></message><message><source>Smooth Mode</source><translation>流畅模式</translation></message><message><source>Language</source><translation>语言</translation></message><message><source>English</source><translation>English</translation></message><message><source>Simplified Chinese</source><translation>简体中文</translation></message><message><source>Delete layout</source><translation>删除布局</translation></message><message><source>Layout name:</source><translation>布局名称：</translation></message><message><source>Save layout</source><translation>保存布局</translation></message><message><source>No saved layouts</source><translation>尚无已保存布局</translation></message>    <message><source>Install required board files</source><translation>安装板端所需文件</translation></message>
-    <message><source>%1 is missing required board files. Open the on-board inference model import to install them?</source><translation>%1 缺少成像所需的板端文件。是否通过「导入板端推理模型」进行安装？</translation></message>
+    <message><source>%1 is missing required board files. Open the on-board inference model import to install them?</source><translation>%1 缺少成像所需的板端文件。是否通过「安装板端推理与自动切换」进行安装？</translation></message>
 </context><context>
     <name>RvUsbEnrollment</name>
     <message>
@@ -2241,7 +2241,7 @@ SSH 指纹：%2
         <source>Reconnect the USB device to retry, or open Device Manager.</source>
         <translation>请重新插入 USB 设备重试，或打开设备管理。</translation>
     </message>
-<message><source>The device was added. To use on-board inference, open Settings &gt; Device Manager and choose Import on-board inference model.</source><translation>设备已添加。缺少板端推理模型，可在“设置 → 设备管理”中选择“导入板端推理模型”。</translation></message>
+<message><source>The device was added. To use on-board inference, open Settings &gt; Device Manager and choose Install protected on-board inference.</source><translation>设备已添加。缺少板端推理模型，可在“设置 → 设备管理”中选择“安装板端推理与自动切换”。</translation></message>
 <message><source>The device was added. The existing on-board inference model checksum differs. Review the board model before starting on-board inference.</source><translation>设备已添加。现有板端推理模型的校验值不符，请核对板端模型后再启动板端推理。</translation></message>
 <message><source>The device was added. On-board inference requires its runtime to be installed on the device.</source><translation>设备已添加。使用板端 板端推理 前，需要先在设备上部署配套运行环境。</translation></message>
 <message><source>RV1103 on-board inference model</source><translation>RV1103 板端推理模型</translation></message>
@@ -2249,8 +2249,8 @@ SSH 指纹：%2
 <context>
     <name>RvDeviceManagerDialog</name>
     <message>
-        <source>Verified %1. Automatic dToF support is missing. Use Import on-board inference model to install it and check the model.</source>
-        <translation>已验证 %1。缺少 dToF 自动切换支持，请通过「导入板端推理模型」安装并检查模型。</translation>
+        <source>Verified %1. Automatic dToF support is missing. Use Install protected on-board inference to install the required files.</source>
+        <translation>已验证 %1。缺少 dToF 自动切换支持，请点击「安装板端推理与自动切换」。</translation>
     </message>
     <message>
         <source>Verified %1. The board capture script is unavailable or unsupported.</source>
@@ -2261,8 +2261,8 @@ SSH 指纹：%2
         <translation>dToF 自动切换已就绪。选择板端推理模型文件以启用板端推理。</translation>
     </message>
     <message>
-        <source>Automatic dToF and the on-board inference model are ready on %1. Click Start in either imaging panel.</source>
-        <translation>%1 的 dToF 自动切换和板端推理模型均已就绪。可在任一成像模块点击「开始」。</translation>
+        <source>Protected LiteSR and automatic dToF are ready on %1. Click Start in either imaging panel.</source>
+        <translation>%1 的加密 LiteSR 和 dToF 自动切换均已就绪。可在任一成像模块点击「开始」。</translation>
     </message>
     <message>
         <source>Automatic dToF is ready. The existing on-board inference model checksum differs and the file was preserved.</source>
@@ -2284,8 +2284,8 @@ SSH 指纹：%2
 <context>
     <name>RvUsbEnrollment</name>
     <message>
-        <source>The device was added. Open Settings &gt; Device Manager &gt; Import on-board inference model to install automatic dToF support and check the model.</source>
-        <translation>设备已添加。请打开「设置 → 设备管理 → 导入板端推理模型」，安装 dToF 自动切换支持并检查模型。</translation>
+        <source>The device was added. Open Settings &gt; Device Manager &gt; Install protected on-board inference to install the required files.</source>
+        <translation>设备已添加。请打开「设置 → 设备管理 → 安装板端推理与自动切换」安装所需文件。</translation>
     </message>
     <message>
         <source>The device was added. The board capture script is unavailable or unsupported.</source>

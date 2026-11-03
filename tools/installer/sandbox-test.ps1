@@ -1,4 +1,4 @@
-﻿$ErrorActionPreference='Stop'
+﻿﻿$ErrorActionPreference='Stop'
 $logs='C:\DctsResults'
 $source='C:\DctsInstaller'
 $app=Join-Path $env:ProgramFiles 'Depth Camera and Tactile Sensor'
@@ -22,6 +22,10 @@ try {
     $setup=(Get-ChildItem -LiteralPath $source -Filter 'DCTS-Setup-*-x64.exe').FullName
     Check 'install_exit_0' ((Run $setup "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /LOG=$logs\install.log" 300) -eq 0)
     Check 'program_files_install' (Test-Path -LiteralPath $exe)
+    Check 'application_gpl_license' (Test-Path -LiteralPath (Join-Path $app 'licenses/DCTS-GPL-3.0.txt'))
+    $sourceNotice=Get-Content -LiteralPath (Join-Path $app 'licenses/Corresponding-Source.txt') -Raw
+    Check 'matching_source_archive_named' ($sourceNotice.Contains('DCTS-1.1.2-corresponding-source.zip'))
+    Check 'no_factory_ssh_trust' ((Get-Item -LiteralPath (Join-Path $app 'rv_control/known_hosts')).Length -eq 0)
     Check 'windows_platform_plugin' (Test-Path (Join-Path $app 'platforms\qwindows.dll'))
     Check 'application_local_vc_runtime' (Test-Path (Join-Path $app 'VCRUNTIME140.dll'))
     Check 'desktop_shortcut' (@(Get-ChildItem "$env:PUBLIC\Desktop" -Filter '*.lnk' | Where-Object {
@@ -55,6 +59,16 @@ try {
     }
     $adb=Join-Path $app 'platform-tools\adb.exe'
     $worker=Join-Path $app 'rv_control\RvControlWorker.exe'
+    $boardRoot=Join-Path $app 'rv_control'
+    $boardManifest=Get-Content -LiteralPath (Join-Path $boardRoot 'implementation.json') -Raw | ConvertFrom-Json
+    foreach($name in 'model.dctsm','litesr-fov1.bin','litesr-fov2.bin','litesr_gui.sh','dtof-switch.sh'){
+        $relative="litesr_board/$name"
+        $hash=(Get-FileHash -LiteralPath (Join-Path $boardRoot $relative)).Hash
+        Check ("board_payload_sha256_"+$name) ($hash -eq $boardManifest.payload_files.$relative)
+    }
+    $boardModel=[IO.File]::ReadAllBytes((Join-Path $boardRoot 'litesr_board/model.dctsm'))
+    Check 'board_encrypted_model_header' ([Text.Encoding]::ASCII.GetString($boardModel,0,7) -eq 'DCTSM01')
+    Check 'board_import_button' ($ui -match '(?m)^LITESR_IMPORT_ACTION PASS\s*$')
     Check 'native_worker_self_test' ((Run $worker '--self-test' 20) -eq 0)
     Check 'managed_vlc_rtsp_plugin' (Test-Path (Join-Path $app 'vlc\plugins\access\liblive555_plugin.dll'))
     Check 'managed_vlc_h265_plugin' (Test-Path (Join-Path $app 'vlc\plugins\codec\libavcodec_plugin.dll'))

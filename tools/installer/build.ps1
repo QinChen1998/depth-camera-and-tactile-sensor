@@ -161,6 +161,8 @@ if(-not $UseStagedPayload){
     $notices=Join-Path $payload 'licenses'
     Copy-Relative (Join-Path $project 'third_party/ffmpeg_7_1_3') $notices 'COPYING.LGPLv2.1'
     Copy-Relative $PSScriptRoot $notices 'Third-Party-Notices.txt'
+    Copy-Item -LiteralPath (Join-Path $project 'LICENSE') -Destination (Join-Path $notices 'DCTS-GPL-3.0.txt')
+    Copy-Relative $PSScriptRoot $notices 'Corresponding-Source.txt'
     $qtSource=Join-Path (Split-Path $qt) 'Src'
     Copy-Relative (Join-Path $qtSource 'qtbase/LICENSES') $notices 'LGPL-3.0-only.txt'
     Copy-Relative (Join-Path $qtSource 'qtquick3d/LICENSES') $notices 'GPL-3.0-only.txt'
@@ -202,6 +204,15 @@ if($VlcRoot){
 foreach($name in 'libvlc.dll','libvlccore.dll','plugins/codec/libavcodec_plugin.dll','plugins/access/liblive555_plugin.dll'){
     if(-not (Test-Path -LiteralPath (Join-Path $vlcPayload $name) -PathType Leaf)){
         throw "Missing VLC x64 managed H.265 runtime ($name). Supply an official VLC 3 Windows distribution with -VlcRoot."
+    }
+}
+
+$boardPayload=Join-Path $payload 'rv_control'
+$boardManifest=Get-Content -LiteralPath (Join-Path $boardPayload 'implementation.json') -Raw | ConvertFrom-Json -AsHashtable
+foreach($name in 'model.dctsm','litesr-fov1.bin','litesr-fov2.bin','litesr_gui.sh','dtof-switch.sh'){
+    $relative="litesr_board/$name"
+    if((Digest (Join-Path $boardPayload $relative)) -ne $boardManifest.payload_files[$relative]){
+        throw "Board installation payload fingerprint mismatch: $name"
     }
 }
 

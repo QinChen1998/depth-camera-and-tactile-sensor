@@ -39,7 +39,7 @@ private:
     void importDevices();
     void importLiteSrModel(bool confirmed = false);
     void exportDevices();
-    void runWorker(const QString &operation, const QString &modelPath={});
+    void runWorker(const QString &operation);
     void readDeviceInformation();
     void confirmSerialRead();
     void acceptWorkerResult(const QJsonObject &result);

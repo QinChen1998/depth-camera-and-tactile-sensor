@@ -101,7 +101,7 @@ RvDeviceManagerDialog::RvDeviceManagerDialog(RvSessionController *session,QWidge
     auto *bottom = UiStyle::wrappingRow(actions, layout->spacing());
     layout->addWidget(actions);
     m_save=new QPushButton(tr("Save device"),actions);m_save->setObjectName("rvDeviceSave");m_verify=new QPushButton(tr("Verify connection"),actions);m_verify->setObjectName("rvDeviceVerify");m_forget=new QPushButton(tr("Clear saved login"),actions);m_forget->setObjectName("rvDeviceForget");
-    m_importLiteSr=new QPushButton(tr("Import on-board inference model..."),actions);m_importLiteSr->setObjectName("rvDeviceImportLiteSr");
+    m_importLiteSr=new QPushButton(tr("Install protected on-board inference..."),actions);m_importLiteSr->setObjectName("rvDeviceImportLiteSr");
     for(auto *b:{m_save,m_verify,m_importLiteSr,m_forget}){bottom->addWidget(b);m_actions.append(b);}
     auto *close=new QDialogButtonBox(QDialogButtonBox::Close,actions);
     auto *closeButton=close->button(QDialogButtonBox::Close);
@@ -211,12 +211,12 @@ void RvDeviceManagerDialog::acceptWorkerResult(const QJsonObject &result){
         m_store->save(list,m_store->activeId());refresh(p.id);m_operation.clear();
         const auto model=result["litesr_model"].toString();
         const auto automaticTof=result["automatic_tof"].toString();
-        if(automaticTof=="missing")message(tr("Verified %1. Automatic dToF support is missing. Use Import on-board inference model to install it and check the model.").arg(p.name));
+        if(automaticTof=="missing")message(tr("Verified %1. Automatic dToF support is missing. Use Install protected on-board inference to install the required files.").arg(p.name));
         else if(automaticTof!="ready")message(tr("Verified %1. The board capture script is unavailable or unsupported.").arg(p.name),true);
-        else if(model=="missing")message(tr("Verified %1. On-board inference model missing. Use Import on-board inference model to copy it to the device.").arg(p.name));
+        else if(model=="missing")message(tr("Verified %1. Protected LiteSR is missing. Use Install protected on-board inference.").arg(p.name));
         else if(model=="mismatch")message(tr("Verified %1. The existing on-board inference model checksum differs.").arg(p.name),true);
         else if(model=="runtime_missing")message(tr("Verified %1. The on-board inference runtime is incomplete.").arg(p.name),true);
-        else if(model=="ready")message(tr("Verified %1. On-board inference model checksum matches.").arg(p.name));
+        else if(model=="ready")message(tr("Verified %1. Protected LiteSR and automatic dToF are ready.").arg(p.name));
         else message(tr("Verified %1. On-board inference model status is unavailable.").arg(p.name),true);
     }else if(m_operation=="--import-litesr-model"){
         const auto p=RvDeviceProfile::fromJson(result["trusted_device"].toObject());
@@ -225,25 +225,15 @@ void RvDeviceManagerDialog::acceptWorkerResult(const QJsonObject &result){
             throw std::runtime_error("LiteSR import response does not match the selected device");
         m_operation.clear();
         const auto model=result["litesr_model"].toString();
-        if(model=="missing"){
-            message(tr("Automatic dToF is ready. Select the on-board inference model file to enable board inference."));
-            const auto path=QFileDialog::getOpenFileName(this,tr("Select near-range on-board INT8 model"),{},tr("RKNN model (*.rknn)"));
-            if(!path.isEmpty())runWorker("--import-litesr-model",path);
-            else m_resumeImaging=false;
-        }else if(model=="ready"){
-            if (m_resumeImaging && m_session && m_session->userStopped() && !m_session->busy()
-                && m_session->deviceProfile().json()==p.json()) {
-                m_resumeImaging=false;
-                m_session->start();
-                accept();
-                return;
-            }
-            message(tr("Automatic dToF and the on-board inference model are ready on %1. Click Start in either imaging panel.").arg(p.name));
-        }else if(model=="mismatch"){
-            message(tr("Automatic dToF is ready. The existing on-board inference model checksum differs and the file was preserved."),true);
-        }else{
-            message(tr("Automatic dToF is ready. The on-board inference runtime is incomplete."),true);
+        if(model!="ready")throw std::runtime_error("Protected LiteSR installation was not verified");
+        if (m_resumeImaging && m_session && m_session->userStopped() && !m_session->busy()
+            && m_session->deviceProfile().json()==p.json()) {
+            m_resumeImaging=false;
+            m_session->start();
+            accept();
+            return;
         }
+        message(tr("Protected LiteSR and automatic dToF are ready on %1. Click Start in either imaging panel.").arg(p.name));
         if (m_operation.isEmpty()) m_resumeImaging=false;
     }else{m_operation.clear();message(tr("Saved login cleared."));}
 }
@@ -318,14 +308,10 @@ void RvDeviceManagerDialog::importLiteSrModel(bool confirmed)
         message(tr("Stop imaging before importing board files."),true);
         return;
     }
-    const auto target=m_store->byId(m_id);
-    if (!confirmed && QMessageBox::question(this,tr("Import on-board inference model"),
-        tr("Install automatic dToF support on %1 (%2) and check the on-board inference model? If the model is missing, you can select a file to copy.")
-            .arg(target.name,target.serial),QMessageBox::Yes|QMessageBox::Cancel,QMessageBox::Cancel)!=QMessageBox::Yes) return;
     m_resumeImaging=confirmed;
     runWorker("--import-litesr-model");
 }
-void RvDeviceManagerDialog::runWorker(const QString &operation,const QString &modelPath){if(operation=="--forget-device-credentials"&&m_session&&m_session->tuner()->shutdownPending()){message(tr("Stop dToF tuning before changing trusted devices."),true);return;}try{const auto worker=RuntimeDiscovery::rvControlForLaunch();if(!worker.error.isEmpty())throw std::runtime_error(worker.error.toStdString());QStringList args{operation};
+void RvDeviceManagerDialog::runWorker(const QString &operation){if(operation=="--forget-device-credentials"&&m_session&&m_session->tuner()->shutdownPending()){message(tr("Stop dToF tuning before changing trusted devices."),true);return;}try{const auto worker=RuntimeDiscovery::rvControlForLaunch();if(!worker.error.isEmpty())throw std::runtime_error(worker.error.toStdString());QStringList args{operation};
     if(operation=="--inspect-host"){
         m_probeId=m_id;m_probeHost=m_host->text().trimmed();m_probePort=m_port->value();m_probeUsername=m_username->text().trimmed();
         if(!RvDeviceStore::validHost(m_probeHost))throw std::runtime_error("Invalid device address");args<<m_probeHost<<QString::number(m_probePort);
@@ -345,6 +331,5 @@ void RvDeviceManagerDialog::runWorker(const QString &operation,const QString &mo
         }
         args<<"--device-store"<<m_store->path()<<"--device-revision"<<m_store->revision()<<"--device-id"<<p.id;
     }
-    if(operation=="--import-litesr-model"&&!modelPath.isEmpty())args<<modelPath;
     m_operation=operation;m_workerFailure.clear();m_worker->setProcessEnvironment(RuntimeDiscovery::handPoseNativeEnvironment(worker.executable));m_worker->setProgram(worker.executable);m_worker->setArguments(args);busy(true);message(operation=="--read-device-serial"?tr("Log in with the usual device password to read its serial..."):tr("Working..."));m_worker->start();m_timeout->start(operation=="--read-device-serial"?180000:60000);
 }catch(const std::exception&e){busy(false);operationFailed(QString::fromUtf8(e.what()));}}

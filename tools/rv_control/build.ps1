@@ -55,6 +55,12 @@ foreach($rvName in @('session.sh','tmf8829_tuner','bounded_log.awk','LICENSE-MIT
 }
 Copy-Item -LiteralPath (Join-Path $rvProject 'tools/dtof_tuner/coordinator.sh') -Destination (Join-Path $rvRuntime 'dtof_tuner/coordinator.sh') -Force
 $rvPayload['dtof_tuner/coordinator.sh']=(Get-FileHash (Join-Path $rvRuntime 'dtof_tuner/coordinator.sh') -Algorithm SHA256).Hash.ToLower()
+New-Item -ItemType Directory -Force -Path (Join-Path $rvRuntime 'litesr_board') | Out-Null
+foreach($rvName in @('model.dctsm','litesr-fov1.bin','litesr-fov2.bin','litesr_gui.sh','dtof-switch.sh')) {
+ $rvRelative="litesr_board/$rvName"
+ Copy-Item -LiteralPath (Join-Path $rvProject "tools/litesr_board/protected/payload/$rvName") -Destination (Join-Path $rvRuntime $rvRelative) -Force
+ $rvPayload[$rvRelative]=(Get-FileHash (Join-Path $rvRuntime $rvRelative) -Algorithm SHA256).Hash.ToLower()
+}
 foreach($rvName in @('known_hosts','licenses/libssh2.txt','licenses/OpenSSL.txt','licenses/upstream.lock.json')){$rvPayload[$rvName]=(Get-FileHash (Join-Path $rvRuntime $rvName) -Algorithm SHA256).Hash.ToLower()}
 [ordered]@{implementation='rv-control-cpp-v1';executable='RvControlWorker.exe';executable_sha256=(Get-FileHash $rvExecutable -Algorithm SHA256).Hash.ToLower();dependencies=$rvHashes;payload_files=$rvPayload;host_key_algorithm='ssh-ed25519';crypto_backend='OpenSSL';libssh2='1.11.1';transport_test_fixture=$TransportTests.IsPresent;python_required=$false;camera_opened=$false;board_connected=$false} | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $rvRuntime 'implementation.json') -Encoding UTF8
 Write-Output "Native RV $Configuration built/deployed: $rvRuntime"
