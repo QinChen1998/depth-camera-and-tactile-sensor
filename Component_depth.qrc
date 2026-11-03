@@ -1,0 +1,10 @@
+<RCC>
+  <qresource prefix="/camera">
+    <file alias="dtof_m48_geometry_f2.bin">assets/camera/dtof_m48_geometry_f2.bin</file>
+    <file alias="dtof_m48_geometry.bin">assets/camera/dtof_m48_geometry.bin</file>
+    <file alias="nv12_rectify_144.bin">assets/camera/nv12_rectify_144.bin</file>
+    <file alias="nv12_rectify_2304.bin">assets/camera/nv12_rectify_2304.bin</file>
+    <file alias="nv12_rectify.bin">assets/camera/nv12_rectify.bin</file>
+    <file alias="nv12_rectify_wide.bin">assets/camera/nv12_rectify_wide.bin</file>
+  </qresource>
+</RCC>

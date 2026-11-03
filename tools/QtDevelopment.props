@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <!-- Machine-specific paths stay outside Git. Explicit MSBuild/environment
+       QtInstall values take precedence over these installation defaults. -->
+  <Import Project="$(MSBuildThisFileDirectory)..\QtDevelopment.local.props"
+          Condition="'$(QtInstall)' == '' and Exists('$(MSBuildThisFileDirectory)..\QtDevelopment.local.props')" />
+  <PropertyGroup>
+    <QtInstall Condition="'$(QtInstall)' == '' and Exists('E:\Qt\6.11.1\msvc2022_64\bin\qmake.exe') and Exists('E:\Qt\6.11.1\msvc2022_64\lib\Qt6Core.lib') and Exists('E:\Qt\6.11.1\msvc2022_64\mkspecs\win32-msvc\qmake.conf')">E:\Qt\6.11.1\msvc2022_64</QtInstall>
+    <QtInstall Condition="'$(QtInstall)' == '' and Exists('D:\Qt\6.11.1\msvc2022_64\bin\qmake.exe') and Exists('D:\Qt\6.11.1\msvc2022_64\lib\Qt6Core.lib') and Exists('D:\Qt\6.11.1\msvc2022_64\mkspecs\win32-msvc\qmake.conf')">D:\Qt\6.11.1\msvc2022_64</QtInstall>
+    <QtInstall Condition="'$(QtInstall)' == '' and Exists('C:\Qt\6.11.1\msvc2022_64\bin\qmake.exe') and Exists('C:\Qt\6.11.1\msvc2022_64\lib\Qt6Core.lib') and Exists('C:\Qt\6.11.1\msvc2022_64\mkspecs\win32-msvc\qmake.conf')">C:\Qt\6.11.1\msvc2022_64</QtInstall>
+  </PropertyGroup>
+</Project>

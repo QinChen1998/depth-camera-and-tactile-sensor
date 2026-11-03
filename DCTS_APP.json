@@ -1,0 +1,7 @@
+{
+  "application": "DepthCameraAndTactileSensor",
+  "schema": 1,
+  "modules": ["tactile", "depth", "camera"],
+  "imaging_schemes": ["host_unidepth_wide_576_fp16_tof16", "board_litesr_near_full_host_contour_hd"],
+  "unidepth_correction": "H"
+}

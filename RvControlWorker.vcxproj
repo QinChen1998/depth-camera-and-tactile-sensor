@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" ToolsVersion="17.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+ <ItemGroup Label="ProjectConfigurations">
+  <ProjectConfiguration Include="Debug|x64"><Configuration>Debug</Configuration><Platform>x64</Platform></ProjectConfiguration>
+  <ProjectConfiguration Include="Release|x64"><Configuration>Release</Configuration><Platform>x64</Platform></ProjectConfiguration>
+ </ItemGroup>
+ <PropertyGroup Label="Globals"><ProjectGuid>{308E37D0-4E82-4FA8-992C-D885304C8C79}</ProjectGuid><Keyword>Win32Proj</Keyword><RootNamespace>RvControlWorker</RootNamespace><WindowsTargetPlatformVersion>10.0.22621.0</WindowsTargetPlatformVersion></PropertyGroup>
+ <Import Project="tools\QtDevelopment.props" />
+ <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+ <PropertyGroup Label="Configuration"><ConfigurationType>Application</ConfigurationType><PlatformToolset>v143</PlatformToolset><UseDebugLibraries>false</UseDebugLibraries><CharacterSet>Unicode</CharacterSet></PropertyGroup>
+ <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+ <PropertyGroup><RvDependencyRoot Condition="'$(RvDependencyRoot)' == ''">$(MSBuildProjectDirectory)\x64\rv_control_sdk\install</RvDependencyRoot><OutDir>$(MSBuildProjectDirectory)\x64\rv_control\$(Configuration)\</OutDir><IntDir>$(MSBuildProjectDirectory)\x64\rv_control\obj_$(Configuration)\</IntDir><TargetName>RvControlWorker</TargetName></PropertyGroup>
+ <ItemDefinitionGroup>
+  <ClCompile><WarningLevel>Level3</WarningLevel><LanguageStandard>stdcpp17</LanguageStandard><ConformanceMode>true</ConformanceMode><ExceptionHandling>Sync</ExceptionHandling><RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary><PrecompiledHeader>NotUsing</PrecompiledHeader><ForceSynchronousPDBWrites>true</ForceSynchronousPDBWrites><AdditionalOptions>/utf-8 /Zc:__cplusplus %(AdditionalOptions)</AdditionalOptions><AdditionalIncludeDirectories>$(RvDependencyRoot)\include;$(QtInstall)\include;$(QtInstall)\include\QtCore;$(QtInstall)\include\QtNetwork;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories><PreprocessorDefinitions>WIN32;_CONSOLE;NOMINMAX;_WIN32_WINNT=0x0A00;_ITERATOR_DEBUG_LEVEL=0;QT_CORE_LIB;QT_NETWORK_LIB;QT_NO_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions></ClCompile>
+  <Link><SubSystem>Console</SubSystem><AdditionalLibraryDirectories>$(RvDependencyRoot)\lib;$(QtInstall)\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories><AdditionalDependencies>Qt6Core.lib;Qt6Network.lib;libssh2.lib;libcrypto.lib;ws2_32.lib;advapi32.lib;credui.lib;%(AdditionalDependencies)</AdditionalDependencies><GenerateDebugInformation>true</GenerateDebugInformation></Link>
+ </ItemDefinitionGroup>
+ <ItemDefinitionGroup Condition="'$(Configuration)' == 'Debug'"><ClCompile><Optimization>Disabled</Optimization><DebugInformationFormat>ProgramDatabase</DebugInformationFormat></ClCompile></ItemDefinitionGroup>
+ <ItemDefinitionGroup Condition="'$(Configuration)' == 'Release'"><ClCompile><Optimization>MaxSpeed</Optimization><DebugInformationFormat>ProgramDatabase</DebugInformationFormat><PreprocessorDefinitions>NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions></ClCompile><Link><OptimizeReferences>true</OptimizeReferences><EnableCOMDATFolding>true</EnableCOMDATFolding></Link></ItemDefinitionGroup>
+ <ItemDefinitionGroup Condition="'$(RvTransportTests)' == 'true'"><ClCompile><PreprocessorDefinitions>RV_CONTROL_TRANSPORT_TEST;%(PreprocessorDefinitions)</PreprocessorDefinitions></ClCompile></ItemDefinitionGroup>
+ <ItemGroup><ClCompile Include="RvControlWorker.cpp"/><ClCompile Include="RvControlProtocol.cpp"/></ItemGroup>
+ <ItemGroup><ClInclude Include="RvControlProtocol.h"/><ClInclude Include="tools\dtof_board\Options.h"/><ClInclude Include="tools\litesr_board\Contract.h"/></ItemGroup>
+ <Target Name="ValidateRvDependencies" BeforeTargets="ClCompile"><Error Condition="!Exists('$(RvDependencyRoot)\lib\libssh2.lib')" Text="Prepare pinned libssh2/OpenSSL with tools/rv_control/prepare_sdk.ps1."/></Target>
+ <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+<ItemGroup><ClInclude Include="sensors\RvDeviceStore.h" /><ClCompile Include="sensors\RvDeviceStore.cpp" /></ItemGroup>
+ <ItemGroup><ClInclude Include="sensors\RvTunerProtocol.h"/><ClCompile Include="sensors\RvTunerProtocol.cpp"/><ClInclude Include="tools\dtof_tuner\Worker.inc"/></ItemGroup>
+</Project>

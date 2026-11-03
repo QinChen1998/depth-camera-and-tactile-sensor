@@ -1,0 +1,64 @@
+{
+  "version": 1,
+  "units": "m",
+  "note": "Display-only provisional contact coverage; source geometry is unchanged.",
+  "sensors": [
+    {
+      "id": "fingertip",
+      "source_directory": "fingertip/source",
+      "source_sha256": {
+        "meshes/base_link.STL": "4288b48ab949b8fff0efcdd4b280df7659fdbc46ab27c843f7e40d70eedc7359",
+        "urdf/指尖触觉urdf.csv": "1542564c61e8fa750233ba68d0a5eac92c6ff635d0f9e22d5e828e9a2c515f82",
+        "urdf/指尖触觉urdf.urdf": "46cca1085379ce431a8a73e89c6255eb4a98809deb3d2b8901367c904f7c0c61"
+      },
+      "contact_y_sign": 1,
+      "center_xz_m": [
+        0,
+        0.014
+      ],
+      "coverage_width_height_m": [
+        0.014,
+        0.021
+      ],
+      "point_lift_m": 0.00018
+    },
+    {
+      "id": "terminal",
+      "source_directory": "terminal/source",
+      "source_sha256": {
+        "meshes/base_link.STL": "38b9565d62ffa9d28804f0174b30c16f7f5fd910dc1c83d6ae2f182710421ccc",
+        "urdf/末端触觉urdf.csv": "7970e4d1dd5cbbd628490dd818300774b0b077a998eac39cfe555a78e5ef00c2",
+        "urdf/末端触觉urdf.urdf": "5cf54c936f45ee43584212f98424a9a68c46e5039a4f06f7cc12d73457d8b04f"
+      },
+      "contact_y_sign": -1,
+      "center_xz_m": [
+        0,
+        0.0125
+      ],
+      "coverage_width_height_m": [
+        0.012,
+        0.018
+      ],
+      "point_lift_m": 0.00018
+    },
+    {
+      "id": "ultrathin",
+      "source_directory": "ultrathin/source",
+      "source_sha256": {
+        "meshes/base_link.STL": "452b06e41c1ba07c73890df8ec897c6ba01d2511f998c411fbb38c6d3ce723b5",
+        "urdf/urdf.csv": "2bdb81a864d8faacb2c914f1d5e4339efbbfa2517415744ef4fa85c6d431b81e",
+        "urdf/urdf.urdf": "9df289186029e5aa22fbf2172de2bb7bb33820d0bec26039e48b0db121a87e61"
+      },
+      "contact_y_sign": -1,
+      "center_xz_m": [
+        0,
+        0.00758
+      ],
+      "coverage_width_height_m": [
+        0.0105,
+        0.0105
+      ],
+      "point_lift_m": 0.00018
+    }
+  ]
+}

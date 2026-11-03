@@ -1,0 +1,18 @@
+/x64/
+/.vs/
+/Depth Ca.*/
+/QtDevelopment.local.props
+/UniDepthRuntimeWide576FP16/
+/config/*
+!/config/first-run-settings.ini
+/AGENTS.md
+/.agents/
+/.codex/
+*.user
+__pycache__/
+*.pyc
+model_key_material.h
+private_build/
+*.onnx
+*.rknn
+*.dctsm

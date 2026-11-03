@@ -1,0 +1,12 @@
+{
+  "source": "RV1103-1106/tools/dtof_tuner; read-only snapshot 2026-10-22",
+  "historical_archive_sha256": "f42837e2ba462fcefc999f64490285f4eb30404bfeea946260d31408a2c8bfb6",
+  "files": {
+    "bounded_log.awk": "97ca78b9983ea78ef7a82519130570b1b87232989c4bb7e568006d805a3b6c83",
+    "LICENSE-MIT.TXT": "99f486ec3489c0d3b2d089ab92e9044ce96c199c018e63fa8b122e98359f9bda",
+    "session.sh": "71867198c50360ee90b8b5008d0680f5e6ef11bd28c04d2d6b8547e68e3ad401",
+    "tmf8829_tuner": "06039c807cc833bf74f711c2a1839990255aa184078157e18ba4050a3663ed6d"
+  },
+  "runtime": "native ARM hard-float/uClibc; no host Python dependency",
+  "deployment": "not automatic; preflight requires installed matching assets"
+}
