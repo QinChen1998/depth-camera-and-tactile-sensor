@@ -36,14 +36,16 @@ inline bool liteSrBoardIdentity(const QJsonObject& m){
     return RvDtofCandidates::isLiteSr(mode)&&m["engine"]==LiteSrBoardContract::engine(mode)&&m["model_sha256"]==LiteSrBoardContract::modelSha(mode)
         &&(!LiteSrBoardContract::isCaptureOnly(mode)||(m["capture_only"]==true&&m["inference_location"]=="none"&&m["depth_present"]==false&&m["photon_enabled"]==false))
         &&(!LiteSrBoardContract::isNear(mode)||(m["checkpoint_sha256"]==LiteSrBoardContract::NearCheckpointSha&&m["training_minimum_m"]==0.01))
-        &&(!LiteSrBoardContract::isHighResolution(mode)||(m["rgb_paused"]==true&&m["video_transport"]=="none"))
-        &&m["width"]==LiteSrBoardContract::outputSide(mode)&&m["height"]==LiteSrBoardContract::outputSide(mode)&&m["fresh_ms"]==LiteSrBoardContract::FreshMs;
+        &&(!(LiteSrBoardContract::isHighResolution(mode)||LiteSrBoardContract::isNative16Depth(mode))||(m["rgb_paused"]==true&&m["video_transport"]=="none"))
+        &&(!LiteSrBoardContract::isNative16Depth(mode)||(m["video_fps"]==0&&m["native_columns"]==16&&m["native_rows"]==16))
+        &&m["width"]==LiteSrBoardContract::outputWidth(mode)&&m["height"]==LiteSrBoardContract::outputHeight(mode)&&m["fresh_ms"]==LiteSrBoardContract::FreshMs;
 }
 inline bool liteSrHdIdentity(const QJsonObject& m){
     return m["video_transport"]=="rtsp_h265"&&m["video_width"]==2304&&m["video_height"]==1296
         &&m["video_fps"]==30&&m["video_kbps"]==4096;
 }
 inline QSize liteSrNativeGrid(const QJsonObject& receipt){
+    if(LiteSrBoardContract::isNative16Depth(receipt["candidate_mode"].toInt(-1)))return receipt["native_columns"]==16&&receipt["native_rows"]==16?QSize(16,16):QSize();
     if(RvDtofCandidates::isCaptureOnly(receipt["candidate_mode"].toInt(-1))&&receipt.contains("requested_host_model")
        &&!RvCameraView::isHostDepth(receipt["requested_host_model"].toString()))return {};
     if(!receipt.contains("native_capture_protocol"))return RvCameraView::isUniDepthNative16(receipt["requested_host_model"].toString())?QSize():QSize(48,32);
@@ -120,6 +122,6 @@ public:
     RvDtofBoardStream(const QJsonObject& receipt,const RvDtofCandidates::Settings& s,QObject* parent=nullptr,
         const QString& host="172.32.0.93",quint16 port=8832,QThreadPool* pool=nullptr);
     ~RvDtofBoardStream() override;
-    bool supportsHostContour() const {return !RvDtofCandidates::isCaptureOnly(expected["candidate_mode"].toInt(-1))&&RvDtofCandidates::isLiteSrFull(expected["candidate_mode"].toInt(-1))&&usesPairedProtocol();}
+    bool supportsHostContour() const {return !LiteSrBoardContract::isNative16Depth(expected["candidate_mode"].toInt(-1))&&!RvDtofCandidates::isCaptureOnly(expected["candidate_mode"].toInt(-1))&&RvDtofCandidates::isLiteSrFull(expected["candidate_mode"].toInt(-1))&&usesPairedProtocol();}
     bool setHostContour(bool enabled,const RvLiteSrContour::RepairSettings& settings);
 };

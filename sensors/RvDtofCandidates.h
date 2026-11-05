@@ -7,15 +7,17 @@
 namespace RvDtofCandidates {
 constexpr int FastDepth=9; // Stable DTF3 board mode, not a GUI index.
 constexpr int LiteSrFull=LiteSrBoardContract::Full, LiteSrContour=LiteSrBoardContract::Contour, LiteSrFullHd=LiteSrBoardContract::FullHd, LiteSrNearFullHd=LiteSrBoardContract::NearFullHd;
+constexpr int LiteSrRectFullHd=LiteSrBoardContract::RectFullHd;
 constexpr int LiteSrHighResolution=LiteSrBoardContract::HighResolution;
+constexpr int LiteSrNative16Depth=LiteSrBoardContract::Native16Depth;
 constexpr int NativeHd=LiteSrBoardContract::NativeHd;
 inline bool isCaptureOnly(int mode){return LiteSrBoardContract::isCaptureOnly(mode);}
 inline bool isLiteSrHd(int mode){return LiteSrBoardContract::isHd(mode);}
 inline bool isLiteSrFull(int mode){return LiteSrBoardContract::isFull(mode);}
 inline bool isLiteSr(int mode){return LiteSrBoardContract::supports(mode);}
 inline bool supports(int mode){return isLiteSr(mode);}
-inline int outputWidth(int mode){return isLiteSr(mode)?LiteSrBoardContract::outputSide(mode):384;}
-inline int outputHeight(int mode){return isLiteSr(mode)?LiteSrBoardContract::outputSide(mode):256;}
+inline int outputWidth(int mode){return isLiteSr(mode)?LiteSrBoardContract::outputWidth(mode):384;}
+inline int outputHeight(int mode){return isLiteSr(mode)?LiteSrBoardContract::outputHeight(mode):256;}
 inline int freshnessMs(int mode){return isLiteSr(mode)?LiteSrBoardContract::FreshMs:220;}
 struct Settings {
     DtofM0::Config metric;

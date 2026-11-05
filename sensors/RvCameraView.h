@@ -1,20 +1,31 @@
 #pragma once
 #include <QtCore/QString>
 #include <QtCore/QJsonArray>
+#include <QtCore/QSize>
 
-// Two immutable virtual cameras. Physical K/D/M/R/t and native rays are shared;
+// Immutable virtual cameras. Physical K/D/M/R/t and native rays are shared;
 // each inference graph, rectification map and projection uses one whole profile.
 namespace RvCameraView {
 inline constexpr const char *UniDepthFp16Native16="unidepth_wide_576_fp16_tof16";
-inline bool isUniDepthNative16(const QString &model){return model==QLatin1String(UniDepthFp16Native16);}
-inline QString runtimeModel(const QString &model){return isUniDepthNative16(model)?QStringLiteral("unidepth_wide_576_fp16"):model;}
+inline constexpr const char *UniDepthVgaNative16="unidepth_rgb672_vga_fp16_tof16";
+inline bool isUniDepthVga(const QString &model){return model==QLatin1String(UniDepthVgaNative16);}
+inline bool isUniDepthNative16(const QString &model){return model==QLatin1String(UniDepthFp16Native16)||isUniDepthVga(model);}
+inline QString runtimeModel(const QString &model){return model==QLatin1String(UniDepthFp16Native16)?QStringLiteral("unidepth_wide_576_fp16"):model;}
 struct Profile {double focal;const char *mapSha,*sourceSha,*graphSha,*name,*conversion;
     const char *weightsSha="93705cb3295dd7476b44911b8a55f5215bf74e8d5eccd27cecdb1b338270a648";
     const char *precision="fp16-mixed",*modelName="UniDepthV2-Small",*graphFile="unidepthv2-small-rv576.onnx";
     int networkWidth=1008,networkHeight=574,resolutionLevel=9;
     const char *networkProfile=nullptr;
     double parityMeanLimit=.001,parityMaxLimit=.01;
-    bool provisional=false;};
+    bool provisional=false;
+    int inputWidth=576,inputHeight=324,outputWidth=576,outputHeight=324;
+    QSize inputSize() const {return {inputWidth,inputHeight};}
+    QSize outputSize() const {return {outputWidth,outputHeight};}
+    int rgbBytes() const {return inputWidth*inputHeight*3;}
+    int depthBytes() const {return outputWidth*outputHeight*4;}
+    double cx() const {return (outputWidth-1)*.5;}
+    double cy() const {return (outputHeight-1)*.5;}
+};
 inline constexpr Profile Standard{574.,
     "00de89f4e6d95f09758b0d8274c2694168a27b5f601bdfeda667b0b179126b5d",
     "46488b81c0fbf75c6277fd9d4da5d29bbf7dcd6f499a67a87ff7e7aa33594368",
@@ -35,6 +46,13 @@ inline constexpr Profile WideRgb576Fp16Trial{260.,
     "2912174428afd1b5b6ceb503b716d58166184529909cb28b9a83f1d60cf686ca","wide","ort-fp16-rgb576-pad6-head-fp32-v1",
     "93705cb3295dd7476b44911b8a55f5215bf74e8d5eccd27cecdb1b338270a648",
     "fp16-mixed-trial","UniDepthV2-Small","unidepthv2-small-rv576.onnx",588,336,-1,"rgb576_pad6_v1",.0025,.01,true};
+inline constexpr Profile Rgb672VgaFp16{260.*480/324,
+    "d48026ea3a476187073955208c940b945d35321a4b4abc75e3c506534997da5e",
+    "a35dbea69611e21c866b1600569fb8a44c9df2061b505477366d020fef443b6f",
+    "50d22cd33e126832793d905788a1efadeb4c9298de72cbfa634d49fdcdbc2dc1","wide","ort-fp16-rgb672-vga-head-fp32-v1",
+    "93705cb3295dd7476b44911b8a55f5215bf74e8d5eccd27cecdb1b338270a648",
+    "fp16-mixed-trial","UniDepthV2-Small","unidepthv2-small-rgb672-vga.onnx",672,504,-1,"rgb672_vga_crop_v1",.0025,.01,true,
+    672,504,640,480};
 inline constexpr Profile ColorRgb{574., Standard.mapSha,
     "06069e977d45604e82f0acee1bba5bcc63bb0b82f6b9f39fb94486532730bd5c", "0f93f909f7cd64973a97016e607fcb5154f90356b3af8183bf1fcc903547911c", "standard", "litesr-color-host-v1",
     "06069e977d45604e82f0acee1bba5bcc63bb0b82f6b9f39fb94486532730bd5c", "fp32", "LiteSR-RGB", "litesr_rgb_raw_v2.onnx"};
@@ -64,6 +82,10 @@ inline bool supportsNativeGrid(const QString &model,int columns,int rows){
         isHostDepth(model)&&((columns==48&&rows==32)||(isDepthorV3(model)&&columns==8&&rows==8));
 }
 inline const Profile &profile(bool wide){return wide?Wide:Standard;}
-inline const Profile &profile(const QString &model){return model=="depthor_v3_fp32"?DepthorV3Fp32:model=="depthor_v3_fp16"?DepthorV3Fp16:model=="depthor_v3_int8"?DepthorV3Int8:model=="colorsr_rgb"?ColorRgb:model=="colorsr_nv12"?ColorNv12:(model=="unidepth_wide_576_fp16"||isUniDepthNative16(model))?WideRgb576Fp16Trial:(model=="unidepth_wide_576"?WideRgb576:profile(isWide(model)));}
-inline QJsonArray intrinsics(bool wide){const double f=profile(wide).focal;return {f,f,287.5,161.5};}
+inline const Profile &profile(const QString &model){
+    if(isUniDepthVga(model))return Rgb672VgaFp16;
+    return model=="depthor_v3_fp32"?DepthorV3Fp32:model=="depthor_v3_fp16"?DepthorV3Fp16:model=="depthor_v3_int8"?DepthorV3Int8:model=="colorsr_rgb"?ColorRgb:model=="colorsr_nv12"?ColorNv12:(model=="unidepth_wide_576_fp16"||isUniDepthNative16(model))?WideRgb576Fp16Trial:(model=="unidepth_wide_576"?WideRgb576:profile(isWide(model)));
+}
+inline QJsonArray intrinsics(const Profile &view){return {view.focal,view.focal,view.cx(),view.cy()};}
+inline QJsonArray intrinsics(bool wide){return intrinsics(profile(wide));}
 }

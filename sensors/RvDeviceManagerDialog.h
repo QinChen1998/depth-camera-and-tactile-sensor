@@ -23,6 +23,10 @@ public:
     explicit RvDeviceManagerDialog(RvSessionController *session,QWidget *parent=nullptr);
     ~RvDeviceManagerDialog() override;
     void importBoardFilesForStart(const RvDeviceProfile &device);
+    void beginUsbEnrollment();
+    void finishUsbEnrollment(bool added);
+signals:
+    void usbConnectionRequested(RvDeviceManagerDialog *dialog);
 protected:
     void reject() override;
     void closeEvent(QCloseEvent *event) override;
@@ -39,11 +43,12 @@ private:
     void importDevices();
     void importLiteSrModel(bool confirmed = false);
     void exportDevices();
-    void runWorker(const QString &operation, const QString &modelPath={});
+    void runWorker(const QString &operation);
     void readDeviceInformation();
     void confirmSerialRead();
     void acceptWorkerResult(const QJsonObject &result);
-    void operationFailed(const QString &reason);
+    void operationFailed(const QString &reason,int code=-1);
+    void showBoardImportFailure(const QString &reason,const QString &phase,int code);
     void cancelOperation();
     void invalidateSerial();
     void message(const QString &text,bool error=false);
@@ -54,6 +59,7 @@ private:
     QString m_id,m_operation,m_probeHost,m_savedFingerprint,m_probeId,m_probeUsername,m_probeKey,m_workerFailure;
     int m_probePort=0;
     bool m_fresh=false,m_readingSerial=false,m_resumeImaging=false;
+    bool m_usbEnrollmentPending=false;
     QWidget *m_details;
     QTableWidget *m_table;
     QLineEdit *m_name,*m_host,*m_serial,*m_key,*m_username;

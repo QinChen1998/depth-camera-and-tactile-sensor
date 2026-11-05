@@ -7,9 +7,7 @@
       "id": "fingertip",
       "source_directory": "fingertip/source",
       "source_sha256": {
-        "meshes/base_link.STL": "4288b48ab949b8fff0efcdd4b280df7659fdbc46ab27c843f7e40d70eedc7359",
-        "urdf/指尖触觉urdf.csv": "1542564c61e8fa750233ba68d0a5eac92c6ff635d0f9e22d5e828e9a2c515f82",
-        "urdf/指尖触觉urdf.urdf": "46cca1085379ce431a8a73e89c6255eb4a98809deb3d2b8901367c904f7c0c61"
+        "指尖触觉1104.STEP": "836a000551327f0e681189a046fab7902a893de3f0aabff43b7c7467ee479148"
       },
       "contact_y_sign": 1,
       "center_xz_m": [
@@ -20,15 +18,38 @@
         0.014,
         0.021
       ],
-      "point_lift_m": 0.00018
+      "point_lift_m": 0.00018,
+      "source_units": "mm",
+      "step_scene_origin_mm": [
+        -19.24651364674718,
+        7.066235824493102,
+        0.0094
+      ],
+      "step_linear_deflection_mm": 0.015,
+      "step_angular_deflection_rad": 0.22,
+      "step_scene_rotation_matrix": [
+        [
+          -1,
+          0,
+          0
+        ],
+        [
+          0,
+          -1,
+          0
+        ],
+        [
+          0,
+          0,
+          1
+        ]
+      ]
     },
     {
       "id": "terminal",
       "source_directory": "terminal/source",
       "source_sha256": {
-        "meshes/base_link.STL": "38b9565d62ffa9d28804f0174b30c16f7f5fd910dc1c83d6ae2f182710421ccc",
-        "urdf/末端触觉urdf.csv": "7970e4d1dd5cbbd628490dd818300774b0b077a998eac39cfe555a78e5ef00c2",
-        "urdf/末端触觉urdf.urdf": "5cf54c936f45ee43584212f98424a9a68c46e5039a4f06f7cc12d73457d8b04f"
+        "末端触觉1104.STEP": "27c83d66bc332f5c043e2e3d4a83cd9dd7f3cea8fb39d8b97bdf1504443d1959"
       },
       "contact_y_sign": -1,
       "center_xz_m": [
@@ -39,15 +60,38 @@
         0.012,
         0.018
       ],
-      "point_lift_m": 0.00018
+      "point_lift_m": 0.00018,
+      "source_units": "mm",
+      "step_scene_origin_mm": [
+        -29.847717011704358,
+        44.35107509522298,
+        0.49999914664627987
+      ],
+      "step_scene_rotation_matrix": [
+        [
+          -1,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          1
+        ],
+        [
+          0,
+          1,
+          0
+        ]
+      ],
+      "step_linear_deflection_mm": 0.015,
+      "step_angular_deflection_rad": 0.22
     },
     {
       "id": "ultrathin",
       "source_directory": "ultrathin/source",
       "source_sha256": {
-        "meshes/base_link.STL": "452b06e41c1ba07c73890df8ec897c6ba01d2511f998c411fbb38c6d3ce723b5",
-        "urdf/urdf.csv": "2bdb81a864d8faacb2c914f1d5e4339efbbfa2517415744ef4fa85c6d431b81e",
-        "urdf/urdf.urdf": "9df289186029e5aa22fbf2172de2bb7bb33820d0bec26039e48b0db121a87e61"
+        "超薄触觉1104.STEP": "0d26022bc3688935f8061299368c086b57952ce7d94e4a6173724e788501bbe9"
       },
       "contact_y_sign": -1,
       "center_xz_m": [
@@ -58,7 +102,32 @@
         0.0105,
         0.0105
       ],
-      "point_lift_m": 0.00018
+      "point_lift_m": 0.00018,
+      "source_units": "mm",
+      "step_scene_origin_mm": [
+        -127.26062369294203,
+        9.673606571841017,
+        0.5899205746943819
+      ],
+      "step_linear_deflection_mm": 0.015,
+      "step_angular_deflection_rad": 0.22,
+      "step_scene_rotation_matrix": [
+        [
+          1.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          1.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          1.0
+        ]
+      ]
     }
   ]
 }

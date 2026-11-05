@@ -2,6 +2,11 @@
 <TS version="2.1" language="zh_CN" sourcelanguage="en_US">
 <context>
     <name>DepthMapWidget</name>
+    <message><source>On-board inference (128x128, camera off)</source><translation>板端推理（128×128，相机关闭）</translation></message>
+    <message><source>16x16 depth and same-frame photon input; 128x128 output. Camera disabled. Selecting another model restores its capture configuration.</source><translation>使用 16×16 深度和同帧光子强度，输出 128×128 深度。此模式关闭相机；选择其他模型会切换到对应的采集配置。</translation></message>
+    <message><source>On-board inference (384x256)</source><translation>板端推理（384×256）</translation></message>
+    <message><source>48x32 depth and photon input; 384x256 output. Same sensor field of view. Experimental weight reuse; physical accuracy is unverified.</source><translation>48×32 深度和光子计数输入，384×256 输出，保持传感器原视场。实验性权重复用，实物精度尚未验证。</translation></message>
+    <message><source>Host-assisted inference (640×480)</source><translation>上位机辅助推理（640×480）</translation></message>
             <message><source>Cannot open the folder. Please copy the path and open it manually.</source><translation>无法打开文件夹，请复制地址后手动打开。</translation></message>
 <message><source>Raw network prediction | radial m | unfiltered | 256 x 256</source><translation>网络原始预测 | 径向米 | 未筛选 | 256 x 256</translation></message>
     <message><source>Display: filtered depth</source><translation>显示：筛选后深度</translation></message>
@@ -1130,8 +1135,8 @@
         <translation>测点颜色与抬升：Z 向下压力</translation>
     </message>
     <message>
-        <source>Data unavailable</source>
-        <translation>数据不可用</translation>
+        <source>Device disconnected / data unavailable</source>
+        <translation>设备未连接/数据不可用</translation>
     </message>
     <message>
         <source>Raw counts</source>
@@ -1148,6 +1153,10 @@
 </context>
 <context>
     <name>TactileVisualizationWidget</name>
+    <message><source>Waiting for sensor data...</source><translation>正在等待传感器数据…</translation></message>
+    <message><source>Auto zeroing... Keep the sensor unloaded.</source><translation>正在自动置零，请保持传感器无受力…</translation></message>
+    <message><source>Auto zero complete · %1 frames · %2 ms</source><translation>自动置零完成 · %1 帧 · %2 ms</translation></message>
+    <message><source>Delta zero set</source><translation>delta 置零完成</translation></message>
     <message><source>Display gain</source><translation>显示倍率</translation></message>
     <message><source>Arrow thickness gain</source><translation>箭头粗细倍率</translation></message>
     <message><source>Resultant arrow size gain</source><translation>合力箭头大小倍率</translation></message>
@@ -1241,6 +1250,10 @@
         <translation>连接设置</translation>
     </message>
     <message>
+        <source>Could not identify the sensor model. Check the baud rate and device ID, then connect again.</source>
+        <translation>无法确认传感器型号。请检查波特率和从站 ID，然后重新连接。</translation>
+    </message>
+    <message>
         <source>No valid sensor response. Check the serial port, baud rate and device ID.</source>
         <translation>未收到有效传感器回包，请检查串口、波特率和设备地址。</translation>
     </message>
@@ -1257,16 +1270,12 @@
         <translation>最小化显示设置</translation>
     </message>
     <message>
-        <source>Connect selected module</source>
-        <translation>连接当前模块</translation>
+        <source>Connect sensor</source>
+        <translation>连接传感器</translation>
     </message>
     <message>
         <source>Disconnect</source>
         <translation>断开连接</translation>
-    </message>
-    <message>
-        <source>Use simulated data</source>
-        <translation>恢复模拟数据</translation>
     </message>
     <message>
         <source>Raw data / diagnostics</source>
@@ -1305,10 +1314,6 @@
         <translation> ms</translation>
     </message>
     <message>
-        <source>Pause acquisition</source>
-        <translation>暂停采集</translation>
-    </message>
-    <message>
         <source>Invalid connection settings</source>
         <translation>连接参数无效</translation>
     </message>
@@ -1327,10 +1332,6 @@
     <message><source>Showing last valid hardware frame</source><translation>显示上一有效硬件帧</translation></message>
     <message><source>Reverse Z arrow direction</source><translation>翻转 Z 轴箭头方向</translation></message>
     <message><source>Reverse only the Z direction of force arrows, including the Z component of resultants. Raw readings, tables, curves, point colors and dot displacement are unchanged.</source><translation>仅翻转受力箭头的 Z 方向，包括合力的 Z 分量；原始读数、表格、曲线、测点颜色和点阵位移保持不变。</translation></message>
-    <message>
-        <source>%1: SIMULATED</source>
-        <translation>%1：模拟数据 SIMULATED</translation>
-    </message>
     <message>
         <source> | %1 ID %2 | RX accepted %3/%4 | CRC errors %5 | Timeouts %6 | Protocol errors %7</source>
         <translation> | %1 ID %2 | 接受 %3/%4 | CRC 错误 %5 | 超时 %6 | 协议错误 %7</translation>
@@ -1386,28 +1387,12 @@
         <translation>展开触觉模型切换按钮</translation>
     </message>
     <message>
-        <source>Press / release</source>
-        <translation>按压 / 释放</translation>
-    </message>
-    <message>
         <source>Tactile visualization</source>
         <translation>磁触觉可视化</translation>
     </message>
     <message>
         <source>Pause simulation</source>
         <translation>暂停模拟</translation>
-    </message>
-    <message>
-        <source>Moving across modules</source>
-        <translation>跨模块移动</translation>
-    </message>
-    <message>
-        <source>No contact</source>
-        <translation>无接触</translation>
-    </message>
-    <message>
-        <source>Tangential change</source>
-        <translation>切向变化</translation>
     </message>
     <message>
         <source>3D view unavailable: %1</source>
@@ -1526,10 +1511,6 @@
         <translation>当前帧</translation>
     </message>
     <message>
-        <source>SIMULATED: display filter inactive</source>
-        <translation>模拟数据：未启用突变过滤</translation>
-    </message>
-    <message>
         <source>Arrow length gain: </source>
         <translation>箭头长度倍率：</translation>
     </message>
@@ -1639,11 +1620,11 @@ Write the selected changes and save together? Acquisition will stop. After savin
     </message>
     <message>
         <source>Click 'Write and save'. Once saving succeeds, power-cycle the sensor once by unplugging and reconnecting its power, then connect using the new settings.</source>
-        <translation>请点击“写入并保存”。保存成功后，将传感器断电插拔一次，再用新参数点击“连接当前模块”。</translation>
+        <translation>请点击“写入并保存”。保存成功后，将传感器断电插拔一次，再用新参数点击“连接传感器”。</translation>
     </message>
     <message>
-        <source>Selected settings read back and save acknowledged: ID %1, baud %2. Power-cycle once, then click 'Connect selected module' using these new values.</source>
-        <translation>参数已读回核对，保存已收到应答：地址 %1，波特率 %2。请断电插拔一次，再按这些新参数点击“连接当前模块”。</translation>
+        <source>Selected settings read back and save acknowledged: ID %1, baud %2. Power-cycle once, then click 'Connect sensor' using these new values.</source>
+        <translation>参数已读回核对，保存已收到应答。地址 %1，波特率 %2。请断电插拔一次，再按这些新参数点击“连接传感器”。</translation>
     </message>
     <message>
         <source>Device settings have been written and the save command acknowledged.
@@ -2093,11 +2074,11 @@ New: %2</source>
         <source>Correct the camera mounting angle before display and model preprocessing. Model input orientation is a separate setting.</source>
         <translation>在显示和模型预处理之前校正摄像头安装角度，模型推理输入方向是独立设置。</translation>
     </message>
-<message><source>Import on-board inference model...</source><translation>导入板端推理模型…</translation></message>
-<message><source>Verified %1. On-board inference model missing. Use Import on-board inference model to copy it to the device.</source><translation>已验证 %1。缺少板端推理模型，请使用“导入板端推理模型”复制。</translation></message>
+<message><source>Install protected on-board inference...</source><translation>安装板端推理与自动切换…</translation></message>
+<message><source>Verified %1. Protected LiteSR is missing. Use Install protected on-board inference.</source><translation>已验证 %1。缺少加密 LiteSR，请点击「安装板端推理与自动切换」。</translation></message>
 <message><source>Verified %1. The existing on-board inference model checksum differs.</source><translation>已验证 %1。现有板端推理模型的校验值不符。</translation></message>
 <message><source>Verified %1. The on-board inference runtime is incomplete.</source><translation>已验证 %1。板端推理运行环境不完整。</translation></message>
-<message><source>Verified %1. On-board inference model checksum matches.</source><translation>已验证 %1。板端推理模型校验值一致。</translation></message>
+<message><source>Verified %1. Protected LiteSR and automatic dToF are ready.</source><translation>已验证 %1。加密 LiteSR 和 dToF 自动切换均已就绪。</translation></message>
 <message><source>Verified %1. On-board inference model status is unavailable.</source><translation>已验证 %1。暂时无法获取板端推理模型状态。</translation></message>
 <message><source>LiteSR model verified on %1. Click Start in the camera panel when ready.</source><translation>已校验 %1 上的 LiteSR 模型。就绪后可在原视频面板点击“开始”。</translation></message>
 <message><source>On-board model import is unavailable in offline mode.</source><translation>离线模式下无法导入板端推理模型。</translation></message>
@@ -2192,9 +2173,25 @@ Projected camera-Z %8 m</source><translation>ToF %1 | ID %2 | 行 %3，列 %4
 <context><name>SensorMainWindow</name>
     <message><source>Host-assisted inference unavailable</source><translation>上位机辅助推理不可用</translation></message>
     <message><source>For now, choose On-board inference under Imaging scheme, then click Start if needed.</source><translation>建议先在「成像方案」中选择「板端推理」，必要时点击「开始」。</translation></message><message><source>About</source><translation>关于</translation></message><message><source>Magnetic tactile sensors</source><translation>磁触觉传感器</translation></message><message><source>Depth Map</source><translation>深度图</translation></message><message><source>Camera raw video</source><translation>摄像头原视频</translation></message><message><source>dToF Parameter Tuning</source><translation>dToF参数设置</translation></message><message><source>File</source><translation>文件</translation></message><message><source>Exit</source><translation>退出</translation></message><message><source>View</source><translation>视图</translation></message><message><source>Reset layout</source><translation>恢复默认布局</translation></message><message><source>Layout Presets</source><translation>布局预设</translation></message><message><source>Save layout...</source><translation>保存布局…</translation></message><message><source>Delete layout...</source><translation>删除布局…</translation></message><message><source>Settings</source><translation>设置</translation></message><message><source>Device Manager...</source><translation>设备管理…</translation></message><message><source>Rendering Mode</source><translation>渲染设置</translation></message><message><source>Standard Mode</source><translation>标准模式</translation></message><message><source>Smooth Mode</source><translation>流畅模式</translation></message><message><source>Language</source><translation>语言</translation></message><message><source>English</source><translation>English</translation></message><message><source>Simplified Chinese</source><translation>简体中文</translation></message><message><source>Delete layout</source><translation>删除布局</translation></message><message><source>Layout name:</source><translation>布局名称：</translation></message><message><source>Save layout</source><translation>保存布局</translation></message><message><source>No saved layouts</source><translation>尚无已保存布局</translation></message>    <message><source>Install required board files</source><translation>安装板端所需文件</translation></message>
-    <message><source>%1 is missing required board files. Open the on-board inference model import to install them?</source><translation>%1 缺少成像所需的板端文件。是否通过「导入板端推理模型」进行安装？</translation></message>
+    <message><source>%1 is missing required board files. Open the on-board inference model import to install them?</source><translation>%1 缺少成像所需的板端文件。是否通过「安装板端推理与自动切换」进行安装？</translation></message>
 </context><context>
     <name>RvUsbEnrollment</name>
+    <message><source>Camera mounting angle</source><translation>摄像头安装角度</translation></message>
+    <message><source>Host inference input orientation</source><translation>上位机推理输入朝向</translation></message>
+    <message><source>Add device</source><translation>添加设备</translation></message>
+    <message><source>Cancel</source><translation>取消</translation></message>
+    <message>
+        <source>The V1.2.0 board will be prepared for imaging. Continue only if it uses the matching F1 camera and ToF assembly.</source>
+        <translation>将为 V1.2.0 交付板安装成像服务。请确认相机与 ToF 组件的安装方式与支持的 F1 标定一致，再继续。</translation>
+    </message>
+    <message><source>Connect via USB</source><translation>USB 一键连接</translation></message>
+    <message><source>Wait for the current device operation to finish, then try again.</source><translation>请等待当前设备操作完成后再试。</translation></message>
+    <message><source>ADB was not found. Place adb.exe and its DLLs in the platform-tools folder next to the application.</source><translation>未找到 ADB。请将 adb.exe 及其 DLL 放入程序旁的 platform-tools 文件夹。</translation></message>
+    <message><source>Could not list USB devices with ADB.</source><translation>无法通过 ADB 列出 USB 设备。</translation></message>
+    <message><source>Connect exactly one RV1103 via USB and make sure ADB is enabled.</source><translation>请通过 USB 只连接一台 RV1103，并确认板端已启用 ADB。</translation></message>
+    <message><source>Could not read the RV1103 identity over USB.</source><translation>无法通过 USB 读取 RV1103 身份信息。</translation></message>
+    <message><source>The RV1103 serial number or SSH key matches a saved profile. Review that profile in Device Manager.</source><translation>该 RV1103 的序列号或 SSH 公钥与已保存的档案相符，请在设备管理中核对该档案。</translation></message>
+    <message><source>Use USB connection in Device Manager to retry.</source><translation>可在设备管理中点击「USB 一键连接」重试。</translation></message>
     <message>
         <source>RV1103 setup unavailable: %1</source>
         <translation>无法自动配置 RV1103：%1</translation>
@@ -2207,11 +2204,11 @@ Projected camera-Z %8 m</source><translation>ToF %1 | ID %2 | 行 %3，列 %4
         <source>Add USB device %1 and start imaging?
 
 SSH fingerprint: %2
-This uses the factory login and F=%3 calibration with 0° mounting and 0° model input. Confirm these settings match the device. Any current imaging session will stop. Windows may ask for permission to configure the USB network adapter.</source>
+This uses the factory login and F=%3 calibration. Verify the two angles below. Any current imaging session will stop. Windows may ask for permission to configure the USB network adapter.</source>
         <translation>是否添加 USB 设备 %1 并开始成像？
 
 SSH 指纹：%2
-将使用出厂账号、F=%3 标定、0° 摄像头安装朝向和 0° 模型输入朝向。请确认这些设置与设备相符。当前成像会话将停止。Windows 可能会请求配置 USB 网卡的权限。</translation>
+将使用出厂账号和 F=%3 标定。请核对下方两项角度。当前成像会话将停止。Windows 可能会请求配置 USB 网卡的权限。</translation>
     </message>
     <message>
         <source>Stop imaging before setting up the new RV1103.</source>
@@ -2241,16 +2238,21 @@ SSH 指纹：%2
         <source>Reconnect the USB device to retry, or open Device Manager.</source>
         <translation>请重新插入 USB 设备重试，或打开设备管理。</translation>
     </message>
-<message><source>The device was added. To use on-board inference, open Settings &gt; Device Manager and choose Import on-board inference model.</source><translation>设备已添加。缺少板端推理模型，可在“设置 → 设备管理”中选择“导入板端推理模型”。</translation></message>
+<message><source>The device was added. To use on-board inference, open Settings &gt; Device Manager and choose Install protected on-board inference.</source><translation>设备已添加。缺少板端推理模型，可在“设置 → 设备管理”中选择“安装板端推理与自动切换”。</translation></message>
 <message><source>The device was added. The existing on-board inference model checksum differs. Review the board model before starting on-board inference.</source><translation>设备已添加。现有板端推理模型的校验值不符，请核对板端模型后再启动板端推理。</translation></message>
 <message><source>The device was added. On-board inference requires its runtime to be installed on the device.</source><translation>设备已添加。使用板端 板端推理 前，需要先在设备上部署配套运行环境。</translation></message>
 <message><source>RV1103 on-board inference model</source><translation>RV1103 板端推理模型</translation></message>
 </context>
 <context>
     <name>RvDeviceManagerDialog</name>
+    <message><source>Connect via USB</source><translation>USB 一键连接</translation></message>
+    <message><source>USB connection is unavailable in offline mode.</source><translation>离线模式下无法通过 USB 连接设备。</translation></message>
+    <message><source>Connecting to RV1103 via USB...</source><translation>正在通过 USB 连接 RV1103…</translation></message>
+    <message><source>The RV1103 was verified and selected for imaging.</source><translation>RV1103 已通过验证并设为当前成像设备。</translation></message>
+    <message><source>USB connection setup ended.</source><translation>USB 连接设置已结束。</translation></message>
     <message>
-        <source>Verified %1. Automatic dToF support is missing. Use Import on-board inference model to install it and check the model.</source>
-        <translation>已验证 %1。缺少 dToF 自动切换支持，请通过「导入板端推理模型」安装并检查模型。</translation>
+        <source>Verified %1. Automatic dToF support is missing. Use Install protected on-board inference to install the required files.</source>
+        <translation>已验证 %1。缺少 dToF 自动切换支持，请点击「安装板端推理与自动切换」。</translation>
     </message>
     <message>
         <source>Verified %1. The board capture script is unavailable or unsupported.</source>
@@ -2261,8 +2263,8 @@ SSH 指纹：%2
         <translation>dToF 自动切换已就绪。选择板端推理模型文件以启用板端推理。</translation>
     </message>
     <message>
-        <source>Automatic dToF and the on-board inference model are ready on %1. Click Start in either imaging panel.</source>
-        <translation>%1 的 dToF 自动切换和板端推理模型均已就绪。可在任一成像模块点击「开始」。</translation>
+        <source>Protected LiteSR and automatic dToF are ready on %1. Click Start in either imaging panel.</source>
+        <translation>%1 的加密 LiteSR 和 dToF 自动切换均已就绪。可在任一成像模块点击「开始」。</translation>
     </message>
     <message>
         <source>Automatic dToF is ready. The existing on-board inference model checksum differs and the file was preserved.</source>
@@ -2284,8 +2286,8 @@ SSH 指纹：%2
 <context>
     <name>RvUsbEnrollment</name>
     <message>
-        <source>The device was added. Open Settings &gt; Device Manager &gt; Import on-board inference model to install automatic dToF support and check the model.</source>
-        <translation>设备已添加。请打开「设置 → 设备管理 → 导入板端推理模型」，安装 dToF 自动切换支持并检查模型。</translation>
+        <source>The device was added. Open Settings &gt; Device Manager &gt; Install protected on-board inference to install the required files.</source>
+        <translation>设备已添加。请打开「设置 → 设备管理 → 安装板端推理与自动切换」安装所需文件。</translation>
     </message>
     <message>
         <source>The device was added. The board capture script is unavailable or unsupported.</source>
@@ -2296,5 +2298,29 @@ SSH 指纹：%2
     <name>UiStyle</name>
     <message><source>host-assisted inference model</source><translation>上位机辅助推理模型</translation></message>
     <message><source>on-board inference model</source><translation>板端推理模型</translation></message>
+</context>
+<context>
+    <name>RvImportDiagnosticsDialog</name>
+    <message><source>Close</source><translation>关闭</translation></message>
+    <message><source>RV1103 import failed</source><translation>RV1103 导入失败</translation></message>
+    <message><source>The diagnostic report could not be saved.</source><translation>无法保存诊断报告。</translation></message>
+    <message><source>Send this diagnostic report to support:
+%1</source><translation>请将此诊断报告发送给运维人员：
+%1</translation></message>
+    <message><source>Open containing folder</source><translation>打开所在文件夹</translation></message>
+    <message><source>Diagnostic report folder</source><translation>诊断报告文件夹</translation></message>
+    <message><source>Diagnostic reports (*.txt)</source><translation>诊断报告 (*.txt)</translation></message>
+    <message><source>Save a copy...</source><translation>另存副本…</translation></message>
+    <message><source>The diagnostic report is no longer available.</source><translation>诊断报告已不可用。</translation></message>
+    <message><source>The diagnostic report copy could not be saved.</source><translation>无法保存诊断报告副本。</translation></message>
+</context>
+<context>
+    <name>RvSessionController</name>
+    <message><source>Connect a device using USB one-click connection in Device Manager.</source><translation>请在「设置 → 设备管理」中使用「USB 一键连接」添加设备。</translation></message>
+</context>
+<context>
+    <name>RvAssistDepth</name>
+    <message><source>The TensorRT-RTX worker executable is missing or unreadable in the installation folder.</source><translation>安装目录中缺少 TensorRT-RTX 推理程序，或当前用户无法读取该文件。</translation></message>
+    <message><source>Could not prepare a readable TensorRT-RTX worker and model path.</source><translation>无法为 TensorRT-RTX 推理程序和模型准备可读的运行路径。</translation></message>
 </context>
 </TS>

@@ -1,5 +1,6 @@
 #pragma once
 #include "TactileFrame.h"
+#include "TactileAutoZero.h"
 #include "LatestSensorFrameBuffer.h"
 #include <QThread>
 #include <QPointer>
@@ -24,6 +25,9 @@ struct SerialSample {
     QVector<quint16> registers;
     QString error;
     bool portOpen = false, accepted = false, crcOk = false, verifyCrc = true, rangeOk = true;
+    bool modelIdentified = false;
+    AutoZeroResult autoZero;
+    int effectiveIntervalMs = 10;
     quint64 requests = 0, acceptedCount = 0, crcErrors = 0, timeouts = 0, protocolErrors = 0;
     qint64 receivedMs = 0;
     quint64 revision = 0;
@@ -50,6 +54,12 @@ struct DeviceConfigResult {
     QVector<QByteArray> requests, responses;
 };
 using ConfigExchange = std::function<QByteArray(const QByteArray &)>;
+struct DeviceIdentity {
+    int type = -1, address = -1;
+};
+// Uses the current baud. Public-address recovery is for a single-device bus,
+// and is verified again at the reported address before accepting the model.
+DeviceIdentity identifyTactileDevice(int address, const ConfigExchange &exchange);
 // currentAddress may be the vendor public address 0 on a single-device bus.
 // newAddress == 0 retains the stored ID; address writes only accept 1-127.
 DeviceConfigResult configureTactileDevice(int currentAddress, int newAddress,
@@ -64,7 +74,7 @@ public:
     explicit TactileSerialSource(QObject *parent = nullptr);
     ~TactileSerialSource() override { stop(); }
     // Refuse a new session until the previous worker has released the port.
-    bool begin(const SerialSettings &settings,bool probeFirst=false);
+    bool begin(const SerialSettings &settings,bool probeFirst=false,bool autoZero=false);
     void stop();
     bool isRunning() const;
     bool stopping() const;

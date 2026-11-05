@@ -8,6 +8,7 @@
 #include <memory>
 class QElapsedTimer;
 struct RvAssistDirectTransport;
+struct RvAssistWorkerPaths;
 
 // Optional native computation process. Receives paired snapshots from the one
 // RV session; it never opens a camera, connects to the board or controls motion.
@@ -51,7 +52,7 @@ private:
     friend int runRvAssistDepthTests(const QString &reportPath);
     friend int runRvImagingSwitchTests(const QString &reportPath);
     struct Input {QImage camera;RvTofFrame tof;quint64 epoch=0,request=0;qint64 receivedMs=0;double serializeMs=0;};
-    void startWorker();
+    void startWorker(bool forceStaging = false);
     bool takePending();
     void sendLatest();
     void readOutput();
@@ -62,6 +63,7 @@ private:
     QString m_root,m_token;
     QString m_hostModel=QStringLiteral("unidepth_wide_576_fp16_tof16");
     QString m_experiment=QStringLiteral("H");
+    std::unique_ptr<RvAssistWorkerPaths> m_workerPaths;
     QProcess m_process;
     std::unique_ptr<RvAssistDirectTransport> m_direct;
     bool m_directMode=false;

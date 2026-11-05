@@ -1,6 +1,6 @@
 <RCC>
   <qresource prefix="/branding">
-    <file alias="robot-hand.ico">assets/robot-hand.ico</file>
+    <file alias="cx.ico">assets/cx.ico</file>
   </qresource>
   <qresource prefix="/qml">
     <file alias="TactileArrow.qml">qml/TactileArrow.qml</file>

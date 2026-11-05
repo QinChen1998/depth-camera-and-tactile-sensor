@@ -45,12 +45,13 @@ constexpr auto kManagedRtspUrl = "rtsp://172.32.0.93/live/0";
 
 bool isManagedRtsp(const QUrl &url,const QString &host)
 {
-    return url.scheme()=="rtsp" && url.host().compare(host,Qt::CaseInsensitive)==0 && url.port(554)==554
+    return !host.isEmpty() && url.scheme()=="rtsp" && url.host().compare(host,Qt::CaseInsensitive)==0 && url.port(554)==554
         && url.path()=="/live/0" && url.userInfo().isEmpty() && !url.hasQuery() && !url.hasFragment();
 }
 
 bool isControlledSource(const QUrl &url,const QString &host)
 {
+    if (host.isEmpty()) return false;
     return isManagedRtsp(url,host) || (url.scheme()=="nv12" && url.host().compare(host,Qt::CaseInsensitive)==0
         && url.port(8831)==8831 && (url.path().isEmpty()||url.path()=="/")
         && url.userInfo().isEmpty() && !url.hasQuery() && !url.hasFragment());
@@ -293,9 +294,12 @@ RvSessionController::RvSessionController(QObject *parent,const QString &deviceSt
     m_streamUrl = m_device.streamUrl();
     // Retired persisted model names never re-enable old inference.
     m_config.model = QStringLiteral("Native");
-    const bool boardDefault=settings.value("depth/imagingScheme").toString()=="board_litesr_near_full_host_contour_hd";
+    const auto savedScheme=settings.value("depth/imagingScheme").toString();
+    const bool native16Default=savedScheme=="board_litesr_near_128x128_depth_only";
+    const bool rectDefault=savedScheme=="board_litesr_near_384x256_host_contour_hd";
+    const bool boardDefault=native16Default||rectDefault||savedScheme=="board_litesr_near_full_host_contour_hd";
     m_config.cameraWidth=2304;
-    m_dtofMode=boardDefault?RvDtofCandidates::LiteSrNearFullHd:RvDtofCandidates::NativeHd;
+    m_dtofMode=native16Default?RvDtofCandidates::LiteSrNative16Depth:rectDefault?RvDtofCandidates::LiteSrRectFullHd:boardDefault?RvDtofCandidates::LiteSrNearFullHd:RvDtofCandidates::NativeHd;
     m_dtofOptions=liteSrBoardOptions(m_dtofSettings);
 
     m_controlTimeout.setSingleShot(true);
@@ -434,8 +438,9 @@ RvSessionController::RvSessionController(QObject *parent,const QString &deviceSt
 
     m_assist=new RvAssistDepth(this);
     connect(m_assist,&RvAssistDepth::inferenceUnavailable,this,&RvSessionController::hostInferenceUnavailable);
-    // Start with UniDepth; optional host models require explicit selection.
-    m_assist->setHostModel(QStringLiteral("unidepth_wide_576_fp16_tof16"));
+    const auto vgaModel=QString::fromLatin1(RvCameraView::UniDepthVgaNative16);
+    const bool vgaSelected=savedScheme=="host_"+vgaModel&&RvAssistDepth::supportsHostModel(vgaModel);
+    m_assist->setHostModel(vgaSelected?vgaModel:QString::fromLatin1(RvCameraView::UniDepthFp16Native16));
     m_assist->setExperiment(QStringLiteral("H"));
     m_assist->setInputRotationDegrees(effectiveHostInputRotation(m_device));
     m_assist->setEnabled(!boardDefault);
@@ -473,6 +478,8 @@ RvSessionController::RvSessionController(QObject *parent,const QString &deviceSt
         m_lastAssistFrame=metadata["frame_id"].toDouble();
         m_recoveryDisplayTimer.stop();
         const auto fit=metadata["assist_fusion"].toObject();
+        const auto &outputView=RvCameraView::profile(assistHostModel());
+        const double outputPixels=outputView.outputWidth*outputView.outputHeight;
         m_assistInfo=tr("ToF anchors: %1 | scale %2 | inference %3 ms | age %4 ms")
             .arg(fit["participating_unique_native_points"].toInt(fit["anchors_inlier"].toInt())).arg(fit["scale"].toDouble(),0,'f',3)
             .arg(metadata["assist_inference_ms"].toDouble(),0,'f',1).arg(metadata["assist_frame_age_ms"].toDouble(),0,'f',0);
@@ -502,12 +509,12 @@ RvSessionController::RvSessionController(QObject *parent,const QString &deviceSt
         }
         if(metadata["assist_output_policy"]==QLatin1String(RvAssistFusion::SupportPolicy)){
             if(fit["support_pixels"].toInt()>0)m_assistInfo+=tr(" | dToF-supported output %1%; outside support is unknown")
-                .arg(100.*fit["support_pixels"].toDouble()/(576*324),0,'f',1);
+                .arg(100.*fit["support_pixels"].toDouble()/outputPixels,0,'f',1);
             else m_assistInfo=tr("No connected current dToF correction support; depth is unknown");
         }
         if(metadata["assist_output_policy"]==QLatin1String(RvAssistFusion::FieldOfViewPolicy))
             m_assistInfo+=tr(" | dToF geometric field %1%; continuous predicted depth inside")
-                .arg(100.*fit["fov_pixels"].toDouble()/(576*324),0,'f',1);
+                .arg(100.*fit["fov_pixels"].toDouble()/outputPixels,0,'f',1);
         if(fit["fusion_mode"]=="rgbd_completion")
             m_assistInfo=tr("%1 | ToF %2 x %3 | points %4 | inference %5 ms | age %6 ms")
                 .arg(metadata["model"].toString()).arg(fit["native_columns"].toInt()).arg(fit["native_rows"].toInt())
@@ -684,7 +691,9 @@ void RvSessionController::reloadDeviceProfiles()
         if(m_assist){m_assist->cancel(tr("Device changed"));m_assist->setInputRotationDegrees(effectiveHostInputRotation(m_device));}
         m_hasConfirmedConfig=false;m_confirmedBoot.clear();m_deviceRevision.clear();
         m_captureOwner={};
-        setState(tr("Stopped"),tr("Device selected; click Start when ready."));
+        setState(tr("Stopped"), m_device.id.isEmpty()
+            ? tr("Connect a device using USB one-click connection in Device Manager.")
+            : tr("Device selected; click Start when ready."));
     }catch(const std::exception &e){m_deviceError=QString::fromUtf8(e.what());setState(tr("Error"),m_deviceError);}
     emit deviceChanged();emit configurationChanged();
 }
@@ -749,7 +758,7 @@ void RvSessionController::setAssistDepthEnabled(bool enabled)
 
 bool RvSessionController::setBoardLiteSrHostContour(bool enabled,const RvLiteSrContour::RepairSettings& settings)
 {
-    if(m_destroying||busy()||m_imagingSwitchActive||!RvDtofCandidates::isLiteSrFull(m_dtofMode)||RvDtofCandidates::isCaptureOnly(m_dtofMode)||!controlledSource()||settings.holeMode<0||settings.holeMode>2)return false;
+    if(m_destroying||busy()||m_imagingSwitchActive||LiteSrBoardContract::isNative16Depth(m_dtofMode)||!RvDtofCandidates::isLiteSrFull(m_dtofMode)||RvDtofCandidates::isCaptureOnly(m_dtofMode)||!controlledSource()||settings.holeMode<0||settings.holeMode>2)return false;
     if((RvDtofCandidates::isLiteSrHd(m_dtofMode)||LiteSrBoardContract::isHighResolution(m_dtofMode))&&!enabled)return false;
     if(boardLiteSrHostContourEnabled()==enabled&&m_boardHostRepair==settings)return true;
     if(m_dtofStream&&!m_dtofStream->setHostContour(enabled,settings))return false;
@@ -768,7 +777,7 @@ bool RvSessionController::setDtofCandidate(int mode,const RvDtofCandidates::Sett
 
 bool RvSessionController::applyDtofCandidate(int mode,const RvDtofCandidates::Settings& settings)
 {
-    if(m_destroying||(mode!=RvDtofCandidates::NativeHd&&mode!=RvDtofCandidates::LiteSrNearFullHd))return false;
+    if(m_destroying||(mode!=RvDtofCandidates::LiteSrNative16Depth&&mode!=RvDtofCandidates::NativeHd&&mode!=RvDtofCandidates::LiteSrNearFullHd&&mode!=RvDtofCandidates::LiteSrRectFullHd))return false;
     QString options;
     try{if(mode>=0)options=RvDtofCandidates::isLiteSr(mode)?liteSrBoardOptions(settings):dtofBoardOptions(settings);}catch(...){return false;}
     if(mode==m_dtofMode&&(mode<0||options==m_dtofOptions))return true;
@@ -801,7 +810,8 @@ void RvSessionController::setDepthModel(const QString &model)
 
 void RvSessionController::selectImagingScheme(const QString& scheme,const RvDtofCandidates::Settings& settings)
 {
-    if(scheme!="host_unidepth_wide_576_fp16_tof16"&&scheme!="board_litesr_near_full_host_contour_hd")return;
+    if(scheme!="board_litesr_near_128x128_depth_only"&&scheme!="board_litesr_near_384x256_host_contour_hd"&&scheme!="board_litesr_near_full_host_contour_hd"
+        &&(!scheme.startsWith("host_")||!RvAssistDepth::supportsHostModel(scheme.mid(5))))return;
     if(m_destroying||busy()||m_imagingSwitchActive||!controlledSource())return;
     if(scheme=="host_assisted"||(scheme.startsWith("host_")&&!scheme.startsWith("host_litesr_"))) {
         const auto selected=scheme=="host_assisted"?QStringLiteral("unidepth"):scheme.mid(5);
@@ -851,10 +861,10 @@ void RvSessionController::selectImagingScheme(const QString& scheme,const RvDtof
         else{emit configurationChanged();updateState();}
         return;
     }
-    if(scheme=="board_litesr_near_high_resolution"||scheme=="board_litesr_near_full_host_contour_hd"||scheme=="board_litesr_area_full"||scheme=="board_litesr_area_full_contour"||scheme=="board_litesr_full_host_contour_hd"){
+    if(scheme=="board_litesr_near_128x128_depth_only"||scheme=="board_litesr_near_384x256_host_contour_hd"||scheme=="board_litesr_near_high_resolution"||scheme=="board_litesr_near_full_host_contour_hd"||scheme=="board_litesr_area_full"||scheme=="board_litesr_area_full_contour"||scheme=="board_litesr_full_host_contour_hd"){
         auto selected=settings;selected.liteSrHoles=m_dtofSettings.liteSrHoles;selected.liteSrOutliers=m_dtofSettings.liteSrOutliers;
         try{liteSrBoardOptions(selected);}catch(...){return;}
-        const int mode=scheme=="board_litesr_near_high_resolution"?RvDtofCandidates::LiteSrHighResolution:scheme=="board_litesr_near_full_host_contour_hd"?RvDtofCandidates::LiteSrNearFullHd:scheme=="board_litesr_full_host_contour_hd"?RvDtofCandidates::LiteSrFullHd:scheme=="board_litesr_area_full"?RvDtofCandidates::LiteSrFull:RvDtofCandidates::LiteSrContour;
+        const int mode=scheme=="board_litesr_near_128x128_depth_only"?RvDtofCandidates::LiteSrNative16Depth:scheme=="board_litesr_near_384x256_host_contour_hd"?RvDtofCandidates::LiteSrRectFullHd:scheme=="board_litesr_near_high_resolution"?RvDtofCandidates::LiteSrHighResolution:scheme=="board_litesr_near_full_host_contour_hd"?RvDtofCandidates::LiteSrNearFullHd:scheme=="board_litesr_full_host_contour_hd"?RvDtofCandidates::LiteSrFullHd:scheme=="board_litesr_area_full"?RvDtofCandidates::LiteSrFull:RvDtofCandidates::LiteSrContour;
         if(m_dtofMode==mode&&m_dtofOptions==liteSrBoardOptions(selected)&&!assistDepthEnabled())return;
         if(!m_userStopped){beginImagingSwitch(scheme,true);if(!m_imagingSwitchActive||m_userStopped)return;}
         m_liteSr->setModel({});setAssistDepthEnabled(false);
@@ -1155,6 +1165,10 @@ void RvSessionController::deviceUnreachable(const QString &deviceId)
 void RvSessionController::startImaging(bool automatic)
 {
     if (m_destroying) return;
+    if (m_device.id.isEmpty() && m_deviceError.isEmpty()) {
+        if (!automatic) setState(tr("Stopped"),tr("Connect a device using USB one-click connection in Device Manager."));
+        return;
+    }
     if(m_tunerExclusive){setState(tr("dToF Parameter Tuning"),tr("RV1103 is owned by dToF tuning. Stop it before starting shared imaging."));return;}
     if(!busy()&&!m_imagingSwitchActive&&hostHdAssist()&&assistDepthEnabled()){
         const auto problem=hostInferencePreflightError();
@@ -1731,7 +1745,7 @@ int RvSessionController::nearestHostHdRgb(const RvTofFrame &raw,qint64 now) cons
     for(int i=0;i<int(m_hdRgbFrames.size());++i){const auto &rgb=m_hdRgbFrames[i];
         if(rgb.source["boot_id"]!=m["boot_id"]||rgb.source["source_generation"]!=m["generation"]
            ||rgb.source["generation"]!=double(m_presentationEpoch)||now-rgb.source["host_decoded_monotonic_ns"].toInteger()>1000000000LL
-           ||rgb.source["rectify_map_sha256"]!=QLatin1String(RvCameraView::profile(RvCameraView::isWide(assistHostModel())).mapSha))continue;
+           ||rgb.source["rectify_map_sha256"]!=QLatin1String(RvCameraView::profile(assistHostModel()).mapSha))continue;
         const auto delta=std::abs(rgb.boardNs-tofNs);if(delta<distance){distance=delta;nearest=i;}
     }
     return nearest;
@@ -1747,7 +1761,7 @@ const RvTofFrame *RvSessionController::latestReusableNative(qint64 rgbNs,qint64 
     const auto tofNs=m["tof_timestamp_ns"].toInteger();
     const auto boardNow=m_hdBoardSampleNs+now-m_hdSampleReceivedNs;
     if(!raw.isValid()||m["boot_id"]!=m_dtofReceipt["boot_id"]||m["generation"]!=m_dtofToken
-        ||m["dtof_fov_correction"].toInt(-1)!=m_device.fov()||m["tof_warning_flags"].toInt(-1)!=0
+        ||m["dtof_fov_correction"].toInt(-1)!=m_device.fov()||(m["tof_warning_flags"]!=0&&m["tof_warning_flags"]!=16)
         ||tofNs<=0||boardNow-tofNs>1000000000LL||tofNs-boardNow>200000000LL
         ||std::abs(rgbNs-tofNs)>qint64(RvCameraView::DepthorMaxPairDeltaMs*1000000.))return nullptr;
     return &raw;
@@ -1763,7 +1777,7 @@ void RvSessionController::dispatchHostHdMeasurement()
     const auto seq=quint64(m["tof_sequence"].toInteger());if(seq<=m_hdScheduledTof)return;
     const auto drop=[&](const char *reason){m_hdPairDrops[reason]=m_hdPairDrops[reason].toInt()+1;m_hdScheduledTof=seq;};
     if(!raw.isValid()||m["boot_id"]!=m_dtofReceipt["boot_id"]||m["generation"]!=m_dtofToken
-       ||m["dtof_fov_correction"].toInt(-1)!=m_device.fov()||m["tof_warning_flags"].toInt(-1)!=0){drop("native_identity");return;}
+       ||m["dtof_fov_correction"].toInt(-1)!=m_device.fov()||(m["tof_warning_flags"]!=0&&m["tof_warning_flags"]!=16)){drop("native_identity");return;}
     if(m_hdClockSamples<2||now-m_hdSampleReceivedNs>=1500000000LL){drop("clock_unavailable");return;}
     const auto tofNs=m["tof_timestamp_ns"].toInteger();
     const auto estimatedBoardNow=m_hdBoardSampleNs+now-m_hdSampleReceivedNs;
@@ -1826,11 +1840,15 @@ void RvSessionController::presentHostHdVideo()
     const auto epoch=m_presentationEpoch;emit cameraFrameReady(s.image);
     if(m_userStopped||epoch!=m_presentationEpoch)return;
     try{
-        const bool wide=RvCameraView::isWide(assistHostModel());
-        const auto &calibration=RvCameraStream::hdCalibration(wide);
+        const auto model=assistHostModel();
+        const auto &view=RvCameraView::profile(model);
+        const bool wide=RvCameraView::isWide(model);
+        const auto &calibration=RvCameraView::isUniDepthVga(model)?RvCameraStream::hdVgaCalibration():RvCameraStream::hdCalibration(wide);
+        if(RvCameraView::isUniDepthVga(model))
+            RvCameraStream::require(calibration.sha256()==view.mapSha,"HD model calibration fingerprint mismatch");
         QElapsedTimer prepare;prepare.start();const auto preview=RvCameraStream::prepareHd(s.image,calibration);
         QJsonObject source{{"source_protocol","HDA1"},{"source_transport","rtsp_h265"},
-            {"source_rgb_width",2304},{"source_rgb_height",1296},{"rgb_width",576},{"rgb_height",324},
+            {"source_rgb_width",2304},{"source_rgb_height",1296},{"rgb_width",view.inputWidth},{"rgb_height",view.inputHeight},
             {"camera_mount_rotation_degrees",m_device.cameraMountRotation},{"camera_coordinate_frame","calibrated_reference"},
             {"model","Native"},{"work_mode","host_rgb"},{"dtof_present",false},
             {"generation",double(epoch)},{"generation_source","host_presentation_epoch"},{"source_generation",m_dtofToken},
@@ -1889,7 +1907,7 @@ void RvSessionController::presentHostHdVideo()
             for(const auto &raw:m_hdNativeFrames){
                 const auto &m=raw.metadata;
                 if(!raw.isValid()||m["boot_id"]!=source["boot_id"]||m["generation"]!=m_dtofToken
-                    ||m["dtof_fov_correction"].toInt(-1)!=m_device.fov()||m["tof_warning_flags"].toInt(-1)!=0)continue;
+                    ||m["dtof_fov_correction"].toInt(-1)!=m_device.fov()||(m["tof_warning_flags"]!=0&&m["tof_warning_flags"]!=16))continue;
                 const auto delta=std::abs(rgbNs-m["tof_timestamp_ns"].toInteger());
                 if(delta<distance){distance=delta;nearest=&raw;}
             }

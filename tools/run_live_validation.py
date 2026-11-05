@@ -13,7 +13,7 @@ def main():
     parser.add_argument('--allow-saved-tof-switch',action='store_true',required=True)
     args=parser.parse_args()
     root=Path(__file__).resolve().parents[1]
-    executable=root/'x64/Release/Depth Camera and Tactile Sensor.exe'
+    executable=root/'x64/Release/触想工作台.exe'
     if args.output.exists():raise SystemExit('Use a new report filename')
     args.output.parent.mkdir(parents=True,exist_ok=True)
     env={k:v for k,v in os.environ.items() if not k.startswith(('PYTHON','CONDA','RV_','DCTS_','QT_','QML'))}

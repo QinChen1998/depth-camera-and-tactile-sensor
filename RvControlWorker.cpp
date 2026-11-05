@@ -78,12 +78,36 @@ QString sha(const QString &path) {
     QCryptographicHash h(QCryptographicHash::Sha256); require(h.addData(&f), "Cannot hash RV runtime dependency");
     return QString::fromLatin1(h.result().toHex());
 }
+// Source file, destination within the private board staging directory, and executable bit.
+constexpr struct BootstrapAsset { const char *name; const char *destination; bool executable; } bootstrapAssets[] = {
+    {"M48_geometry.bin", "depth/M48_geometry.bin", false},
+    {"bounded_log.awk", "depth/bounded_log.awk", false},
+    {"camera_rtsp_config.awk", "depth/camera_rtsp_config.awk", false},
+    {"depth_status", "depth/depth_status", true},
+    {"librknnmrt.so", "depth/librknnmrt.so", false},
+    {"no_route_monitor.so", "depth/no_route_monitor.so", false},
+    {"depth-control.sh", "depth/control.sh", true},
+    {"service.sh", "depth/service.sh", true},
+    {"ensure-spi.sh", "depth/ensure-spi.sh", true},
+    {"candidate-control.sh", "candidate/control.sh", true},
+    {"session.sh", "candidate/session.sh", true},
+    {"native_hd_gui", "candidate/native_hd_gui", true},
+    {"tof_driver", "depth/tmf8829_ext", true},
+    {"S99zdepth", "S99zdepth", true},
+};
 void resources(const QDir &root) {
     const auto info = QJsonDocument::fromJson(readFile(root.filePath("implementation.json"))).object();
     require(info["implementation"] == Implementation && info["executable"] == "RvControlWorker.exe"
         && info["executable_sha256"].toString() == sha(QCoreApplication::applicationFilePath()), "Native RV implementation fingerprint mismatch");
     const auto dlls = info["dependencies"].toObject(), files = info["payload_files"].toObject();
     require(dlls.contains("libssh2.dll") && dlls.contains("libcrypto-3-x64.dll") && files.contains("known_hosts"), "Native SSH closure missing");
+    for (const auto *name : {"model.dctsm","litesr-fov1.bin","litesr-fov2.bin","litesr_gui.sh","dtof-switch.sh","rect-model.dctsm","rect-litesr-fov1.bin","rect-litesr-fov2.bin","dtof-switch-v1.sh","native16-model.dctsm","native16-litesr-fov1.bin","native16-litesr-fov2.bin","native-fov1.bin","native-fov2.bin"})
+        require(files.contains(QString("litesr_board/")+name), "Protected LiteSR payload missing from the runtime manifest");
+
+    require(files.contains("rv1103_bootstrap/install.sh"), "RV1103 setup script missing from the runtime manifest");
+    for (const auto &asset : bootstrapAssets)
+        require(files.contains(QString("rv1103_bootstrap/")+asset.name), "RV1103 setup asset missing from the runtime manifest");
+
     for (const auto &table : {dlls, files}) for (auto it = table.begin(); it != table.end(); ++it) {
         const auto name = it.key();
         require(!name.isEmpty() && !QDir::isAbsolutePath(name) && !name.contains(':') && !name.contains('\\')
@@ -163,7 +187,7 @@ struct Credentials {
         PCREDENTIALW entry = nullptr;
         bool found=!readingSerial&&CredReadW(target,CRED_TYPE_GENERIC,0,&entry);
         // Migrate only the approved original board's legacy IP-based credential.
-        if(!found&&deviceStore&&device.serial=="0000000000000001"&&device.publicKey==Key&&device.username=="root") {
+        if(!found&&deviceStore&&device.serial=="REDACTED_DEVICE_SERIAL"&&device.publicKey==Key&&device.username=="root") {
             found=CredReadW(L"DexterousHand/RV1103/172.32.0.93",CRED_TYPE_GENERIC,0,&entry);persist=found;
         }
         if (found) {
@@ -441,59 +465,6 @@ void verifyDevice(Ssh &connection) {
     const auto geometry=connection.execute(QStringLiteral("sha256sum /root/r144_depth/M48_geometry.bin")).simplified().split(' ').value(0);
     require(geometry==device.geometrySha().toLatin1(),"Device GEO2 calibration differs from its profile; capture was not configured");
 }
-QString nearModelScript()
-{
-    return QStringLiteral(R"SH(
-set -eu
-dir=/root/dtof_candidates_20261009
-model="$dir/litesr_near_official10_20261023.rknn"
-expected='%1'
-model_state(){
-    if [ ! -x "$dir/litesr_near_gui" ] || [ ! -r "$dir/litesr_gui.sh" ] ||
-       [ ! -x "$dir/control.sh" ] || [ ! -r "$dir/session.sh" ]; then
-        echo runtime_missing
-    elif [ -L "$model" ]; then
-        echo mismatch
-    elif [ ! -e "$model" ]; then
-        echo missing
-    elif [ -f "$model" ]; then
-        sum=$(sha256sum "$model") || { echo mismatch; return; }
-        if [ "${sum%% *}" = "$expected" ]; then echo ready; else echo mismatch; fi
-    else
-        echo mismatch
-    fi
-}
-)SH").arg(QString::fromLatin1(LiteSrBoardContract::NearModelSha));
-}
-QString nearModelState(Ssh &connection)
-{
-    const auto state=connection.execute(nearModelScript()+"\nmodel_state").trimmed();
-    require(state=="ready"||state=="missing"||state=="mismatch"||state=="runtime_missing",
-        "Invalid LiteSR model status");
-    return QString::fromLatin1(state);
-}
-QString nearModelInstallScript()
-{
-    return nearModelScript()+QStringLiteral(R"SH(
-state=$(model_state)
-if [ "$state" = ready ]; then cat >/dev/null; echo ready; exit 0; fi
-[ "$state" = missing ] || { echo 'DTOF_ERROR:LiteSR runtime missing or existing model differs; no file was replaced'; exit 2; }
-umask 077
-stage=$(mktemp -d "$dir/.dcts-litesr.XXXXXX")
-tmp="$stage/${model##*/}"
-trap 'rm -f "$tmp"; rmdir "$stage"' EXIT
-trap 'exit 2' HUP INT TERM
-cat >"$tmp"
-sum=$(sha256sum "$tmp")
-[ "${sum%% *}" = "$expected" ] || { echo 'DTOF_ERROR:Uploaded LiteSR model checksum mismatch'; exit 2; }
-# Create the final name atomically. ln fails if any file already owns the name.
-if ! ln "$tmp" "$dir/"; then
-    [ "$(model_state)" = ready ] || { echo 'DTOF_ERROR:LiteSR target changed; no file was replaced'; exit 2; }
-fi
-[ "$(model_state)" = ready ]
-echo ready
-)SH");
-}
 QJsonObject withDevice(QJsonObject result) {
     if(deviceStore) { result["trusted_device"]=device.json();result["device_registry_revision"]=deviceStore->revision();result["expected_fov"]=device.fov(); }
     return result;
@@ -501,41 +472,38 @@ QJsonObject withDevice(QJsonObject result) {
 #include "tools/dtof_tuner/Worker.inc"
 // This hook lives in the existing candidate session so the coordinator still
 // owns the same manager and producer PIDs, including on the legacy firmware.
-const QByteArray DctsTofHook = R"SH(# DCTS automatic dToF preset v1
-dcts_tof(){
- preset=$1; mode=$2; shift 2
- case "$preset:$mode" in
-  :*) if [ "$1" = launch_tof ]; then "$@"; else exec "$@"; fi; return;;
-  16:14) distance=5;;
-  48:13) distance=11;;
-  *) return 2;;
- esac
- remaining=$#
- while [ "$remaining" -gt 0 ]; do
-  argument=$1; shift; remaining=$((remaining-1))
-  case "$argument" in
-   -d|-o|-t) [ "$remaining" -gt 0 ] || return 2; shift; remaining=$((remaining-1));;
-   -g|-n) ;;
-   *) set -- "$@" "$argument";;
-  esac
- done
- set -- "$@" -d "$distance" -o 1 -t 0
- if [ "$preset" = 48 ]; then set -- "$@" -g; fi
- if [ "$1" = launch_tof ]; then "$@"; else exec "$@"; fi
+QByteArray boardPayload(const QString &name)
+{
+    return readFile(QDir(QCoreApplication::applicationDirPath()).filePath("litesr_board/"+name), 4*1024*1024);
 }
-)SH";
+const QByteArray &automaticTofHook()
+{
+    static const auto hook=boardPayload("dtof-switch.sh");
+    return hook;
+}
 const QByteArray DctsTofCall = R"SH(dcts_tof "${DCTS_DTOF_PRESET:-}" "$1" )SH";
 const QString CandidateSession = "/root/dtof_candidates_20261009/session.sh";
 
 QByteArray withAutomaticTof(QByteArray session)
 {
-    const auto existing=session.indexOf(DctsTofHook);
+    const auto &hook=automaticTofHook();
+    // Recognize the exact previous hook, preserving saved producer arguments.
+    const auto legacy=boardPayload("dtof-switch-v1.sh");
+    auto previous=legacy;previous.replace("48:13|48:16)","48:13)");
+    if(session.contains(previous))session.replace(previous,hook);
+    if(session.contains(legacy))session.replace(legacy,hook);
+    session.replace("13|14)","13|14|16|17)");
+    session.replace("13|14|16)","13|14|16|17)");
+    session.replace("[ \"$1\" = 13 ] || [ \"$1\" = 14 ];","[ \"$1\" = 13 ] || [ \"$1\" = 14 ] || [ \"$1\" = 16 ];");
+    session.replace("[ \"$mode\" = 15 ];","[ \"$mode\" = 15 ] || [ \"$mode\" = 16 ];");
+    session.replace("[ \"$mode\" = 16 ];","[ \"$mode\" = 16 ] || [ \"$mode\" = 17 ];");
+    const auto existing=session.indexOf(hook);
     const auto call=session.indexOf(DctsTofCall);
     if(existing>=0 || call>=0) {
-        require(existing>=0 && call>=existing+DctsTofHook.size(),"Incomplete automatic dToF hook; review the board session script");
+        require(existing>=0 && call>=existing+hook.size(),"Incomplete automatic dToF hook; review the board session script");
         auto original=session;
         original.remove(call,DctsTofCall.size());
-        original.remove(existing,DctsTofHook.size());
+        original.remove(existing,hook.size());
         require(!original.contains("dcts_tof") && withAutomaticTof(original)==session,
                 "Automatic dToF hook differs from the supported version");
         return session;
@@ -549,7 +517,7 @@ QByteArray withAutomaticTof(QByteArray session)
     const auto line=matches.next();
     require(!matches.hasNext(),"Ambiguous board candidate producer");
     session.insert(line.capturedEnd(),DctsTofCall);
-    session.insert(line.capturedStart(),DctsTofHook);
+    session.insert(line.capturedStart(),hook);
     return session;
 }
 
@@ -596,6 +564,9 @@ echo ready
             && tunerRead(connection,CandidateSession)==after,"Automatic dToF installation was not verified");
 }
 
+#include "tools/litesr_board/protected/Worker.inc"
+#include "tools/rv_control/Bootstrap.inc"
+
 int run(const QStringList &input) {
     auto args=input;
     QDir root(QCoreApplication::applicationDirPath()); resources(root); SshLibrary ssh;
@@ -616,22 +587,42 @@ int run(const QStringList &input) {
         const auto bytes=QJsonDocument(QJsonObject{{"public_key",key},{"fingerprint",RvDeviceStore::keyFingerprint(key)},{"authenticated",false}}).toJson(QJsonDocument::Compact);
         std::fwrite(bytes.constData(),1,size_t(bytes.size()),stdout);return 0;
     }
-    if(args.size()==3&&args[1]=="--verify-usb-enrollment") {
+    if(args.size()==5&&args[1]=="--verify-usb-enrollment") {
         require(!deviceStore&&qEnvironmentVariable("RV_TEST_OFFLINE_ONLY")!="1",
             "USB enrollment is unavailable in offline mode or with an existing registry");
         device=RvDeviceProfile::fromJson(QJsonDocument::fromJson(args[2].toUtf8()).object());
         require(device.id==device.serial&&device.host=="172.32.0.93"&&device.sshPort==22
-            &&device.username=="root"&&device.ready()&&device.inputRotation==0
-            &&device.cameraMountRotation==0&&device.legacyCoordinator,"Invalid USB enrollment profile");
+            &&device.username=="root"&&device.ready()&&device.legacyCoordinator,"Invalid USB enrollment profile");
         factoryLogin=true;
         readingSerial=true;
-        Ssh connection(known);
-        verifyDevice(connection);
-        const auto modelState=nearModelState(connection);
-        connection.rememberSerialLogin(device.serial);
-        const auto receipt=QJsonDocument(QJsonObject{{"verified",true},{"litesr_model",modelState},{"automatic_tof",automaticTofState(connection)}}).toJson(QJsonDocument::Compact);
-        std::fwrite(receipt.constData(),1,size_t(receipt.size()),stdout);
-        return 0;
+        const auto boot=args[3];
+        require(QRegularExpression("^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$").match(boot).hasMatch()
+            && (args[4]=="v120" || args[4]=="installed"), "Invalid USB setup request");
+        try {
+            Ssh connection(known);
+            require(readDeviceSerial(connection)==device.serial
+                && connection.execute("cat /proc/sys/kernel/random/boot_id").trimmed()==boot.toLatin1(),
+                "USB and SSH identify different board sessions");
+            if(args[4]=="v120") installV120Board(connection,root,boot);
+            verifyDevice(connection);
+            auto modelState=nearModelState(connection);
+            auto tofState=automaticTofState(connection);
+            if ((modelState=="ready" || modelState=="missing") && (tofState=="ready" || tofState=="missing")
+                && (modelState!="ready" || tofState!="ready")) {
+                installProtectedLiteSr(connection);
+                modelState=nearModelState(connection);
+                tofState=automaticTofState(connection);
+            }
+            if(args[4]=="v120") require(modelState=="ready" && tofState=="ready", "New board setup did not pass verification");
+            connection.rememberSerialLogin(device.serial);
+            const auto receipt=QJsonDocument(QJsonObject{{"verified",true},{"litesr_model",modelState},{"automatic_tof",tofState}}).toJson(QJsonDocument::Compact);
+            std::fwrite(receipt.constData(),1,size_t(receipt.size()),stdout);
+            return 0;
+        } catch (const std::exception &error) {
+            const auto receipt=QJsonDocument(QJsonObject{{"setup_error",QString::fromUtf8(error.what())}}).toJson(QJsonDocument::Compact);
+            std::fwrite(receipt.constData(),1,size_t(receipt.size()),stdout);
+            return 2;
+        }
     }
     if(args.size()==6&&args[1]=="--read-device-serial") {
         require(!deviceStore,"Serial discovery must not modify a saved device");
@@ -653,7 +644,7 @@ int run(const QStringList &input) {
         require(bool(deviceStore),"A selected device is required");
         const auto target=device.credentialTarget().toStdWString();
         require(CredDeleteW(target.c_str(),CRED_TYPE_GENERIC,0)||GetLastError()==ERROR_NOT_FOUND,"Cannot remove saved device credential");
-        if(device.serial=="0000000000000001"&&device.publicKey==Key&&device.username=="root")
+        if(device.serial=="REDACTED_DEVICE_SERIAL"&&device.publicKey==Key&&device.username=="root")
             require(CredDeleteW(L"DexterousHand/RV1103/172.32.0.93",CRED_TYPE_GENERIC,0)||GetLastError()==ERROR_NOT_FOUND,"Cannot remove migrated credential");
         std::fputs("{\"removed\":true}",stdout);return 0;
     }
@@ -662,30 +653,13 @@ int run(const QStringList &input) {
         Ssh connection(known);verifyDevice(connection);
         const auto bytes=QJsonDocument(withDevice({{"verified",true},{"litesr_model",nearModelState(connection)},{"automatic_tof",automaticTofState(connection)}})).toJson(QJsonDocument::Compact);std::fwrite(bytes.constData(),1,size_t(bytes.size()),stdout);return 0;
     }
-    if((args.size()==2||args.size()==3)&&args[1]=="--import-litesr-model") {
+    if(args.size()==2&&args[1]=="--import-litesr-model") {
         require(bool(deviceStore)&&qEnvironmentVariable("RV_TEST_OFFLINE_ONLY")!="1",
             "LiteSR import requires a selected device and online mode");
-        constexpr qint64 modelSize=575927;
-        QByteArray model;
-        if(args.size()==3) {
-            QFile modelFile(args[2]);
-            require(modelFile.open(QIODevice::ReadOnly),"Cannot open the selected LiteSR model");
-            model=modelFile.read(modelSize+1);
-            require(model.size()==modelSize&&QCryptographicHash::hash(model,QCryptographicHash::Sha256).toHex()==LiteSrBoardContract::NearModelSha,
-                "The selected file is not the supported LiteSR near INT8 model");
-        }
         pinSelectedProfile=true;
         Ssh connection(known);verifyDevice(connection);
-        auto state=nearModelState(connection);
-        if(!model.isEmpty())
-            require(state=="ready"||state=="missing",
-                "LiteSR runtime missing or existing model differs; no model file was replaced");
-        installAutomaticTof(connection);
-        if(state=="missing"&&!model.isEmpty()) {
-            require(connection.execute(nearModelInstallScript(),30000,model).trimmed()=="ready","LiteSR model installation was not verified");
-            state="ready";
-        }
-        const auto bytes=QJsonDocument(withDevice({{"litesr_model",state},{"automatic_tof","ready"}})).toJson(QJsonDocument::Compact);
+        installProtectedLiteSr(connection);
+        const auto bytes=QJsonDocument(withDevice({{"litesr_model","ready"},{"automatic_tof","ready"}})).toJson(QJsonDocument::Compact);
         std::fwrite(bytes.constData(),1,size_t(bytes.size()),stdout);return 0;
     }
 #ifdef RV_CONTROL_TRANSPORT_TEST
@@ -742,7 +716,7 @@ int run(const QStringList &input) {
             else {require(recovery.isEmpty()&&(args[i]=="--recover-fault"||args[i]=="--recover-stream-fault"),"Unknown candidate option");recovery=args[i];}
         }
         bool ok=false;const int mode=args[2].toInt(&ok);const auto token=args[3],csv=args[4];
-        require(ok&&(mode==LiteSrBoardContract::NearFullHd||mode==LiteSrBoardContract::NativeHd)&&token.size()==32&&token.toLatin1().toHex().size()==64,"Invalid candidate selection");
+        require(ok&&(mode==LiteSrBoardContract::Native16Depth||mode==LiteSrBoardContract::NearFullHd||mode==LiteSrBoardContract::RectFullHd||mode==LiteSrBoardContract::NativeHd)&&token.size()==32&&token.toLatin1().toHex().size()==64,"Invalid candidate selection");
         for(auto ch:token)require(QStringLiteral("0123456789abcdef").contains(ch),"Invalid candidate generation");
         if(LiteSrBoardContract::supports(mode))LiteSrBoardContract::validate(mode,token.toStdString(),csv.toStdString());
         const bool captureOnly=LiteSrBoardContract::isCaptureOnly(mode);
@@ -753,7 +727,7 @@ int run(const QStringList &input) {
         if(automaticStart){pinSelectedProfile=true;automaticCameraStart=true;}
         Ssh connection(known);
         verifyDevice(connection);
-        const auto modelState=automaticStart||recovery=="--recover-fault"||mode==LiteSrBoardContract::NearFullHd
+        const auto modelState=automaticStart||recovery=="--recover-fault"||LiteSrBoardContract::isNear(mode)
             ? nearModelState(connection) : QStringLiteral("ready");
         const auto tofState=automaticTofState(connection);
         if(modelState!="ready"||tofState!="ready"){
@@ -767,11 +741,12 @@ int run(const QStringList &input) {
                 "Automatic dToF support changed before capture could start.");
         const auto saved=RvTuner::scriptSettings(session,true);
         auto effective=saved;
-        effective.mode=captureOnly?5:11;
+        effective.mode=(captureOnly||LiteSrBoardContract::isNative16Depth(mode))?5:11;
+        if(LiteSrBoardContract::isNative16Depth(mode))effective.periodMs=33;
         effective.objects=1;
         effective.signal=!captureOnly;
         effective.noise=false;
-        require(captureOnly?effective.fp16Native16Compatible():effective.liteSrCompatible(),
+        require(LiteSrBoardContract::isNative16Depth(mode)?(effective.mode==5&&effective.signal&&effective.objects==1&&effective.periodMs==33):(captureOnly?effective.fp16Native16Compatible():effective.liteSrCompatible()),
                 "Automatic dToF preset is incompatible with the requested imaging mode");
         if(captureOnly){
             QJsonParseError parse;const auto capabilities=QJsonDocument::fromJson(connection.execute("LD_LIBRARY_PATH=/root/r144_depth:/oem/usr/lib /root/dtof_candidates_20261009/native_hd_gui --native-capabilities"),&parse).object();
@@ -784,14 +759,18 @@ int run(const QStringList &input) {
                                              .arg(effective.size().width()).arg(action).arg(mode).arg(token,csv));
         QJsonParseError error;const auto doc=QJsonDocument::fromJson(output,&error);auto r=doc.object();
         require(error.error==QJsonParseError::NoError&&doc.isObject()&&r["state"]=="running"&&r["protocol"]==(LiteSrBoardContract::supports(mode)?LiteSrBoardContract::Protocol:"DTF3")&&r["generation"]==token&&r["candidate_mode"].toInt(-1)==mode&&r["options"]==csv&&r["boot_id"].toString().size()==36,"Candidate receipt mismatch");
-        if(LiteSrBoardContract::supports(mode))require(r["engine"]==LiteSrBoardContract::engine(mode)&&r["model_sha256"]==LiteSrBoardContract::modelSha(mode)&&(!LiteSrBoardContract::isNear(mode)||(r["checkpoint_sha256"]==LiteSrBoardContract::NearCheckpointSha&&r["training_minimum_m"]==0.01))&&r["width"]==LiteSrBoardContract::outputSide(mode)&&r["height"]==LiteSrBoardContract::outputSide(mode)&&r["fresh_ms"]==LiteSrBoardContract::FreshMs,"LiteSR model receipt mismatch");
-        if(LiteSrBoardContract::isHighResolution(mode))require(r["rgb_paused"]==true&&r["video_transport"]=="none","High-resolution RGB pause receipt mismatch");
+        if(LiteSrBoardContract::supports(mode))require(r["engine"]==LiteSrBoardContract::engine(mode)&&r["model_sha256"]==LiteSrBoardContract::modelSha(mode)&&(!LiteSrBoardContract::isNear(mode)||(r["checkpoint_sha256"]==LiteSrBoardContract::NearCheckpointSha&&r["training_minimum_m"]==0.01))&&r["width"]==LiteSrBoardContract::outputWidth(mode)&&r["height"]==LiteSrBoardContract::outputHeight(mode)&&r["fresh_ms"]==LiteSrBoardContract::FreshMs,"LiteSR model receipt mismatch");
+        if(LiteSrBoardContract::isHighResolution(mode)||LiteSrBoardContract::isNative16Depth(mode))require(r["rgb_paused"]==true&&r["video_transport"]=="none","High-resolution RGB pause receipt mismatch");
         if(LiteSrBoardContract::isHd(mode))require(r["paired_depth_native_protocol"]==LiteSrBoardContract::PairedProtocol&&r["video_transport"]=="rtsp_h265"&&r["video_width"]==2304&&r["video_height"]==1296&&r["video_fps"]==30&&r["video_kbps"]==4096,"HD video receipt mismatch");
         if(LiteSrBoardContract::isCaptureOnly(mode))require(r["capture_only"]==true&&r["inference_location"]=="none"&&r["depth_present"]==false&&r["photon_enabled"]==false,"Capture-only receipt mismatch; update the board photon policy before host inference");
         if(captureOnly){
             require(r["native_capture_protocol"]==LiteSrBoardContract::NativeCaptureProtocolV2
                     &&r["native_columns"]==16&&r["native_rows"]==16,"Native capture grid differs from the automatic 16x16 preset");
             r["requested_host_model"]=hostModel;r["capture_settings"]=effective.json();r["saved_capture_settings"]=saved.json();
+        }
+        if(LiteSrBoardContract::isNative16Depth(mode)){
+            require(r["native_columns"]==16&&r["native_rows"]==16&&r["video_fps"]==0&&r["paired_depth_native_protocol"]==LiteSrBoardContract::PairedProtocol,"Native16 depth/camera-off receipt mismatch");
+            r["capture_settings"]=effective.json();r["saved_capture_settings"]=saved.json();
         }
         const auto response=QJsonDocument(withDevice(r)).toJson(QJsonDocument::Compact);std::fwrite(response.constData(),1,size_t(response.size()),stdout);return 0;
     }

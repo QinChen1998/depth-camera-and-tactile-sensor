@@ -4,6 +4,8 @@
 #include <array>
 #include <vector>
 
+namespace RvCameraView {struct Profile;}
+
 namespace RvAssistFusion {
 enum PointReason : char {NoMeasurement=0, Invalid=1, Quality=2, Outside=3, Boundary=4,
     GlobalOutlier=5, Duplicate=6, GlobalRejected=7, LocalConflict=8, Adopted=9,
@@ -36,7 +38,7 @@ const Calibration &calibrationForNativeGrid(int fov,int columns,int rows);
 const std::array<std::array<double,3>,64> &native8RaysForFov(int fov);
 bool loadCalibration(const QByteArray &bytes, Calibration &out, QString &error);
 // An explicit RGB-only estimate has no fabricated native measurement identity.
-Result monocular(const std::vector<float> &monocularZ, const char *reason);
+Result monocular(const std::vector<float> &monocularZ, const char *reason,QSize size={576,324});
 Result fuse(const std::vector<float> &monocularZ, const QImage &rectifiedCamera,
             const RvTofFrame &tof, const Calibration &calibration,bool wideView=false);
 // Independent RGB-cadence experiment: the same robust scalar fit, without a
@@ -52,6 +54,9 @@ Result fuseGlobalScale(const std::vector<float> &monocularZ,const QImage &rectif
 Result fuseGlobalScale(const std::vector<float> &monocularZ,QSize rectifiedCameraSize,
                        const RvTofFrame &tof,const Calibration &calibration,bool wideView=false,
                        GlobalScaleFit fit=GlobalScaleFit::RetainedConsensusV2);
+Result fuseGlobalScale(const std::vector<float> &monocularZ,const RvTofFrame &tof,
+                       const Calibration &calibration,const RvCameraView::Profile &view,
+                       GlobalScaleFit fit=GlobalScaleFit::RetainedConsensusV2);
 // Scalar agreement diagnostics against this measurement, not independent GT.
 // Does not retain/export images, tensors, or individual measured distances.
 QJsonObject agreement(const std::vector<float> &monocularZ,const Result &output,
@@ -63,6 +68,7 @@ Result limitTofSupport(Result output,const RvTofFrame &tof,const Calibration &ca
 // Geometric outer field only. Uses the calibrated sensor cone and current Z
 // for parallax; validity/SNR/selected anchors never carve holes in the image.
 Result limitTofFieldOfView(Result output,const Calibration &calibration,bool wideView=false);
+Result limitTofFieldOfView(Result output,const Calibration &calibration,const RvCameraView::Profile &view);
 // One worker/session owns this state. No previous depth image is retained.
 class ScaleContinuity {
 public:

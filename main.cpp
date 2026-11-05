@@ -25,6 +25,9 @@ int runTactileVisualizationTests(const QString &);
 int runRvAssistRecoveryTests(const QString &);
 int runRvTunerTests(const QString &);
 int runLiveValidation(SensorMainWindow &,const QString &,int);
+int runLiteSr384LiveValidation(SensorMainWindow &,const QString &);
+int runLiteSr128LiveValidation(SensorMainWindow &,const QString &);
+int runLiteSr128VgaSwitchValidation(SensorMainWindow &,const QString &);
 
 namespace {
 QString configurationDirectory()
@@ -77,6 +80,13 @@ void configureSettings(const QString &directory,bool seedDefaults,bool importOri
 int main(int argc,char **argv)
 {
     qputenv("RV_UNIDEPTH_EXPERIMENT","H");
+    if(argc>1&&std::strcmp(argv[1],"--rv-assist-path-test")==0){
+        QCoreApplication app(argc,argv);
+        const auto args=app.arguments();
+        if(args.size()!=3||qEnvironmentVariable("RV_TEST_OFFLINE_ONLY")!="1")return 3;
+        extern int runRvAssistDepthTests(const QString &reportPath);
+        return runRvAssistDepthTests(args[2]);
+    }
     if(argc>1&&std::strcmp(argv[1],"--rv-assist-worker")==0){
         QCoreApplication app(argc,argv);const auto args=app.arguments();
         if(args.size()!=5||!RvAssistDepth::supportsHostModel(args[4]))return 3;
@@ -92,11 +102,14 @@ int main(int argc,char **argv)
     QApplication app(argc,argv);app.setQuitOnLastWindowClosed(false);UiStyle::install(app);
     app.setApplicationDisplayName(QStringLiteral("触想工作台"));
     app.setApplicationVersion(QStringLiteral("1.0"));
-    app.setWindowIcon(QIcon(QStringLiteral(":/branding/robot-hand.ico")));
+    app.setWindowIcon(QIcon(QStringLiteral(":/branding/cx.ico")));
     const auto arguments=app.arguments();const QString flag=arguments.value(1),report=arguments.value(2);
-    const bool live=flag=="--live-validation";
+    const bool vgaSwitchLive=flag=="--litesr128-vga-switch-validation";
+    const bool native16Live=vgaSwitchLive||flag=="--litesr128-live-validation";
+    const bool rectLive=native16Live||flag=="--litesr384-live-validation";
+    const bool live=rectLive||flag=="--live-validation";
     if(live&&(qEnvironmentVariable("DCTS_LIVE_ENABLE")!="1"||qEnvironmentVariable("DCTS_LIVE_SERIAL").isEmpty()
-        ||qEnvironmentVariable("DCTS_ALLOW_SAVED_TOF_SWITCH")!="1"||qEnvironmentVariable("RV_TEST_OFFLINE_ONLY")=="1"))return 3;
+        ||(!rectLive&&qEnvironmentVariable("DCTS_ALLOW_SAVED_TOF_SWITCH")!="1")||qEnvironmentVariable("RV_TEST_OFFLINE_ONLY")=="1"))return 3;
     const bool testing=!flag.isEmpty();std::unique_ptr<QTemporaryDir> temporary;
     if(testing){
 #ifdef DCTS_INSTALLER_BUILD
@@ -141,6 +154,9 @@ int main(int argc,char **argv)
     }
     if(testing&&flag!="--port-ui-smoke-test"&&!live)return 3;
     SensorMainWindow window(&language);window.show();
+    if(vgaSwitchLive)return runLiteSr128VgaSwitchValidation(window,report);
+    if(native16Live)return runLiteSr128LiveValidation(window,report);
+    if(rectLive)return runLiteSr384LiveValidation(window,report);
     if(live)return runLiveValidation(window,report,300);
     if(flag=="--port-ui-smoke-test"){
         const int result=runPortSmokeTests(window,language,report);

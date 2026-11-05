@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 #include <QDockWidget>
 #include <QTimer>
 #include "sensors/TactileVisualizationWidget.h"

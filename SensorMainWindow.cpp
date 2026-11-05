@@ -141,7 +141,7 @@ void SensorMainWindow::showAbout()
     auto *logo = new QLabel(dialog);
     logo->setPixmap(windowIcon().pixmap(QSize(112, 112), dialog->devicePixelRatioF()));
     auto *name = new QLabel(QApplication::applicationDisplayName(), dialog);
-    auto *version = new QLabel(QStringLiteral("v%1").arg(QApplication::applicationVersion()), dialog);
+    auto *version = new QLabel(QStringLiteral("v%1 · 内测版").arg(QApplication::applicationVersion()), dialog);
 
     auto *layout = new QVBoxLayout(dialog);
     layout->setContentsMargins(32, 24, 32, 24);
@@ -156,6 +156,8 @@ RvDeviceManagerDialog *SensorMainWindow::showDeviceManager(bool modal)
 {
     if (!m_devices) {
         m_devices = new RvDeviceManagerDialog(m_session, this);
+        connect(m_devices, &RvDeviceManagerDialog::usbConnectionRequested,
+                this, &SensorMainWindow::usbDeviceConnectionRequested);
         m_devices->setAttribute(Qt::WA_DeleteOnClose);
     }
     if (modal && !m_devices->isModal()) {
@@ -280,7 +282,7 @@ void SensorMainWindow::changeEvent(QEvent *event)
 
 void SensorMainWindow::retranslate()
 {
-    setWindowTitle(QApplication::applicationDisplayName());
+    setWindowTitle(QApplication::applicationDisplayName() + QStringLiteral("（内测版）"));
     m_tactile->setWindowTitle(tr("Magnetic tactile sensors"));m_depthDock->setWindowTitle(tr("Depth Map"));
     m_cameraDock->setWindowTitle(tr("Camera raw video"));
     m_file->setTitle(tr("File"));m_exit->setText(tr("Exit"));m_view->setTitle(tr("View"));

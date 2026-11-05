@@ -35,8 +35,11 @@ public:
  void setNativeGridSize(QSize size){nativeGridSize=size;target={};refreshHover();update();}
  QSizeF presentationSize()const{
   const auto grid=nativeGridSize.isEmpty()?depthSize:nativeGridSize;
-  return nativeRadial?QSizeF(grid.height(),grid.width()):
-      (!imageSourceRect.isEmpty()&&imageSourceRect!=image.rect()?QSizeF(imageSourceRect.size()):QSizeF(144,81));
+  if(nativeRadial)return QSizeF(grid.height(),grid.width());
+  if(!imageSourceRect.isEmpty()&&imageSourceRect!=image.rect())return imageSourceRect.size();
+  // The VGA virtual camera uses square pixels on the full 4:3 grid.
+  if(image.size()==QSize(640,480))return image.size();
+  return QSizeF(144,81);
  }
  QRect displayedSourceRect()const{return imageSourceRect;}
  QString legendText()const{return tr(blackOutside?"camera-Z: %1 m blue / %2 m green / %3 m red; invalid and out-of-range black":"camera-Z: %1 m blue / %2 m green / %3 m red; invalid black").arg(rangeMinimum,0,'g',6).arg((rangeMinimum+rangeMaximum)/2,0,'g',6).arg(rangeMaximum,0,'g',6);}
@@ -99,7 +102,7 @@ protected:
    p.setPen(QColor("#9ba9b9"));p.drawText(QRectF(10,bar.bottom()+12,this->width()-20,36),Qt::AlignCenter,loadingState==1?tr("Preparing GPU and model. Please wait..."):tr("Model ready"));return;
   }
   if(image.isNull()){p.drawText(rect(),Qt::AlignCenter,emptyReason.isEmpty()?tr("Waiting for RV1103 depth"):emptyReason);return;}
-  // Preserve physical 16:9 FoV even for 384x256 sampling, before display rotation.
+  // Fit the calibrated presentation geometry before applying display rotation.
   target=ImagePresentation::fittedRect(QRectF(rect()).adjusted(8,8,-8,-8),presentationSize(),rotation);
   setProperty("presentationRect",target);
   const auto display=nativeRadial?image.transformed(QTransform().rotate(-90)).flipped(Qt::Horizontal):image;

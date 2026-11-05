@@ -118,19 +118,21 @@ bool RvDepthView::setDepth(const QByteArray &bytes,const QJsonObject &metadata,c
     sideDiagnostic.clear();sidePixels=0;sideScale=1;
     setProperty("sidePredictionActive",false);setProperty("sidePredictionPixels",0);
     const int width=metadata["width"].toInt(),height=metadata["height"].toInt();
-    const bool rawPreview=metadata["color_raw_preview"]==true&&RvCameraView::isColorLiteSR(metadata["assist_host_model"].toString());
-    if(!((width==144&&height==81)||(width==288&&height==162)||(width==384&&height==256)||(width==576&&height==324)||(radial&&((width==256&&height==256)||(width==512&&height==512))))
+    const auto model=metadata["assist_host_model"].toString();
+    const auto &view=RvCameraView::profile(model);
+    const bool rawPreview=metadata["color_raw_preview"]==true&&RvCameraView::isColorLiteSR(model);
+    const bool hostGrid=RvCameraView::isUniDepth(model)&&QSize(width,height)==view.outputSize();
+    if(!((width==144&&height==81)||(width==288&&height==162)||(width==384&&height==256)||(width==576&&height==324)||hostGrid||(radial&&((width==128&&height==128)||(width==256&&height==256)||(width==512&&height==512))))
         ||bytes.size()!=width*height*4||metadata["depth_unit"]!=(rawPreview?"camera_radial_m_float32":radial?"sensor_radial_m_float32":"camera-Z_m_float32")){
         clear();return false;
     }
     const auto fit=metadata["assist_fusion"].toObject();
     const auto mode=fit["fusion_mode"].toString();
     const double scale=fit["scale"].toDouble(0);
-    const auto model=metadata["assist_host_model"].toString();
-    bool allowSides=!radial&&!rawPreview&&width==576&&height==324&&RvCameraView::isUniDepth(model)&&RvCameraView::isWide(model)
+    bool allowSides=!radial&&!rawPreview&&hostGrid&&RvCameraView::isWide(model)
         &&(metadata["assist_experiment"]=="G"||metadata["assist_experiment"]=="H")
         &&metadata["assist_input_orientation_checked"]==true&&metadata["assist_diagnostic_capture"]==true
-        &&metadata["assist_diagnostic_payload"]=="mono_reasons_v1"&&diagnostic.size()==RvDepthDiagnostic::PayloadBytes
+        &&metadata["assist_diagnostic_payload"]=="mono_reasons_v1"&&diagnostic.size()==view.depthBytes()+2*RvDepthDiagnostic::ReasonBytes
         &&(mode=="global_scale"||mode=="held_scale"||mode=="monocular")&&fit["local_factor_limit"]==1
         &&std::isfinite(scale)&&scale>0;
     auto values=std::make_shared<std::vector<float>>(width*height);int outside=0;
@@ -147,7 +149,7 @@ bool RvDepthView::setDepth(const QByteArray &bytes,const QJsonObject &metadata,c
     depth=std::move(values);depthSize=QSize(width,height);held=false;coverage.clear();depthMetadata=metadata;
     const auto field=(radial||rawPreview)?RvDepthCoverage::DepthField():RvDepthCoverage::depthField(bytes,metadata);
     if(allowSides&&field.valid()&&outside){
-        for(int i=RvDepthDiagnostic::DepthBytes;i<diagnostic.size();++i)
+        for(int i=view.depthBytes();i<diagnostic.size();++i)
             if(quint8(diagnostic[i])>quint8(RvAssistFusion::AlreadySupported)){allowSides=false;break;}
         if(allowSides){sideDiagnostic=diagnostic;sideScale=scale;sidePixels=outside;
             setProperty("sidePredictionActive",true);setProperty("sidePredictionPixels",sidePixels);}

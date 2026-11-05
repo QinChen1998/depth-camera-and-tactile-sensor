@@ -80,7 +80,7 @@ public:
     int dtofCandidateMode() const {return m_dtofMode;}
     bool photonCountsEnabled() const {return RvDtofCandidates::isLiteSr(m_dtofMode)&&!RvDtofCandidates::isCaptureOnly(m_dtofMode);}
     RvDtofCandidates::Settings dtofCandidateSettings() const {return m_dtofSettings;}
-    bool boardLiteSrHostContourEnabled() const {return !RvDtofCandidates::isCaptureOnly(m_dtofMode)&&(RvDtofCandidates::isLiteSrHd(m_dtofMode)||LiteSrBoardContract::isHighResolution(m_dtofMode)||m_boardHostContour);}
+    bool boardLiteSrHostContourEnabled() const {return !LiteSrBoardContract::isNative16Depth(m_dtofMode)&&!RvDtofCandidates::isCaptureOnly(m_dtofMode)&&(RvDtofCandidates::isLiteSrHd(m_dtofMode)||LiteSrBoardContract::isHighResolution(m_dtofMode)||m_boardHostContour);}
     RvLiteSrContour::RepairSettings boardLiteSrHostRepairSettings() const {return m_boardHostRepair;}
     bool setBoardLiteSrHostContour(bool enabled,const RvLiteSrContour::RepairSettings& settings);
     bool setDtofCandidate(int mode,const RvDtofCandidates::Settings& settings);

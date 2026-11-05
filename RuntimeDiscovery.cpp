@@ -1,4 +1,5 @@
 #include "RuntimeDiscovery.h"
+#include "sensors/RvCameraView.h"
 #include <QCoreApplication>
 #include <QCryptographicHash>
 #include <QDir>
@@ -48,8 +49,25 @@ QString applicationRoot() {
     return QCoreApplication::applicationDirPath();
 }
 bool componentAvailable(const QString &id){return id=="rv"||id=="tactile";}
-QString rvAssistRoot(){const auto path=overrideValue("RV_ASSIST_WIDE_576_FP16_ROOT");return path.isEmpty()?QDir(applicationRoot()).filePath("UniDepthRuntimeWide576FP16"):path;}
-QString rvAssistModelRoot(const QString &model){return model=="unidepth_wide_576_fp16_tof16"?rvAssistRoot():QString();}
+QString rvAssistRoot(){
+    const auto path=overrideValue("RV_ASSIST_WIDE_576_FP16_ROOT");
+    if(!path.isEmpty())return path;
+#if defined(DCTS_TENSORRT_RTX) && !defined(DCTS_INSTALLER_BUILD)
+    return QDir(applicationRoot()).filePath("UniDepthRuntimeWide576FP16RTX");
+#else
+    return QDir(applicationRoot()).filePath("UniDepthRuntimeWide576FP16");
+#endif
+}
+QString rvAssistModelRoot(const QString &model){
+    if(model==QLatin1String(RvCameraView::UniDepthFp16Native16))return rvAssistRoot();
+#if defined(DCTS_TENSORRT_RTX) && !defined(DCTS_INSTALLER_BUILD)
+    if(RvCameraView::isUniDepthVga(model)){
+        const auto path=overrideValue("RV_ASSIST_RGB672_VGA_FP16_ROOT");
+        return path.isEmpty()?QDir(applicationRoot()).filePath("UniDepthRuntimeRgb672VgaFP16RTX"):path;
+    }
+#endif
+    return {};
+}
 // Compatibility interfaces are inert: no host LiteSR runtime is distributed.
 QString rvLiteSrRoot(){return {};}
 QString rvLiteSrNearRoot(){return {};}

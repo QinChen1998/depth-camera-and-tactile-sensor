@@ -1,0 +1,22 @@
+{
+  "map_sha256": "7aa7e0661ff93d756e003dd112af60e32ba062472aceeed3c111e7a422e52582",
+  "calibration_sha256": "8198bdfde1916c72e4d472e73448ebf7341fc080e38c14733e479ce6bc11b9ba",
+  "source_size": [
+    2304,
+    1296
+  ],
+  "wire_size": [
+    144,
+    81
+  ],
+  "output_size": [
+    144,
+    81
+  ],
+  "coded_height": 82,
+  "source_relation": "source=16*wire+7.5",
+  "model_grid_relation": "model=(rectified+0.5)/1.0-0.5",
+  "color_matrix": "canonical-full-601",
+  "range": "full",
+  "resize": "area16x16-round-half-up"
+}

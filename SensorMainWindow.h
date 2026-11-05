@@ -25,6 +25,8 @@ public:
     TactileDockWidget *tactile() const { return m_tactile; }
     void resetLayout();
     void monitorCameraConnection();
+signals:
+    void usbDeviceConnectionRequested(RvDeviceManagerDialog *dialog);
 protected:
     bool nativeEvent(const QByteArray &eventType, void *message, qintptr *result) override;
     void changeEvent(QEvent *event) override;

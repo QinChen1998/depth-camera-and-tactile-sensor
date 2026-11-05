@@ -335,8 +335,12 @@ DepthMapWidget::DepthMapWidget(QWidget *parent)
     m_rvModelCaption->setObjectName("rvDepthModelLabel");
     m_rvModel = new QComboBox(m_rvControls);
     m_rvModel->setObjectName("rvDepthModel");
-    for (const char *model : {"host_unidepth_wide_576_fp16_tof16", "board_litesr_near_full_host_contour_hd"})
+    for (const char *model : {"host_unidepth_wide_576_fp16_tof16", "board_litesr_near_full_host_contour_hd", "board_litesr_near_384x256_host_contour_hd", "board_litesr_near_128x128_depth_only"})
         m_rvModel->addItem(QString::fromLatin1(model), QString::fromLatin1(model));
+    if(RvAssistDepth::supportsHostModel(QLatin1String(RvCameraView::UniDepthVgaNative16))){
+        const auto scheme=QStringLiteral("host_")+QLatin1String(RvCameraView::UniDepthVgaNative16);
+        m_rvModel->addItem(scheme,scheme);
+    }
     m_rvResolutionCaption = new QLabel(m_rvControls);
     m_rvResolutionCaption->setObjectName("rvDepthResolutionLabel");
     m_rvResolution = new QComboBox(m_rvControls);
@@ -616,7 +620,7 @@ int DepthMapWidget::selectedWidth() const
 {
     if(m_rvMode&&m_depthTabs->currentIndex()==3)return 256;
     if(m_rvMode&&m_depthTabs->currentIndex()==2)return RvDtofCandidates::outputWidth(m_session?m_session->dtofCandidateMode():RvDtofCandidates::FastDepth);
-    if(m_rvMode&&m_depthTabs->currentIndex()==1)return 576;
+    if(m_rvMode&&m_depthTabs->currentIndex()==1&&m_session)return RvCameraView::profile(m_session->assistHostModel()).outputWidth;
     if (m_rvMode)
         return m_session ? m_session->depthWidth() : m_snapshot.metadata["width"].toInt(144);
     return m_resolutionCombo->currentData().toSize().width();
@@ -626,7 +630,7 @@ int DepthMapWidget::selectedHeight() const
 {
     if(m_rvMode&&m_depthTabs->currentIndex()==3)return 256;
     if(m_rvMode&&m_depthTabs->currentIndex()==2)return RvDtofCandidates::outputHeight(m_session?m_session->dtofCandidateMode():RvDtofCandidates::FastDepth);
-    if(m_rvMode&&m_depthTabs->currentIndex()==1)return 324;
+    if(m_rvMode&&m_depthTabs->currentIndex()==1&&m_session)return RvCameraView::profile(m_session->assistHostModel()).outputHeight;
     if (m_rvMode) {
         if (!m_session) return m_snapshot.metadata["height"].toInt(81);
         switch (m_session->depthWidth()) {
@@ -776,10 +780,13 @@ void DepthMapWidget::retranslateUi()
     m_colorOutput->setAccessibleName(tr("Depth output display"));
     m_colorOutput->setToolTip(tr("Raw prediction without output masks or range rejection. Color limits saturate; nonfinite values are magenta. Input preprocessing is unchanged."));
     label("host_unidepth_wide_576_fp16_tof16",tr("Host-assisted inference"));
+    label("host_unidepth_rgb672_vga_fp16_tof16",tr("Host-assisted inference (640×480)"));
     m_rvModel->setItemData(m_rvModel->findData("host_unidepth_wide_576_fp16_tof16"),tr("Requires saved 16 x 16 ordinary or high accuracy ToF settings with one target and Noise off. Does not change saved sensor settings."),Qt::ToolTipRole);
     m_depthTabs->setTabText(0,tr("Board depth"));m_depthTabs->setTabText(1,tr("Host assisted depth"));
     m_depthTabs->setTabText(2,tr("Board depth"));m_depthTabs->setTabText(3,tr("Host depth preview"));
     label("board_litesr_near_full_host_contour_hd",tr("On-board inference"));
+    label("board_litesr_near_384x256_host_contour_hd",tr("On-board inference (384x256)"));
+    label("board_litesr_near_128x128_depth_only",tr("On-board inference (128x128, camera off)"));
     for(int i=0;i<m_rvModel->count();++i){
         const auto id=m_rvModel->itemData(i).toString();
         if(id.startsWith("board_litesr_"))m_rvModel->setItemData(i,tr("On-board INT8 inference and all depth processing run on RV1103. Same-frame native D/I, 256 x 256 output displayed at the native ToF aspect ratio. Positive near returns are interpolated separately below the trained 10 cm minimum."),Qt::ToolTipRole);
@@ -787,6 +794,8 @@ void DepthMapWidget::retranslateUi()
     m_liteSrRepairButton->setText(tr("Repair settings..."));
     m_boardLiteSrHostContour->setText(tr("Host contour optimization"));
     m_boardLiteSrHostContour->setToolTip(tr("RV1103 runs the full on-board INT8 model. The PC refines its depth with matched native input; no host neural network is started. The separate board contour option keeps all processing on RV1103."));
+    m_rvModel->setItemData(m_rvModel->findData("board_litesr_near_128x128_depth_only"),tr("16x16 depth and same-frame photon input; 128x128 output. Camera disabled. Selecting another model restores its capture configuration."),Qt::ToolTipRole);
+    m_rvModel->setItemData(m_rvModel->findData("board_litesr_near_384x256_host_contour_hd"),tr("48x32 depth and photon input; 384x256 output. Same sensor field of view. Experimental weight reuse; physical accuracy is unverified."),Qt::ToolTipRole);
     m_rvModel->setItemData(m_rvModel->findData("board_litesr_near_full_host_contour_hd"),tr("Official near-depth post-training, 1-140 cm input and output. INT8 inference runs on RV1103; matched contour refinement and display run on the PC. Real near-depth accuracy is unverified. RGB is not a model input."),Qt::ToolTipRole);
     m_liteSrWhiteCaption->setText(tr("Counts white:"));
     m_liteSrWhite->setToolTip(tr("Fixed experimental mapping: intensity = min(counts / white, 1). Shared across candidates; not per-frame auto range or physical calibration."));
@@ -999,7 +1008,7 @@ void DepthMapWidget::syncSessionControls()
     setProperty("dtofComputeLocation",lite?"host_native":boardFull&&m_session->boardLiteSrHostContourEnabled()?"rv1103+host_cpu":"rv1103");
     m_boardLiteSrHostContour->setVisible(boardFull);
     {const QSignalBlocker blocker(m_boardLiteSrHostContour);m_boardLiteSrHostContour->setChecked(m_session&&m_session->boardLiteSrHostContourEnabled());}
-    m_boardLiteSrHostContour->setEnabled(m_session&&!m_session->busy()&&!RvDtofCandidates::isLiteSrHd(boardMode)&&!LiteSrBoardContract::isHighResolution(boardMode));
+    m_boardLiteSrHostContour->setEnabled(!LiteSrBoardContract::isNative16Depth(boardMode)&&m_session&&!m_session->busy()&&!RvDtofCandidates::isLiteSrHd(boardMode)&&!LiteSrBoardContract::isHighResolution(boardMode));
     m_liteSrRepairButton->setVisible((lite&&liteDepth->model()=="area_full_contour")||boardMode==RvDtofCandidates::LiteSrContour||(boardFull&&m_session->boardLiteSrHostContourEnabled()));
     m_liteSrRepairButton->setEnabled(m_session&&!m_session->busy());
     m_liteSrRepairButton->setText(boardFull&&m_session->boardLiteSrHostContourEnabled()?tr("Contour settings..."):tr("Repair settings..."));
@@ -1220,6 +1229,7 @@ void DepthMapWidget::acceptCandidate(const RvDtofCandidates::Result& result){
     if(!result.fresh){if(result.error.isEmpty())holdCandidate();else clearCandidate(result.error);return;}
     if(RvDtofCandidates::identity(result.metadata)!=RvDtofCandidates::identity(m_session->metadata()))return;
     if(RvDtofCandidates::isLiteSrFull(m_session->dtofCandidateMode())&&result.metadata["host_contour_enabled"].toBool()!=m_session->boardLiteSrHostContourEnabled())return;
+    m_candidateCanvas->setNativeGridSize(LiteSrBoardContract::isNative16Depth(m_session->dtofCandidateMode())?QSize(16,16):QSize(48,32));
     if(m_candidateCanvas->setDepth(result.depth,result.metadata)&&m_candidateCanvas->setCoverage(result.coverage))
         m_candidateSnapshot={result.depth,{},{},result.metadata,QDateTime::currentDateTimeUtc()};
     else clearCandidate(tr("No fresh dToF data"));

@@ -1,11 +1,11 @@
-﻿#define AppName "触想工作台"
-#define AppExe "Depth Camera and Tactile Sensor.exe"
+#define AppName "触想工作台"
+#define AppExe "触想工作台.exe"
 
 [Setup]
 AppId={{E927DDB5-704F-4F63-AEC3-54D67D2B1177}
 AppName={#AppName}
 AppVersion={#Version}
-DefaultDirName={autopf}\Depth Camera and Tactile Sensor
+DefaultDirName={autopf}\{#AppName}
 DefaultGroupName={#AppName}
 ArchitecturesAllowed=x64os
 ArchitecturesInstallIn64BitMode=x64os
@@ -15,7 +15,7 @@ WizardStyle=modern
 DisableProgramGroupPage=yes
 ShowLanguageDialog=no
 OutputDir={#Output}
-OutputBaseFilename=DCTS-Setup-{#Version}-x64
+OutputBaseFilename={#AppName}-内测版-v{#Version}-x64
 Compression=lzma2/fast
 SolidCompression=yes
 UninstallDisplayIcon={app}\{#AppExe}

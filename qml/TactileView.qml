@@ -327,5 +327,5 @@ Item {
             color: root.display.textColor; font.pixelSize: 12
         }
     }
-    Text { anchors.centerIn: parent; visible: !root.display.valid; text: root.display.sourceLabel + " | " + qsTr("Data unavailable"); color: root.display.textColor }
+    Text { objectName: "tactileNoDataMessage"; anchors.centerIn: parent; visible: !root.display.valid; text: qsTr("Device disconnected / data unavailable"); color: root.display.textColor }
 }

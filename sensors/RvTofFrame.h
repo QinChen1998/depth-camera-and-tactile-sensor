@@ -57,7 +57,7 @@ struct RvTofFrame {
         const double delta=metadata["pair_delta_ms"].toDouble(1000),uncertainty=metadata["pair_clock_uncertainty_ms"].toDouble(-1);
         return metadata["assist_experiment"]=="H"&&metadata["source_protocol"]=="HDA1"
             &&metadata["dtof_present"]==true&&metadata["work_mode"]=="rgb_tof"
-            &&metadata["pairing_policy"]==QLatin1String(GlobalScaleReusePolicy)&&metadata["tof_warning_flags"]==0
+            &&metadata["pairing_policy"]==QLatin1String(GlobalScaleReusePolicy)&&(metadata["tof_warning_flags"]==0||metadata["tof_warning_flags"]==16)
             &&std::isfinite(delta)&&std::abs(delta)<=GlobalScaleMaxPairDeltaMs
             &&std::isfinite(uncertainty)&&uncertainty>=0&&uncertainty<=35
             &&metadata["rgb_timestamp_ns"].isDouble()&&metadata["rgb_timestamp_ns"].toDouble()>0

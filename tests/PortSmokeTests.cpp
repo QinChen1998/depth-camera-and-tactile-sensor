@@ -3,6 +3,7 @@
 #include "../RuntimeDiscovery.h"
 #include "../TactileDockWidget.h"
 #include "../RenderingSettings.h"
+#include "RvDeviceFixture.h"
 #include "../sensors/DepthMapWidget.h"
 #include "../sensors/RvAssistDepth.h"
 #include "../sensors/RvAssistFusion.h"
@@ -55,7 +56,12 @@ int runPortSmokeTests(SensorMainWindow &window,LanguageManager &language,const Q
     for(const auto *name:{"tactileDock","depthMapDock","rtspCameraDock"})
         check(QString("DOCK_")+name,window.findChild<QDockWidget *>(name)!=nullptr);
     auto *models=window.findChild<QComboBox *>("rvDepthModel");
-    check("EXACT_TWO_IMAGING_SCHEMES",models&&models->count()==2&&models->itemData(0)=="host_unidepth_wide_576_fp16_tof16"&&models->itemData(1)=="board_litesr_near_full_host_contour_hd");
+    const bool vgaSupported=RvAssistDepth::supportsHostModel(QLatin1String(RvCameraView::UniDepthVgaNative16));
+    check("EXACT_IMAGING_SCHEMES",models&&models->count()==(vgaSupported?5:4)
+        &&models->itemData(0)=="host_unidepth_wide_576_fp16_tof16"&&models->itemData(1)=="board_litesr_near_full_host_contour_hd"
+        &&models->itemData(2)=="board_litesr_near_384x256_host_contour_hd"
+        &&models->itemData(3)=="board_litesr_near_128x128_depth_only"
+        &&(!vgaSupported||models->itemData(4)=="host_unidepth_rgb672_vga_fp16_tof16"));
     check("NO_HOST_DIRECTION_OR_CORRECTION_SELECTORS",
           !window.depth()->findChild<QComboBox *>("rvAssistInputRotation")
           &&!window.depth()->findChild<QComboBox *>("rvUniDepthExperiment"));
@@ -71,6 +77,16 @@ int runPortSmokeTests(SensorMainWindow &window,LanguageManager &language,const Q
         &&initialPresentation->rotationDegrees()==0&&initialPresentation->blackOutsideRange()
         &&initialPresentation->colorMinimum()==.01&&initialPresentation->colorMaximum()==3);
     check("STARTUP_CAPTURE_STOPPED",session->userStopped());
+    RvDeviceStore initialDevices;
+    check("FIRST_RUN_HAS_NO_TRUSTED_OR_ACTIVE_DEVICE",initialDevices.profiles().isEmpty()
+        &&initialDevices.activeId().isEmpty()&&session->deviceProfile().id.isEmpty()
+        &&!session->controlledSource());
+    session->startAutomatically();
+    check("FIRST_RUN_NO_HISTORICAL_SSH_PROBE",session->userStopped()&&!session->busy());
+    // The remaining tests exercise the controls for an explicitly enrolled device.
+    const auto fixture=offlineRvDevice();
+    initialDevices.save({fixture},fixture.id);
+    session->reloadDeviceProfiles();
     auto *depthStart=window.findChild<QPushButton *>("rvDepthStart");
     auto *depthStop=window.findChild<QPushButton *>("rvDepthStop");
     auto *depthReconnect=window.findChild<QPushButton *>("rvDepthReconnect");
@@ -131,6 +147,10 @@ int runPortSmokeTests(SensorMainWindow &window,LanguageManager &language,const Q
     session->selectImagingScheme("board_litesr_near_high_resolution",{});
     check("REMOVED_SCHEME_API_REJECTED",session->dtofCandidateMode()==original&&session->assistHostModel()=="unidepth_wide_576_fp16_tof16");
     check("REMOVED_BOARD_MODE_REJECTED",!session->setDtofCandidate(15,{}));
+    session->selectImagingScheme("board_litesr_near_128x128_depth_only",{});
+    check("NATIVE16_CAMERA_OFF_SELECTION",session->dtofCandidateMode()==17&&session->userStopped()&&!session->assistDepthEnabled()&&!session->boardLiteSrHostContourEnabled());
+    {RvSessionController reopened;check("NATIVE16_SELECTION_PERSISTS",reopened.dtofCandidateMode()==17&&reopened.userStopped()&&!reopened.assistDepthEnabled());}
+
     session->selectImagingScheme("board_litesr_near_full_host_contour_hd",{});
     check("BOARD_SELECTION_STOPPED",session->dtofCandidateMode()==13&&session->userStopped()&&!session->assistDepthEnabled());
     {
@@ -139,11 +159,7 @@ int runPortSmokeTests(SensorMainWindow &window,LanguageManager &language,const Q
             reopened.dtofCandidateMode()==13&&reopened.userStopped()&&!reopened.assistDepthEnabled());
     }
     session->selectImagingScheme("host_unidepth_wide_576_fp16_tof16",{});
-    const bool fp16Available=RvAssistDepth::hostModelAvailable("unidepth_wide_576_fp16_tof16");
-    if(fp16Available)
-        check("FP16_SELECTION_STOPPED",session->dtofCandidateMode()==14&&session->userStopped()&&session->assistDepthEnabled()&&session->assistExperiment()=="H");
-    else
-        check("FP16_ABSENT_KEEPS_BOARD_SELECTED",session->dtofCandidateMode()==13&&session->userStopped()&&!session->assistDepthEnabled());
+    check("FP16_SELECTION_STOPPED",session->dtofCandidateMode()==14&&session->userStopped()&&session->assistDepthEnabled()&&session->assistExperiment()=="H");
     bool idle=true;for(auto *process:window.findChildren<QProcess *>())idle&=process->state()==QProcess::NotRunning;
     check("NO_WORKER_OR_HARDWARE_STARTED",idle);
     const auto worker=RuntimeDiscovery::rvControlForLaunch();
@@ -158,7 +174,7 @@ int runPortSmokeTests(SensorMainWindow &window,LanguageManager &language,const Q
     window.findChild<QAction *>("actionRenderStandard")->trigger();
     check("STANDARD_RENDERING_WORKS",!rendering->lowCostRendering());rendering->setLowCostRendering(prior);
     language.setLanguage(LanguageManager::Language::SimplifiedChinese);settle(100);
-    check("CHINESE_WINDOW",window.windowTitle()==QStringLiteral("触想工作台"));
+    check("CHINESE_WINDOW",window.windowTitle()==QStringLiteral("触想工作台（内测版）"));
     auto *about = window.menuBar()->findChild<QAction *>("aboutAction");
     check("CHINESE_ABOUT_MENU",about && window.menuBar()->actions().contains(about)
         && about->text()==QStringLiteral("关于"));
@@ -168,7 +184,7 @@ int runPortSmokeTests(SensorMainWindow &window,LanguageManager &language,const Q
     if(aboutDialog){
         for(auto *label:aboutDialog->findChildren<QLabel *>()){
             aboutName |= label->text()==QStringLiteral("触想工作台");
-            aboutVersion |= label->text()==QStringLiteral("v1.0");
+            aboutVersion |= label->text()==QStringLiteral("v1.0 · 内测版");
             aboutLogo |= !label->pixmap().isNull();
         }
     }
@@ -256,8 +272,7 @@ int runPortSmokeTests(SensorMainWindow &window,LanguageManager &language,const Q
     emit session->cameraFrameReady(syntheticVideo);
     check("CAMERA_RESOLUTION_USES_RECEIVED_FRAME",cameraInfo&&cameraInfo->text().contains(QStringLiteral("576×324")));
     emit session->streamCleared();
-    auto *canvas=static_cast<RvDepthView *>(window.findChild<QWidget *>("rvAssistDepthCanvas"));
-    if (fp16Available && canvas) {
+    if (auto *canvas=static_cast<RvDepthView *>(window.findChild<QWidget *>("rvAssistDepthCanvas"))) {
         constexpr int width=576,height=324,pixels=width*height;
         QByteArray metres(pixels*4,'\0'), diagnostic(RvDepthDiagnostic::PayloadBytes,'\0');
         for(int i=0;i<pixels;++i){
@@ -290,8 +305,54 @@ int runPortSmokeTests(SensorMainWindow &window,LanguageManager &language,const Q
         check("OUTSIDE_FIELD_HOVER_ONE_LINE",hover.contains(QString::fromUtf8("预测：1.5000 m camera-Z"))
             && !hover.contains('\n') && canvas->depthAt(width/4,height/2)==0);
         window.depth()->clearAssistDepth({});
-    } else if (fp16Available) {
+    } else {
         check("OUTSIDE_FIELD_HOVER_ONE_LINE",false);
+    }
+    if(vgaSupported){
+        const auto model=QString::fromLatin1(RvCameraView::UniDepthVgaNative16);
+        const auto &vga=RvCameraView::profile(model);
+        session->selectImagingScheme("host_"+model,{});
+        check("VGA_STOPPED_SELECTION",session->userStopped()&&session->assistHostModel()==model
+            &&models->currentData()=="host_"+model&&window.depth()->selectedWidth()==640&&window.depth()->selectedHeight()==480);
+        RvSessionController reopened;
+        check("VGA_SELECTION_PERSISTS",reopened.assistHostModel()==model&&reopened.assistExperiment()=="H");
+        QByteArray metres(vga.depthBytes(),0),diagnostic(vga.depthBytes()+2*RvDepthDiagnostic::ReasonBytes,0);
+        for(int i=0;i<vga.depthBytes()/4;++i){
+            if(i%640>=320)qToLittleEndian<quint32>(0x40000000,metres.data()+i*4);
+            qToLittleEndian<quint32>(0x3fc00000,diagnostic.data()+i*4);
+        }
+        const auto policy=QString::fromLatin1(RvAssistFusion::FieldOfViewPolicy);
+        const QJsonObject fit{{"fusion_mode","global_scale"},{"scale",1},{"local_factor_limit",1},
+            {"output_policy",policy},{"fov_geometry_only",true},{"fov_pixels",640*480/2}};
+        const QJsonObject metadata{{"width",640},{"height",480},{"depth_unit","camera-Z_m_float32"},
+            {"assist_host_model",model},{"assist_experiment","H"},{"assist_input_orientation_checked",true},
+            {"assist_diagnostic_capture",true},{"assist_diagnostic_payload","mono_reasons_v1"},
+            {"assist_output_policy",policy},{"assist_camera_profile","wide"},{"assist_output_restored_to_calibrated_grid",true},
+            {"assist_input_rotation_degrees",0},{"dtof_fov_correction",1},{"rectify_map_sha256",vga.mapSha},
+            {"assist_graph_sha256",vga.graphSha},{"depth_K",RvCameraView::intrinsics(vga)},{"assist_fusion",fit}};
+        QImage rgb(640,480,QImage::Format_RGB888);rgb.fill(Qt::black);
+        window.depth()->acceptAssistSnapshot(metres,metadata,rgb,RvTofFrame{},diagnostic);
+        auto *canvas=static_cast<RvDepthView *>(window.depth()->findChild<QWidget *>("rvAssistDepthCanvas"));
+        const auto snapshot=window.depth()->snapshot();
+        check("VGA_METRIC_SNAPSHOT_AND_SIDE_DISPLAY",canvas&&canvas->depthAt(160,240)==0&&canvas->depthAt(480,240)==2
+            &&canvas->property("sidePredictionActive").toBool()&&snapshot.metresFloat32LE==metres
+            &&snapshot.cameraImage.size()==QSize(640,480)&&snapshot.depthImage.size()==QSize(640,480));
+        if(canvas){
+            const int rotation=canvas->displayRotationDegrees();
+            const auto hasAspect=[&](int degrees,int width,int height){
+                canvas->setDisplayRotationDegrees(degrees);
+                const auto rendered=canvas->grab();
+                const auto rect=canvas->property("presentationRect").toRectF();
+                out<<"VGA_DRAW_RECT "<<degrees<<' '<<rect.width()<<'x'<<rect.height()<<'\n';
+                return !rendered.isNull()&&!rect.isEmpty()
+                    &&std::abs(rect.width()/rect.height()-double(width)/height)<.001;
+            };
+            check("VGA_RENDERED_ASPECT_RATIO",hasAspect(0,4,3)&&hasAspect(90,3,4));
+            canvas->holdFrame();
+            check("VGA_HELD_FRAME_RETAINS_ASPECT",hasAspect(0,4,3));
+            canvas->setDisplayRotationDegrees(rotation);
+        }
+        window.depth()->clearAssistDepth({});
     }
     session->selectImagingScheme("board_litesr_near_full_host_contour_hd",{});
     if (auto *contour=window.findChild<QPushButton *>("rvLiteSrRepairSettings"); contour&&contour->isVisible()&&contour->isEnabled()) {
@@ -309,7 +370,7 @@ int runPortSmokeTests(SensorMainWindow &window,LanguageManager &language,const Q
     check("TACTILE_QML_READY",view&&view->status()==QQuickWidget::Ready);
     const auto *tactile=window.tactile()->display();
     check("FIRST_RUN_136_TACTILE_OUTPUT_POINTS",tactile->displayPointCount()==136);
-    check("OFFLINE_TACTILE_STAYS_SIMULATED",tactile->frame().valid&&tactile->frame().sourceMode=="Mock"
+    check("OFFLINE_TACTILE_WAITS_FOR_DEVICE",!tactile->frame().valid&&tactile->history().samples().empty()
         &&tactile->findChild<QPushButton *>("tactileConnect")->isEnabled()&&!tactile->hasDisplayBaseline());
     check("TACTILE_CONNECTION_SETTINGS_OPEN_WITHOUT_SENSOR",tactile->findChild<QPushButton *>("tactileConnectionSettings")->isChecked());
     check("TACTILE_DEFAULT_REQUEST_GAP_10MS",tactile->findChild<QSpinBox *>("tactileInterval")->value()==10);
@@ -335,8 +396,20 @@ int runPortSmokeTests(SensorMainWindow &window,LanguageManager &language,const Q
         auto *confirm=devices.findChild<QCheckBox *>("rvDeviceConfirm");
         auto *save=devices.findChild<QPushButton *>("rvDeviceSave");
         auto *importLiteSr=devices.findChild<QPushButton *>("rvDeviceImportLiteSr");
+        auto *connectUsb=devices.findChild<QPushButton *>("rvDeviceConnectUsb");
+        check("USB_CONNECT_ACTION",connectUsb&&connectUsb->isEnabled()
+            &&connectUsb->text()==QString::fromUtf8("USB 一键连接"));
+        if(connectUsb&&qEnvironmentVariable("RV_TEST_OFFLINE_ONLY")=="1"){
+            bool requested=false;
+            const auto connection=QObject::connect(&devices,&RvDeviceManagerDialog::usbConnectionRequested,&devices,
+                [&requested]{requested=true;});
+            connectUsb->click();
+            QObject::disconnect(connection);
+            check("USB_CONNECT_OFFLINE_GUARD",!requested
+                &&devices.findChild<QLabel *>("rvDeviceStatus")->text()==QString::fromUtf8("离线模式下无法通过 USB 连接设备。"));
+        }
         check("LITESR_IMPORT_ACTION",importLiteSr&&importLiteSr->isEnabled()
-            &&importLiteSr->text()==QString::fromUtf8("导入板端推理模型…"));
+            &&importLiteSr->text()==QString::fromUtf8("安装板端推理与自动切换…"));
         if(importLiteSr&&qEnvironmentVariable("RV_TEST_OFFLINE_ONLY")=="1"){
             importLiteSr->click();
             bool noImportProcess=true;
@@ -353,7 +426,7 @@ int runPortSmokeTests(SensorMainWindow &window,LanguageManager &language,const Q
             &&session->assistInputRotationDegrees()==device.inputRotation&&session->userStopped());
     }
     language.setLanguage(LanguageManager::Language::English);settle(100);
-    check("ENGLISH_WINDOW",window.windowTitle()==QStringLiteral("触想工作台"));
+    check("ENGLISH_WINDOW",window.windowTitle()==QStringLiteral("触想工作台（内测版）"));
     check("ENGLISH_ABOUT_MENU",about && about->text()=="About");
     check("ENGLISH_TWO_SCHEMES",models&&models->itemText(0)=="Host-assisted inference"&&models->itemText(1)=="On-board inference");
     check("ENGLISH_IMAGING_SCHEME_TOOLTIP",models&&models->toolTip()=="Select host-assisted or on-board depth inference.");

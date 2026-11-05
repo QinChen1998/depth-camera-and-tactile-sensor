@@ -16,7 +16,7 @@ def main():
     parser.add_argument('--flags',nargs='*')
     args=parser.parse_args()
     root=Path(__file__).resolve().parents[1]
-    executable=root/'x64'/args.configuration/'Depth Camera and Tactile Sensor.exe'
+    executable=root/'x64'/args.configuration/'触想工作台.exe'
     args.output.mkdir(parents=True,exist_ok=False)
     env={k:v for k,v in os.environ.items() if not k.startswith(('PYTHON','CONDA','RV_','DCTS_'))}
     env.update(PATH=str(args.qt_root/'bin')+';'+os.environ.get('SystemRoot','C:/Windows')+'/System32',
@@ -31,10 +31,13 @@ def main():
     results=[]
     for flag in flags:
         output=args.output/(flag+'.txt');started=time.monotonic()
+        # The UI suite includes many real-time reconnect/settling windows.
+        # This process budget does not change its 500-900 ms auto-zero checks.
+        timeout_seconds=240 if args.configuration=='Debug' and flag=='tactile-visualization-test' else 150
         print('RUN '+args.configuration+' '+flag,flush=True)
         try:
             process=subprocess.run([str(executable),'--'+flag,str(output)],cwd=root,env=env,
-                                   stdout=subprocess.PIPE,stderr=subprocess.STDOUT,timeout=150)
+                                   stdout=subprocess.PIPE,stderr=subprocess.STDOUT,timeout=timeout_seconds)
             (args.output/(flag+'.log')).write_bytes(process.stdout)
             text=output.read_text(encoding='utf-8-sig',errors='replace') if output.exists() else ''
             row=dict(flag=flag,exit_code=process.returncode,seconds=round(time.monotonic()-started,2),
@@ -42,7 +45,7 @@ def main():
                      failures=[line for line in text.splitlines() if re.search(r'\bFAIL\b',line)])
         except subprocess.TimeoutExpired as error:
             (args.output/(flag+'.log')).write_bytes(error.stdout or b'')
-            row=dict(flag=flag,passed=False,timeout=True,seconds=150)
+            row=dict(flag=flag,passed=False,timeout=True,seconds=timeout_seconds)
         results.append(row);print(json.dumps(row),flush=True)
     summary=dict(passed=all(row['passed'] for row in results),configuration=args.configuration,local_runtime=args.local_runtime,
                  hardware_started=False,results=results)

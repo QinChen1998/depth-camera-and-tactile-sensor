@@ -35,13 +35,16 @@ public:
  // coordinates and hash once on load, while still checking every packet's SHA.
  class Calibration {
  public:
-  explicit Calibration(const QByteArray& map) {
+  explicit Calibration(const QByteArray& map,QSize source={}) {
    require(map.size()>=16&&map.left(8)==QByteArray("NVMAP1\0\0",8),"Map header");
    w=qFromLittleEndian<quint32>(map.constData()+8);h=qFromLittleEndian<quint32>(map.constData()+12);
-   require((w==144&&h==81)||(w==576&&h==324)||(w==2304&&h==1296),"Supported map dimensions");
+   require((source.isEmpty()&&((w==144&&h==81)||(w==576&&h==324)||(w==2304&&h==1296)))
+           ||(source==QSize(2304,1296)&&w==672&&h==504),"Supported map dimensions");
+   sourceWidth=source.isEmpty()?w:source.width();
+   sourceHeight=source.isEmpty()?h:source.height();
    const int n=w*h;require(map.size()==16+n*6,"Map size");pixels.resize(n);
    for(int p=0;p<n;++p){const auto idx=qFromLittleEndian<quint32>(map.constData()+16+p*4);const auto frac=qFromLittleEndian<quint16>(map.constData()+16+n*4+p*2);
-    require(idx<quint32(n-w-1)&&idx%w<w-1&&frac<1024,"Map coordinate");
+    require(idx<quint32(sourceWidth*(sourceHeight-1)-1)&&idx%sourceWidth<sourceWidth-1&&frac<1024,"Map coordinate");
     const int fx=frac%32,fy=frac/32;
     pixels[p]={idx*3,{quint16((32-fx)*(32-fy)),quint16(fx*(32-fy)),quint16((32-fx)*fy),quint16(fx*fy)}};
    }
@@ -53,7 +56,7 @@ public:
  private:
   friend class RvCameraStream;
   struct Pixel {quint32 offset;quint16 weights[4];};
-  int w=0,h=0;QByteArray sha;QVector<Pixel> pixels;
+  int w=0,h=0,sourceWidth=0,sourceHeight=0;QByteArray sha;QVector<Pixel> pixels;
  };
  // Normalize physical mounting before any calibration-map sampling. ToF and
  // inferred depth already use the calibrated reference frame and stay native.
@@ -66,8 +69,10 @@ public:
  // half-pixel centres as the Native 4x preview, then rectify exactly once.
  // This does not rotate the model input or change any ToF coordinates.
  static QImage prepareHd(const QImage& decoded,const Calibration& calibration) {
-  require(decoded.size()==QSize(2304,1296)&&calibration.width()==576,"HD model input dimensions");
+  require(decoded.size()==QSize(2304,1296),"HD model input dimensions");
   const auto source=decoded.convertToFormat(QImage::Format_RGB888);
+  if(calibration.sourceWidth==2304)return rectify(source,calibration);
+  require(calibration.width()==576,"HD model input dimensions");
   QImage small(576,324,QImage::Format_RGB888);
   for(int y=0;y<324;++y) {
    const auto* a=source.constScanLine(4*y+1);const auto* b=source.constScanLine(4*y+2);
@@ -95,9 +100,10 @@ public:
  }
  static QImage rectify(const QImage& raw,const Calibration& calibration){
   const int w=calibration.w,h=calibration.h,n=w*h;
-  require(raw.size()==QSize(w,h)&&raw.format()==QImage::Format_RGB888&&raw.bytesPerLine()==w*3,"RGB/map layout");
+  const int sourceWidth=calibration.sourceWidth;
+  require(raw.size()==QSize(sourceWidth,calibration.sourceHeight)&&raw.format()==QImage::Format_RGB888&&raw.bytesPerLine()==sourceWidth*3,"RGB/map layout");
   QImage out(w,h,QImage::Format_RGB888);auto* dst=out.bits();const auto* src=raw.constBits();
-  const int offsets[4]={0,3,w*3,(w+1)*3};
+  const int offsets[4]={0,3,sourceWidth*3,(sourceWidth+1)*3};
   for(int p=0;p<n;++p){const auto& pixel=calibration.pixels[p];
    for(int c=0;c<3;++c){unsigned sum=0;for(int k=0;k<4;++k)sum+=pixel.weights[k]*src[pixel.offset+offsets[k]+c];dst[p*3+c]=(sum+512)>>10;}}
   return out;
@@ -176,6 +182,14 @@ public:
  static const Calibration &hdCalibration(bool wide=false){
   if(wide){static const Calibration value(loadMap(576,true));return value;}
   static const Calibration value(loadMap(576));return value;
+ }
+ static const Calibration &hdVgaCalibration(){
+  static const Calibration value=[]{
+   QFile file(":/camera/rgb672_rectify.bin");
+   require(file.open(QIODevice::ReadOnly),"Missing RGB672 calibration map");
+   return Calibration(file.readAll(),QSize(2304,1296));
+  }();
+  return value;
  }
 protected:
  void run() override {

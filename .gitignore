@@ -16,3 +16,8 @@ private_build/
 *.onnx
 *.rknn
 *.dctsm
+
+/UniDepthRuntime*/
+*.dctsm
+/tools/litesr_board/**/payload/*.bin
+/models/tactile/*/source/

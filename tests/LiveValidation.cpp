@@ -4,6 +4,9 @@
 #include "../sensors/RvCameraView.h"
 #include "../sensors/RvTunerController.h"
 #include <QApplication>
+#include <QComboBox>
+#include <QtEndian>
+#include <cstring>
 #include <QDateTime>
 #include <QElapsedTimer>
 #include <QEventLoop>
@@ -169,3 +172,104 @@ int runLiveValidation(SensorMainWindow &window,const QString &path,int seconds){
     report["passed"]=lite&&host&&restoreOK&&unchanged&&report["final_owner_idle"].toBool();
     save(path,report);progress({{"phase","complete"},{"passed",report["passed"]}});window.close();return report["passed"].toBool()?0:2;
 }
+
+// Explicit real-device integration test. Only scalar reports are saved.
+// Uses ordinary session selection/start/switch/stop, never tuner.persist().
+static int runBoardLiteSrLiveValidation(SensorMainWindow &window,const QString &path,bool native16,bool vgaSwitch=false){
+    auto *s=window.session();auto *t=s->tuner();
+    QJsonObject report{{"passed",false},{"images_saved",false},{"measurement_arrays_saved",false},{"saved_sensor_settings_written",false}};
+    if(qEnvironmentVariable("DCTS_LIVE_ENABLE")!="1"||s->deviceProfile().serial!=qEnvironmentVariable("DCTS_LIVE_SERIAL")||qEnvironmentVariable("RV_TEST_OFFLINE_ONLY")=="1")return 3;
+    const auto inspect=[&](QJsonObject &o){t->read();if(!waitFor([&]{return !t->pending();},95000)||t->state()!=RvTunerController::Idle)return false;o=t->inspection();return o["owner"]=="idle";};
+    QJsonObject before,after;
+    if(!inspect(before)){report["error"]="Idle preflight failed: "+t->detail();save(path,report);return 2;}
+    report["before"]=before;
+    auto *menu=window.findChild<QComboBox*>("rvDepthModel");
+    auto *board=static_cast<RvDepthView*>(window.depth()->findChild<QWidget*>("rvDtofFastDepthCanvas"));
+    auto *host=static_cast<RvDepthView*>(window.depth()->findChild<QWidget*>("rvAssistDepthCanvas"));
+    if(!menu||!board||!host)return 3;
+    QJsonArray runs;bool success=true;QString previousGeneration;
+    QFile journal(path+".progress.jsonl");if(!journal.open(QIODevice::WriteOnly|QIODevice::Truncate))return 3;
+    const auto progress=[&](QJsonObject o){o["unix_ms"]=QDateTime::currentMSecsSinceEpoch();journal.write(QJsonDocument(o).toJson(QJsonDocument::Compact)+'\n');journal.flush();};
+    const QString rect="board_litesr_near_384x256_host_contour_hd",old="board_litesr_near_full_host_contour_hd",unidepth="host_unidepth_wide_576_fp16_tof16";
+    const QString small="board_litesr_near_128x128_depth_only";
+    const QString vga="host_unidepth_rgb672_vga_fp16_tof16";
+    const QStringList sequence=vgaSwitch?QStringList{vga,small,vga}:native16?QStringList{small,rect,old,unidepth,small}:QStringList{rect,old,unidepth,rect};
+    int stage=0;
+    for(const auto &scheme:sequence){
+        const bool onHost=scheme==unidepth||scheme==vga,smallMode=scheme==small;const int mode=onHost?14:smallMode?17:scheme==rect?16:13;
+        const auto hostModel=onHost?scheme.mid(5):QString();
+        const auto &profile=RvCameraView::profile(hostModel);
+        const int width=onHost?profile.outputWidth:smallMode?128:mode==16?384:256,height=onHost?profile.outputHeight:smallMode?128:256;
+        auto *canvas=onHost?host:board;QObject context;
+        int frames=0,positiveFrames=0,painted=0,videos=0,native=0,photon=0;bool invalid=false,measuring=false;
+        QString error,generation; qint64 lastId=-1,lastPaint=-1;QJsonObject last;QVector<double> npu,contour,compute,sourcePublish;QJsonArray windows;
+        int info10=0;double firstPublish=-1,lastPublish=-1,firstCount=0,lastCount=0;
+        const auto fail=[&](const QString &why){invalid=true;error=why;};
+        const auto accept=[&](const QByteArray &bytes,const QJsonObject &m){
+            if(s->dtofCandidateMode()!=mode||(!onHost&&m["candidate_mode"]!=mode))return;
+            const auto g=m["generation"].toVariant().toString();const auto id=m["frame_id"].toInteger();
+            if(!generation.isEmpty()&&generation==g&&id<=lastId){fail("Repeated depth frame");return;}
+            generation=g;lastId=id;
+            if(bytes.size()!=width*height*4||m["width"]!=width||m["height"]!=height){fail("Wrong output shape");return;}
+            if(!onHost&&(m["model_sha256"]!=LiteSrBoardContract::modelSha(mode)||m["host_contour_enabled"].toBool()!=!smallMode||m["rgb_used"]!=false||m["input_rotation_degrees"]!=0||m["depth_unit"]!="sensor_radial_m_float32")){fail("Board identity, units or contour contract changed");return;}
+            if(onHost&&(m["assist_host_model"]!=hostModel||m["assist_experiment"]!="H"||m["assist_output_restored_to_calibrated_grid"]!=true)){fail("Legacy host inference contract changed");return;}
+            if(smallMode&&(m["video_transport"]!="none"||m["video_fps"]!=0||m["rgb_paused"]!=true||m["photon_data"]!=true||m["input_columns"]!=16||m["input_rows"]!=16
+                ||m["photon_sequence"].toString().toLongLong()!=id||m["photon_timestamp_ns"].toString().toLongLong()!=m["tof_timestamp_ns"].toInteger())){fail("Native16 same-frame/camera-off contract mismatch");return;}
+            int positive=0;
+            for(int i=0;i<width*height;++i){const auto bits=qFromLittleEndian<quint32>(bytes.constData()+4*i);float z;std::memcpy(&z,&bits,4);if(!std::isfinite(z)||z<0||(!onHost&&z>1.4f)){fail("Invalid metric value");return;}positive+=z>0;}
+            if(positive)++positiveFrames;
+            last=m;++frames;
+            if(measuring){
+                if(m["npu_ms"].isDouble())npu<<m["npu_ms"].toDouble();if(m["host_contour_ms"].isDouble())contour<<m["host_contour_ms"].toDouble();
+                if(m["compute_ms"].isDouble())compute<<m["compute_ms"].toDouble();
+                info10+=m["depth_native_warning_flags"]==16;
+                if(m["publish_count"].isDouble()){
+                    lastCount=m["publish_count"].toDouble();lastPublish=m["publish_monotonic_ms"].toDouble();
+                    if(firstPublish<0){firstPublish=lastPublish;firstCount=lastCount;}
+                    sourcePublish<<lastPublish-m["tof_timestamp_ns"].toInteger()/1e6;
+                }
+            }
+        };
+        QObject::connect(s,&RvSessionController::dtofCandidateReady,&context,[&](const RvDtofCandidates::Result &r){if(!onHost&&r.fresh)accept(r.depth,r.metadata);});
+        QObject::connect(s,&RvSessionController::assistDepthSnapshotReady,&context,[&](const QByteArray &b,const QJsonObject &m){if(onHost)accept(b,m);});
+        QObject::connect(s,&RvSessionController::cameraFrameReady,&context,[&](const QImage &im){if(measuring){if(smallMode||im.size()!=QSize(2304,1296))fail("Unexpected RGB stream");++videos;}});
+        QObject::connect(s,&RvSessionController::tofFrameReady,&context,[&](const RvTofFrame &f){if(measuring){if(f.columns()!=((onHost||smallMode)?16:48)||f.rows()!=((onHost||smallMode)?16:32))fail("Wrong native grid");++native;}});
+        QObject::connect(s,&RvSessionController::photonFrameReady,&context,[&](const RvPhotonFrame &){if(measuring)++photon;});
+        canvas->performanceFramePainted=[&](const QJsonObject &m){if(measuring&&m["frame_id"].toInteger()!=lastPaint){lastPaint=m["frame_id"].toInteger();++painted;}};
+        auto observer=qScopeGuard([&]{canvas->performanceFramePainted={};});
+        progress({{"phase","selecting"},{"scheme",scheme}});
+        const int index=menu->findData(scheme); menu->setCurrentIndex(index); QMetaObject::invokeMethod(menu,"activated",Qt::DirectConnection,Q_ARG(int,index));
+        if(stage==0)s->start();
+        const bool ready=waitFor([&]{return invalid||s->userStopped()||(frames>=3&&!s->busy());},95000)&&!invalid&&!s->userStopped()&&frames>=3;
+        if(!ready&&error.isEmpty())error=s->detailText()+" / "+s->depthInfoText();
+        const int initial=frames;QElapsedTimer clock;clock.start();measuring=ready;
+        const int seconds=vgaSwitch?30:stage==0?(native16?300:60):30;
+        int previousFrames=initial,previousPainted=0;double previousSeconds=0;
+        const auto pulse=[&]{const double elapsed=clock.nsecsElapsed()/1e9,span=elapsed-previousSeconds;if(span<.1)return;
+            QJsonObject item{{"phase","window"},{"scheme",scheme},{"elapsed_seconds",elapsed},{"window_seconds",span},{"depth_fps",(frames-previousFrames)/span},{"painted_fps",(painted-previousPainted)/span},{"info10_outputs",info10},{"last_frame_id",lastId}};
+            windows.append(item);progress(item);if(frames==previousFrames)fail("No fresh output in measurement window");previousFrames=frames;previousPainted=painted;previousSeconds=elapsed;
+        };
+        QTimer timer;timer.setInterval(10000);QObject::connect(&timer,&QTimer::timeout,&context,pulse);
+        if(ready){progress({{"phase","measuring"},{"scheme",scheme},{"seconds",seconds},{"generation",generation}});timer.start();waitFor([&]{return invalid||s->userStopped();},seconds*1000);timer.stop();pulse();}
+        measuring=false;const double elapsed=clock.nsecsElapsed()/1e9;
+        const bool geometry=onHost||(canvas->property("depthWidth").toInt()==width&&canvas->property("depthHeight").toInt()==height&&canvas->presentationSize()==(smallMode?QSizeF(16,16):QSizeF(32,48)));
+        const bool pass=ready&&!invalid&&!s->userStopped()&&elapsed>=seconds-.5&&frames-initial>=10&&positiveFrames>=10&&painted>=10&&(smallMode?videos==0:videos>=30)&&native>=10&&(onHost?photon==0:photon>=10)&&geometry&&generation!=previousGeneration;
+        QJsonObject result{{"scheme",scheme},{"mode",mode},{"passed",pass},{"error",error},{"seconds",elapsed},{"depth_frames",frames-initial},{"positive_depth_frames",positiveFrames},{"painted_frames",painted},{"video_frames",videos},{"native_frames",native},{"photon_frames",photon},{"depth_fps",(frames-initial)/std::max(.001,elapsed)},{"painted_fps",painted/std::max(.001,elapsed)},{"video_fps",videos/std::max(.001,elapsed)},{"npu",stats(npu)},{"contour",stats(contour)},{"display_geometry_preserved",geometry},{"generation",generation},{"model_sha256",last["model_sha256"]},{"input_rotation_degrees",last["input_rotation_degrees"]}};
+        result["board_compute"]=stats(compute);result["source_to_publish"]=stats(sourcePublish);result["info10_outputs"]=info10;result["windows"]=windows;
+        result["board_publish_fps"]=(lastPublish>firstPublish)?1000.*(lastCount-firstCount)/(lastPublish-firstPublish):0.;
+        runs.append(result);report["runs"]=runs;save(path,report);progress({{"phase","mode_finished"},{"passed",pass},{"scheme",scheme}});
+        previousGeneration=generation;++stage;if(!pass){success=false;break;}
+    }
+    board->performanceFramePainted={};host->performanceFramePainted={};
+    int late=0;QObject stopObserver;
+    QObject::connect(s,&RvSessionController::dtofCandidateReady,&stopObserver,[&](const RvDtofCandidates::Result &r){if(r.fresh)++late;});
+    s->stop();waitFor([&]{return !s->busy();},30000);waitFor([]{return false;},1500);
+    bool idle=false;QElapsedTimer stopClock;stopClock.start(); do { idle=inspect(after);if(!idle)waitFor([]{return false;},500); } while(!idle&&stopClock.elapsed()<25000);const bool unchanged=idle&&before["settings"]==after["settings"]&&before["litesr_settings"]==after["litesr_settings"]&&before["service_sha"]==after["service_sha"]&&before["litesr_sha"]==after["litesr_sha"];
+    report["after"]=after;report["normal_stop"]=idle&&s->userStopped();report["late_results_after_stop"]=late;report["saved_sensor_files_unchanged"]=unchanged;
+    report["passed"]=success&&stage==sequence.size()&&idle&&unchanged&&late==0;save(path,report);window.close();return report["passed"].toBool()?0:2;
+}
+
+int runLiteSr384LiveValidation(SensorMainWindow &w,const QString &p){return runBoardLiteSrLiveValidation(w,p,false);}
+int runLiteSr128LiveValidation(SensorMainWindow &w,const QString &p){return runBoardLiteSrLiveValidation(w,p,true);}
+
+int runLiteSr128VgaSwitchValidation(SensorMainWindow &w,const QString &p){return runBoardLiteSrLiveValidation(w,p,true,true);}

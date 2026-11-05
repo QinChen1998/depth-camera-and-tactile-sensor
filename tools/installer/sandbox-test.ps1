@@ -1,8 +1,8 @@
-﻿$ErrorActionPreference='Stop'
+$ErrorActionPreference='Stop'
 $logs='C:\DctsResults'
 $source='C:\DctsInstaller'
-$app=Join-Path $env:ProgramFiles 'Depth Camera and Tactile Sensor'
-$exe=Join-Path $app 'Depth Camera and Tactile Sensor.exe'
+$app=Join-Path $env:ProgramFiles '触想工作台'
+$exe=Join-Path $app '触想工作台.exe'
 $env:RV_TEST_OFFLINE_ONLY='1'
 $env:PATH="$env:SystemRoot\System32;$env:SystemRoot"
 $checks=[ordered]@{}
@@ -19,9 +19,10 @@ function Run([string]$program,[string]$arguments,[int]$timeout=150){
     return $p.ExitCode
 }
 try {
-    $setup=(Get-ChildItem -LiteralPath $source -Filter 'DCTS-Setup-*-x64.exe').FullName
+    $setup=(Get-ChildItem -LiteralPath $source -Filter '触想工作台-内测版-v*-x64.exe').FullName
     Check 'install_exit_0' ((Run $setup "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /LOG=$logs\install.log" 300) -eq 0)
     Check 'program_files_install' (Test-Path -LiteralPath $exe)
+    Check 'inference_worker_installed' (Test-Path -LiteralPath (Join-Path $app 'DctsInferenceWorker.exe') -PathType Leaf)
     Check 'windows_platform_plugin' (Test-Path (Join-Path $app 'platforms\qwindows.dll'))
     Check 'application_local_vc_runtime' (Test-Path (Join-Path $app 'VCRUNTIME140.dll'))
     Check 'desktop_shortcut' (@(Get-ChildItem "$env:PUBLIC\Desktop" -Filter '*.lnk' | Where-Object {
@@ -81,6 +82,7 @@ try {
     $uninstall=Join-Path $app 'unins000.exe'
     Check 'uninstall_exit_0' ((Run $uninstall "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /LOG=$logs\uninstall.log" 300) -eq 0)
     Check 'uninstalled_executable_removed' (-not (Test-Path -LiteralPath $exe))
+    Check 'uninstalled_inference_worker_removed' (-not (Test-Path -LiteralPath (Join-Path $app 'DctsInferenceWorker.exe')))
     Check 'user_preferences_preserved' (Test-Path -LiteralPath $prefs)
     $checks.passed=(@($checks.Values | Where-Object {$_ -eq $false}).Count -eq 0)
 } catch {

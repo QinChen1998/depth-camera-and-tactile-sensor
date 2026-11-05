@@ -33,21 +33,22 @@ bool write(const QString &path,const QByteArray &bytes){QSaveFile f(path);return
 bool png(const QString &path,const QImage &image){QSaveFile f(path);return f.open(QIODevice::WriteOnly)&&image.save(&f,"PNG")&&f.commit();}
 }
 QByteArray encode(const std::vector<float> &mono,const RvAssistFusion::Result &result,int nativeCount){
-    if(mono.size()!=Pixels||(nativeCount!=ReasonBytes&&nativeCount!=256))return {};
-    QByteArray out(PayloadBytes,Qt::Uninitialized);auto *data=out.data();
-    qToLittleEndian<quint32>(mono.data(),Pixels,data);
+    if((mono.size()!=Pixels&&mono.size()!=640*480)||(nativeCount!=ReasonBytes&&nativeCount!=256))return {};
+    const int depthBytes=int(mono.size())*4;
+    QByteArray out(depthBytes+2*ReasonBytes,Qt::Uninitialized);auto *data=out.data();
+    qToLittleEndian<quint32>(mono.data(),qsizetype(mono.size()),data);
     const auto reasons=[&](const QByteArray &source,int offset){
         std::memset(data+offset,RvAssistFusion::NoMeasurement,ReasonBytes);
         if(source.size()==ReasonBytes||source.size()==nativeCount)std::memcpy(data+offset,source.constData(),nativeCount);
     };
-    reasons(result.globalReasons,DepthBytes);reasons(result.localReasons,DepthBytes+ReasonBytes);return out;
+    reasons(result.globalReasons,depthBytes);reasons(result.localReasons,depthBytes+ReasonBytes);return out;
 }
-bool validPayload(const QByteArray &p){
-    if(p.size()!=PayloadBytes)return false;
+bool validPayload(const QByteArray &p,int depthBytes){
+    if((depthBytes!=DepthBytes&&depthBytes!=640*480*4)||p.size()!=depthBytes+2*ReasonBytes)return false;
     const auto *data=p.constData();
-    for(int i=0;i<Pixels;++i){const auto bits=qFromLittleEndian<quint32>(data+4*i);float z;std::memcpy(&z,&bits,4);
+    for(int i=0;i<depthBytes/4;++i){const auto bits=qFromLittleEndian<quint32>(data+4*i);float z;std::memcpy(&z,&bits,4);
         if(!std::isfinite(z)||z<=0)return false;}
-    for(int i=DepthBytes;i<PayloadBytes;++i)if(quint8(data[i])>RvAssistFusion::AlreadySupported)return false;
+    for(int i=depthBytes;i<p.size();++i)if(quint8(data[i])>RvAssistFusion::AlreadySupported)return false;
     return true;
 }
 bool Snapshot::valid()const{

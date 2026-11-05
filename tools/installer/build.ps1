@@ -1,4 +1,4 @@
-﻿param(
+param(
     [Parameter(Mandatory)][string]$BuildDirectory,
     [string]$QtRoot='',
     [string]$MSBuild='',
@@ -22,7 +22,7 @@ if(-not $work.StartsWith($validation+'\',[StringComparison]::OrdinalIgnoreCase))
 }
 if($Version -notmatch '^\d+\.\d+\.\d+(\.\d+)?$'){throw 'Invalid installer version.'}
 $payload=Join-Path $work 'payload'
-$exe='Depth Camera and Tactile Sensor.exe'
+$exe='触想工作台.exe'
 
 function Invoke-Native([string]$Program,[string[]]$Arguments){
     & $Program @Arguments
@@ -61,7 +61,8 @@ if(-not $UseStagedPayload){
         '/m:2','/nologo','/v:minimal',"/flp:logfile=$work/build.log;verbosity=normal")
 
     New-Item -ItemType Directory -Path $payload | Out-Null
-    Copy-Relative $desktop $payload $exe
+    Copy-Item -LiteralPath (Join-Path $desktop $exe) -Destination $payload
+    Copy-Relative $desktop $payload 'DctsInferenceWorker.exe'
     Invoke-Native (Join-Path $qt 'bin/windeployqt.exe') @(
         '--release','--qmldir',(Join-Path $project 'qml'),'--no-translations','--no-compiler-runtime',
         '--skip-plugin-types','qmltooling','--exclude-plugins','qtvirtualkeyboardplugin',(Join-Path $payload $exe))
@@ -205,6 +206,12 @@ foreach($name in 'libvlc.dll','libvlccore.dll','plugins/codec/libavcodec_plugin.
     }
 }
 
+foreach($name in $exe,'DctsInferenceWorker.exe'){
+    if(-not (Test-Path -LiteralPath (Join-Path $payload $name) -PathType Leaf)){
+        throw "Missing application executable in staged payload ($name)."
+    }
+}
+
 $stagedModel=Join-Path $payload 'UniDepthRuntimeWide576FP16'
 $stagedManifest=Get-Content -LiteralPath (Join-Path $stagedModel 'runtime.json') -Raw | ConvertFrom-Json -AsHashtable
 if($stagedManifest.backend -ne 'onnxruntime-tensorrt-rtx' -or $stagedManifest.ort_version -ne '1.31.1' -or
@@ -222,10 +229,10 @@ if($StageOnly){return}
 if(-not $Iscc -or -not $ChineseMessages){throw 'Provide -Iscc and -ChineseMessages for installer compilation.'}
 $out=Join-Path $work 'delivery'
 New-Item -ItemType Directory -Force $out | Out-Null
-$icon=(Get-ChildItem -LiteralPath (Join-Path $project 'assets') -Filter robot-hand.ico -Recurse -File | Select-Object -First 1).FullName
+$icon=(Resolve-Path -LiteralPath (Join-Path $project 'assets/cx.ico')).Path
 Invoke-Native (Resolve-Path -LiteralPath $Iscc).Path @(
     "/DVersion=$Version","/DOutput=$out","/DPayload=$payload","/DIconPath=$icon",
     "/DChineseMessages=$((Resolve-Path -LiteralPath $ChineseMessages).Path)",(Join-Path $PSScriptRoot 'Dcts.iss'))
-$installer=Join-Path $out "DCTS-Setup-$Version-x64.exe"
-"$(Digest $installer) *$(Split-Path $installer -Leaf)" | Set-Content -LiteralPath "$installer.sha256" -Encoding ascii
+$installer=Join-Path $out "触想工作台-内测版-v$Version-x64.exe"
+"$(Digest $installer) *$(Split-Path $installer -Leaf)" | Set-Content -LiteralPath "$installer.sha256" -Encoding utf8NoBOM
 Get-Item -LiteralPath $installer

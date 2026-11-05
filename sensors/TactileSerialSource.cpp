@@ -21,6 +21,23 @@ bool validConfigReply(const QByteArray &tx, const QByteArray &rx) {
     return rx.size()==bytes+5 && quint8(rx[2])==bytes;
 }
 }
+DeviceIdentity identifyTactileDevice(int address, const ConfigExchange &exchange) {
+    if(address<0||address>127||!exchange)return {};
+    const auto readWord=[&](int slave,int reg) {
+        const auto tx=configPacket(slave,3,reg,1);
+        const auto rx=exchange(tx);
+        if(!validConfigReply(tx,rx))return -1;
+        return (int(quint8(rx[3]))<<8)|int(quint8(rx[4]));
+    };
+    int model=readWord(address,0x44c0);
+    if(model<0&&address!=0){address=0;model=readWord(0,0x44c0);}
+    if(model<1||model>3)return {};
+    if(address==0){
+        address=readWord(0,0x466c);
+        if(address<0||address>127||readWord(address,0x44c0)!=model)return {};
+    }
+    return {model-1,address};
+}
 DeviceConfigResult configureTactileDevice(int current, int target, SaveCandidate candidate, const ConfigExchange &exchange, int currentBaud, int newBaud) {
     DeviceConfigResult r; r.requestedAddress=target;r.requestedBaud=newBaud;r.candidate=candidate;
     const int choice=int(candidate);
@@ -142,12 +159,13 @@ Frame serialFrame(const SerialSample &sample,const SerialSettings &s,const QUuid
 }
 struct SerialWorkerState {
     SerialSettings settings;
-    bool probeFirst=false;
+    bool probeFirst=false, autoZero=false;
     QUuid session;
     quint64 generation = 0;
     std::atomic_bool stop{true}, closing{false}, verify{true}, paused{false}, configBusy{false};
     std::atomic<quint64> revision{0}, configCommand{0};
     std::atomic_int intervalMs{10};
+    std::atomic_int respondingAddress{1};
     ConfigExchange exchangeForTests;
     LatestSensorFrameBuffer<SerialSample> latest;
     LatestSensorFrameBuffer<DeviceConfigResult> configResults;
@@ -159,10 +177,10 @@ struct SerialWorkerState {
         if(wakeEvent)CloseHandle(wakeEvent);
     }
     void wake() { if(wakeEvent)SetEvent(wakeEvent); }
-    void waitForRequestGap() {
+    void waitForRequestGap(bool zeroing=false) {
         QElapsedTimer elapsed;elapsed.start();
         while(!stop&&!paused&&!configCommand) {
-            const qint64 remaining=qint64(intervalMs.load())*1000000-elapsed.nsecsElapsed();
+            const qint64 remaining=qint64(zeroing?TactileAutoZero::PollIntervalMs:intervalMs.load())*1000000-elapsed.nsecsElapsed();
             if(remaining<=0)return;
             // A high-resolution, one-shot Windows timer avoids rounding a 10 ms
             // request gap up to the system sleep tick. Stop/config/edits wake it.
@@ -179,13 +197,13 @@ struct SerialWorkerState {
 };
 TactileSerialSource::TactileSerialSource(QObject *parent)
     : QObject(parent), m_state(std::make_shared<SerialWorkerState>()) {}
-bool TactileSerialSource::begin(const SerialSettings &s,bool probeFirst) {
+bool TactileSerialSource::begin(const SerialSettings &s,bool probeFirst,bool autoZero) {
     if(isRunning())return false;
     stop();
     auto state=std::make_shared<SerialWorkerState>();
     state->settings=s;state->session=m_session=QUuid::createUuid();state->generation=++m_generation;
-    state->intervalMs=s.intervalMs;state->exchangeForTests=m_exchangeForTests;
-    state->probeFirst=probeFirst;
+    state->intervalMs=s.intervalMs;state->respondingAddress=s.slave;state->exchangeForTests=m_exchangeForTests;
+    state->probeFirst=probeFirst;state->autoZero=autoZero;
     state->stop=false;state->verify=s.verifyCrc;state->revision=1;m_state=state;
     // No parent and no capture of this: a blocked driver may outlive the panel.
     // The worker retains its state and deletes itself only after run() returns.
@@ -223,7 +241,7 @@ bool TactileSerialSource::takeConfigResult(DeviceConfigResult &result) {
 bool TactileSerialSource::requestDeviceConfig(int target,SaveCandidate candidate,int newBaud) {
     if(!isRunning()||m_state->stop||m_state->closing||target<0||target>127||int(candidate)<0||int(candidate)>2
         ||(newBaud&&(!validBaud(newBaud)||newBaud==m_state->settings.baud))
-        ||((target||newBaud)&&((target && target==m_state->settings.slave)||candidate==SaveCandidate::None))
+        ||((target||newBaud)&&((target && target==m_state->respondingAddress.load())||candidate==SaveCandidate::None))
         ||(!target&&!newBaud&&candidate!=SaveCandidate::None))return false;
     bool idle=false;if(!m_state->configBusy.compare_exchange_strong(idle,true))return false;
     m_state->configResults.clear();++m_state->revision;m_state->latest.clear();
@@ -231,11 +249,13 @@ bool TactileSerialSource::requestDeviceConfig(int target,SaveCandidate candidate
 }
 void TactileSerialSource::run(const std::shared_ptr<SerialWorkerState> &state) {
     if(state->stop)return;
-    const auto &settings=state->settings;
+    auto settings=state->settings;
+    TactileAutoZero zero(state->autoZero);
     SerialSample totals;totals.settings=settings;totals.verifyCrc=settings.verifyCrc;totals.revision=state->revision.load();QElapsedTimer clock;clock.start();
     auto publish=[&](SerialSample sample){sample.requests=totals.requests;sample.acceptedCount=totals.acceptedCount;
         sample.crcErrors=totals.crcErrors;sample.timeouts=totals.timeouts;sample.protocolErrors=totals.protocolErrors;
         sample.receivedMs=clock.msecsSinceReference()+clock.elapsed();
+        sample.autoZero=zero.result();
         if(!state->stop)state->latest.publish(sample);};
     if(!settings.valid()){totals.error="Invalid serial settings";publish(totals);return;}
     QSerialPort port;port.setPortName(settings.port);port.setBaudRate(settings.baud);
@@ -245,24 +265,37 @@ void TactileSerialSource::run(const std::shared_ptr<SerialWorkerState> &state) {
         port.setDataTerminalReady(false);port.setRequestToSend(false);port.setReadBufferSize(4096);
     }
     totals.portOpen=true;publish(totals);
+    const auto exchange=[&](const QByteArray &tx){
+        if(state->stop)return QByteArray{};
+        if(state->exchangeForTests)return state->exchangeForTests(tx);
+        QElapsedTimer silence;silence.start();while(!state->stop&&silence.elapsed()<20)QThread::msleep(2);
+        if(state->stop)return QByteArray{};
+        port.clear(QSerialPort::Input);QByteArray rx;QElapsedTimer deadline;deadline.start();
+        if(port.write(tx)!=tx.size())return rx;
+        while(port.bytesToWrite()>0&&!state->stop&&deadline.elapsed()<settings.timeoutMs)port.waitForBytesWritten(10);
+        while(!state->stop&&deadline.elapsed()<settings.timeoutMs){
+            if(port.bytesAvailable()||port.waitForReadyRead(10))rx+=port.readAll();
+            if(port.error()==QSerialPort::ResourceError||port.error()==QSerialPort::DeviceNotFoundError)break;
+            if(rx.size()>=3){int count=(quint8(rx[1])&0x80)?5:(quint8(rx[1])==0x10?8:quint8(rx[2])+5);if(rx.size()>=count)break;}
+        }
+        return state->stop?QByteArray{}:rx;
+    };
     while(!state->stop) {
+        if(!totals.modelIdentified){
+            const auto identity=identifyTactileDevice(settings.slave,exchange);
+            if(state->stop)break;
+            if(identity.type<0){
+                totals.error=QStringLiteral("Sensor model identification failed");publish(totals);
+                if(state->probeFirst||port.error()==QSerialPort::ResourceError||port.error()==QSerialPort::DeviceNotFoundError)break;
+                state->waitForRequestGap();continue;
+            }
+            settings.type=identity.type;settings.slave=identity.address;
+            state->respondingAddress=identity.address;
+            totals.settings=settings;totals.modelIdentified=true;totals.error.clear();
+        }
         const quint64 command=state->configCommand.exchange(0);
         if(command){
-            auto exchange=[&](const QByteArray &tx){
-                if(state->stop)return QByteArray{};
-                if(state->exchangeForTests)return state->exchangeForTests(tx);
-                QElapsedTimer silence;silence.start();while(!state->stop&&silence.elapsed()<20)QThread::msleep(2);
-                if(state->stop)return QByteArray{};
-                port.clear(QSerialPort::Input);QByteArray rx;QElapsedTimer deadline;deadline.start();
-                if(port.write(tx)!=tx.size())return rx;
-                while(port.bytesToWrite()>0&&!state->stop&&deadline.elapsed()<settings.timeoutMs)port.waitForBytesWritten(10);
-                while(!state->stop&&deadline.elapsed()<settings.timeoutMs){
-                    if(port.bytesAvailable()||port.waitForReadyRead(10))rx+=port.readAll();
-                    if(port.error()==QSerialPort::ResourceError||port.error()==QSerialPort::DeviceNotFoundError)break;
-                    if(rx.size()>=3){int count=(quint8(rx[1])&0x80)?5:(quint8(rx[1])==0x10?8:quint8(rx[2])+5);if(rx.size()>=count)break;}
-                }
-                return state->stop?QByteArray{}:rx;
-            };
+            zero.cancel();
             const quint64 value=command-1;
             auto result=configureTactileDevice(settings.slave,int(value&255),SaveCandidate((value>>8)&255),exchange,settings.baud,int(value>>16));
             if(result.writeAttempted)state->closing=true;
@@ -272,17 +305,20 @@ void TactileSerialSource::run(const std::shared_ptr<SerialWorkerState> &state) {
             if(result.writeAttempted)break;
             continue;
         }
-        if(state->paused){QThread::msleep(10);continue;}
+        if(state->paused){zero.cancel();QThread::msleep(10);continue;}
         const auto revision=state->revision.load();
+        const int effectiveInterval=zero.collecting()?TactileAutoZero::PollIntervalMs:state->intervalMs.load();
+        const int remaining=zero.remainingMs(clock.elapsed());
+        const int responseTimeout=remaining>=0?qMax(1,qMin(settings.timeoutMs,remaining)):settings.timeoutMs;
         const QByteArray tx=tactileReadRequest(settings.slave);
         if(!state->exchangeForTests)port.clear(QSerialPort::Input);
         ++totals.requests;
         QByteArray rx;QString ioError;QElapsedTimer deadline;deadline.start();
         if(state->exchangeForTests)rx=state->exchangeForTests(tx);
         else if(port.write(tx)!=tx.size())ioError=port.errorString();
-        while(!state->exchangeForTests&&ioError.isEmpty()&&port.bytesToWrite()>0&&!state->stop&&deadline.elapsed()<settings.timeoutMs)port.waitForBytesWritten(10);
-        while(!state->exchangeForTests&&ioError.isEmpty()&&!state->stop&&deadline.elapsed()<settings.timeoutMs) {
-            if(port.bytesAvailable()||port.waitForReadyRead(10))rx+=port.readAll();
+        while(!state->exchangeForTests&&ioError.isEmpty()&&port.bytesToWrite()>0&&!state->stop&&deadline.elapsed()<responseTimeout)port.waitForBytesWritten(qMax(1,qMin(10,responseTimeout-int(deadline.elapsed()))));
+        while(!state->exchangeForTests&&ioError.isEmpty()&&!state->stop&&deadline.elapsed()<responseTimeout) {
+            if(port.bytesAvailable()||port.waitForReadyRead(qMax(1,qMin(10,responseTimeout-int(deadline.elapsed())))))rx+=port.readAll();
             if(port.error()==QSerialPort::ResourceError||port.error()==QSerialPort::DeviceNotFoundError){ioError=port.errorString();break;}
             if(rx.size()>=5) {
                 const int expected=(quint8(rx[1])&0x80)?5:(rx.size()>=3?quint8(rx[2])+5:133);
@@ -292,6 +328,8 @@ void TactileSerialSource::run(const std::shared_ptr<SerialWorkerState> &state) {
         if(state->stop)break;
         auto currentSettings=settings;currentSettings.verifyCrc=state->verify.load();currentSettings.intervalMs=state->intervalMs.load();
         auto sample=decodeTactileResponse(rx,currentSettings);sample.tx=tx;sample.portOpen=ioError.isEmpty();sample.revision=revision;
+        sample.effectiveIntervalMs=effectiveInterval;
+        sample.modelIdentified=true;
         const int expected=rx.size()>=3?((quint8(rx[1])&0x80)?5:quint8(rx[2])+5):133;
         if(!ioError.isEmpty()){sample.accepted=false;sample.error=ioError;}
         else if(rx.size()<expected){sample.accepted=false;sample.error="Response timeout / incomplete frame";++totals.timeouts;}
@@ -301,13 +339,15 @@ void TactileSerialSource::run(const std::shared_ptr<SerialWorkerState> &state) {
         }
         if(sample.accepted)++totals.acceptedCount;
         sample.frame=serialFrame(sample,currentSettings,state->session,state->generation,totals.requests,clock.nsecsElapsed());
+        if(revision==state->revision.load())zero.observe(sample.frame,clock.elapsed());
+        else zero.advance(clock.elapsed());
         publish(sample);
         if(!ioError.isEmpty())break;
         if(state->probeFirst){
             if(!sample.accepted||!sample.crcOk||!sample.rangeOk)break;
             state->probeFirst=false;
         }
-        state->waitForRequestGap();
+        state->waitForRequestGap(zero.collecting());
     }
     state->closing=true;
     if(port.isOpen())port.close();

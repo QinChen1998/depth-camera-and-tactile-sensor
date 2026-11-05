@@ -138,12 +138,13 @@ const std::array<std::array<double,3>,64> &native8RaysForFov(int fov){
     return fov==1?f1:fov==2?f2:empty;
 }
 
-Result monocular(const std::vector<float> &mono,const char *reason) {
+Result monocular(const std::vector<float> &mono,const char *reason,QSize size) {
+    const int pixels=size.width()*size.height();
     Result result;
     result.globalReasons=result.localReasons=QByteArray(1536,NoMeasurement);
-    if(mono.size()!=W*H) {result.error="Invalid monocular dimensions";return result;}
+    if(mono.size()!=pixels) {result.error="Invalid monocular dimensions";return result;}
     for(float z:mono)if(!std::isfinite(z)||z<=0) {result.error="Invalid monocular camera-Z output";return result;}
-    result.depth.resize(W*H*4);
+    result.depth.resize(pixels*4);
     qToLittleEndian<quint32>(mono.data(),qsizetype(mono.size()),result.depth.data());
     result.diagnostics["fusion_mode"]="monocular";result.diagnostics["dtof_corrected"]=false;
     result.diagnostics["fallback_reason"]=QString::fromLatin1(reason);
@@ -153,15 +154,15 @@ Result monocular(const std::vector<float> &mono,const char *reason) {
 }
 
 static Result fuseImpl(const std::vector<float> &mono,const QImage &camera,
-            const RvTofFrame &tof,const Calibration &cal,bool wideView,bool globalOnly,QSize cameraSize,
+            const RvTofFrame &tof,const Calibration &cal,const RvCameraView::Profile &view,bool globalOnly,QSize cameraSize,
             GlobalScaleFit globalFit=GlobalScaleFit::LegacyV1) {
     const int nativeCount=cal.nativeCount();
-    const auto &view=RvCameraView::profile(wideView);
+    const int width=view.outputWidth,height=view.outputHeight;
     Result result;
     result.globalReasons=result.localReasons=QByteArray(nativeCount,Invalid);
     const auto fail=[&](const char *message) {result.depth.clear();result.error=QString::fromLatin1(message);return result;};
-    if(!cal.valid || mono.size()!=W*H || cameraSize!=QSize(W,H) || !tof.isValidForHostFusion() || !nativeGridMatches(tof,cal)
-        || tof.metadata["rgb_width"].toInt()!=W
+    if(!cal.valid || mono.size()!=width*height || cameraSize!=QSize(width,height) || !tof.isValidForHostFusion() || !nativeGridMatches(tof,cal)
+        || tof.metadata["rgb_width"].toInt()!=view.inputWidth
         || tof.metadata["rectify_map_sha256"]!=QLatin1String(view.mapSha)
         || !tof.metadata["pair_delta_ms"].isDouble()
         || std::abs(tof.metadata["pair_delta_ms"].toDouble())>200)
@@ -170,7 +171,7 @@ static Result fuseImpl(const std::vector<float> &mono,const QImage &camera,
     // Only measurement support failures may fall back; frame/calibration and
     // model validity have already been checked. Temporal scaling is separate.
     const auto monocular=[&](const char *reason) {
-        auto output=RvAssistFusion::monocular(mono,reason);
+        auto output=RvAssistFusion::monocular(mono,reason,cameraSize);
         // Preserve the already collected diagnostics of the paired path.
         for(auto it=output.diagnostics.begin();it!=output.diagnostics.end();++it)result.diagnostics[it.key()]=it.value();
         result.depth=std::move(output.depth);
@@ -192,16 +193,16 @@ static Result fuseImpl(const std::vector<float> &mono,const QImage &camera,
         const double x=radius*q[0]+cal.translation[0],y=radius*q[1]+cal.translation[1];
         const double z=radius*q[2]+cal.translation[2];
         if(z<=0){result.globalReasons[i]=result.localReasons[i]=Outside;continue;}
-        const double u=view.focal*x/z+287.5,v=view.focal*y/z+161.5;
-        if(u<3 || u>W-4 || v<3 || v>H-4){result.globalReasons[i]=result.localReasons[i]=Outside;continue;}
+        const double u=view.focal*x/z+view.cx(),v=view.focal*y/z+view.cy();
+        if(u<3 || u>width-4 || v<3 || v>height-4){result.globalReasons[i]=result.localReasons[i]=Outside;continue;}
         ++projected;
-        double low=mono[int(v)*W+int(u)],high=low;
+        double low=mono[int(v)*width+int(u)],high=low;
         for(int dy=-3;dy<=3;dy+=3)for(int dx=-3;dx<=3;dx+=3) {
-            const double d=mono[(int(v)+dy)*W+int(u)+dx];low=std::min(low,d);high=std::max(high,d);
+            const double d=mono[(int(v)+dy)*width+int(u)+dx];low=std::min(low,d);high=std::max(high,d);
         }
         if(high>1.4*low) {result.globalReasons[i]=result.localReasons[i]=Boundary;++edgeRejected;continue;}
         result.globalReasons[i]=result.localReasons[i]=GlobalRejected;
-        anchors.push_back({u,v,z,std::log(z/sample(mono,W,H,u,v)),i});
+        anchors.push_back({u,v,z,std::log(z/sample(mono,width,height,u,v)),i});
     }
     result.diagnostics={{"tof_total_zones",nativeCount},{"tof_good_zones",good},{"tof_projected_in_view",projected},
         {"anchors_projected",int(anchors.size())},{"anchors_edge_rejected",edgeRejected}};
@@ -214,7 +215,7 @@ static Result fuseImpl(const std::vector<float> &mono,const QImage &camera,
     const double mad=median(deviations);
     const double gate=std::clamp(3*1.4826*mad,std::log(1.15),std::log(1.75));
     std::vector<Anchor> inliers;std::vector<double> accepted;
-    double minX=W,maxX=0,minY=H,maxY=0;
+    double minX=width,maxX=0,minY=height,maxY=0;
     std::set<int> occupied;
     int inconsistent=0,duplicates=0;
     for(const auto &a:anchors) {
@@ -251,9 +252,9 @@ static Result fuseImpl(const std::vector<float> &mono,const QImage &camera,
     const double logScale=median(accepted),scale=std::exp(logScale);
     if(!std::isfinite(scale) || scale<.02 || scale>50)return monocular("Unstable monocular scale fit");
     if(globalOnly){
-        result.depth.resize(W*H*4);
+        result.depth.resize(width*height*4);
         auto *depth=result.depth.data();
-        for(int i=0;i<W*H;++i){const float z=float(mono[i]*scale);
+        for(int i=0;i<width*height;++i){const float z=float(mono[i]*scale);
             if(!std::isfinite(z)||z<=0)return fail("Non-finite fused depth");
             quint32 bits;std::memcpy(&bits,&z,4);qToLittleEndian(bits,depth+4*i);
         }
@@ -273,7 +274,7 @@ static Result fuseImpl(const std::vector<float> &mono,const QImage &camera,
     if(!useLocal)for(const auto &a:inliers)result.localReasons[a.nativeIndex]=WeakLocalGroup;
     std::vector<float> lowMono(GW*GH),weights(GW*GH,0),rhs(GW*GH,0),field(GW*GH,0),next(GW*GH,0);
     const QImage guide=camera.convertToFormat(QImage::Format_RGB888).scaled(GW,GH,Qt::IgnoreAspectRatio,Qt::SmoothTransformation);
-    for(int y=0;y<GH;++y)for(int x=0;x<GW;++x)lowMono[y*GW+x]=float(std::log(sample(mono,W,H,4*x+1.5,4*y+1.5)));
+    for(int y=0;y<GH;++y)for(int x=0;x<GW;++x)lowMono[y*GW+x]=float(std::log(sample(mono,width,height,4*x+1.5,4*y+1.5)));
     const double localLimit=std::log(1.35);
     for(const auto &a:inliers) {
         const double x=std::clamp((a.x+.5)/4-.5,0.0,double(GW-1)),y=std::clamp((a.y+.5)/4-.5,0.0,double(GH-1));
@@ -308,11 +309,11 @@ static Result fuseImpl(const std::vector<float> &mono,const QImage &camera,
         }
         field.swap(next);
     }
-    result.depth.resize(W*H*4);
-    for(int y=0;y<H;++y)for(int x=0;x<W;++x) {
-        const float z=float(mono[y*W+x]*scale*std::exp(sample(field,GW,GH,(x+.5)/4-.5,(y+.5)/4-.5)));
+    result.depth.resize(width*height*4);
+    for(int y=0;y<height;++y)for(int x=0;x<width;++x) {
+        const float z=float(mono[y*width+x]*scale*std::exp(sample(field,GW,GH,(x+.5)/4-.5,(y+.5)/4-.5)));
         if(!std::isfinite(z)||z<=0)return fail("Non-finite fused depth");
-        quint32 bits;std::memcpy(&bits,&z,4);qToLittleEndian(bits,result.depth.data()+4*(y*W+x));
+        quint32 bits;std::memcpy(&bits,&z,4);qToLittleEndian(bits,result.depth.data()+4*(y*width+x));
     }
     result.diagnostics["anchors_inlier"]=int(inliers.size());result.diagnostics["scale"]=scale;
     result.diagnostics["log_ratio_mad"]=mad;result.diagnostics["local_factor_limit"]=useLocal?1.35:1.0;
@@ -328,13 +329,18 @@ static Result fuseImpl(const std::vector<float> &mono,const QImage &camera,
 }
 
 Result fuse(const std::vector<float> &mono,const QImage &camera,const RvTofFrame &tof,const Calibration &cal,bool wideView){
-    return fuseImpl(mono,camera,tof,cal,wideView,false,camera.size());
+    return fuseImpl(mono,camera,tof,cal,RvCameraView::profile(wideView),false,camera.size());
 }
 Result fuseGlobalScale(const std::vector<float> &mono,const QImage &camera,const RvTofFrame &tof,const Calibration &cal,bool wideView,GlobalScaleFit fit){
-    return fuseImpl(mono,camera,tof,cal,wideView,true,camera.size(),fit);
+    return fuseImpl(mono,camera,tof,cal,RvCameraView::profile(wideView),true,camera.size(),fit);
 }
 Result fuseGlobalScale(const std::vector<float> &mono,QSize cameraSize,const RvTofFrame &tof,const Calibration &cal,bool wideView,GlobalScaleFit fit){
-    return fuseImpl(mono,QImage{},tof,cal,wideView,true,cameraSize,fit);
+    return fuseImpl(mono,QImage{},tof,cal,RvCameraView::profile(wideView),true,cameraSize,fit);
+}
+
+Result fuseGlobalScale(const std::vector<float> &mono,const RvTofFrame &tof,const Calibration &cal,
+                       const RvCameraView::Profile &view,GlobalScaleFit fit){
+    return fuseImpl(mono,QImage{},tof,cal,view,true,view.outputSize(),fit);
 }
 
 static Result fuseResidualImpl(const std::vector<float> &mono,const QImage &camera,const RvTofFrame &tof,
@@ -868,9 +874,14 @@ Result limitTofSupport(Result result,const RvTofFrame &tof,const Calibration &ca
 }
 
 Result limitTofFieldOfView(Result result,const Calibration &cal,bool wideView) {
+    return limitTofFieldOfView(std::move(result),cal,RvCameraView::profile(wideView));
+}
+
+Result limitTofFieldOfView(Result result,const Calibration &cal,const RvCameraView::Profile &view) {
+    const int width=view.outputWidth,height=view.outputHeight;
     if(!result.ok())return result;
     const auto fail=[&]{result.depth.clear();result.error=QStringLiteral("Invalid dToF output support contract");return result;};
-    if(!cal.valid||result.depth.size()!=W*H*4)return fail();
+    if(!cal.valid||result.depth.size()!=width*height*4)return fail();
     const std::array<int,4> corners={0,cal.columns-1,cal.nativeCount()-1,(cal.rows-1)*cal.columns};
     const auto &centre=cal.cameraRays[(cal.rows/2)*cal.columns+cal.columns/2];
     std::array<std::array<double,3>,4> planes{};
@@ -882,13 +893,13 @@ Result limitTofFieldOfView(Result result,const Calibration &cal,bool wideView) {
         const double factor=(direction>0?1.:-1.)/std::sqrt(length);for(auto &v:n)v*=factor;
     }
     for(double t:cal.translation)if(!std::isfinite(t))return fail();
-    const double focal=RvCameraView::profile(wideView).focal;int pixels=0;
+    const double focal=view.focal;int pixels=0;
     // Detach at most once. Retained snapshots keep their original depth bytes.
     auto *depth=result.depth.data();
-    for(int y=0;y<H;++y)for(int x=0;x<W;++x){
-        const int i=y*W+x;const quint32 bits=qFromLittleEndian<quint32>(depth+4*i);float z;std::memcpy(&z,&bits,4);
+    for(int y=0;y<height;++y)for(int x=0;x<width;++x){
+        const int i=y*width+x;const quint32 bits=qFromLittleEndian<quint32>(depth+4*i);float z;std::memcpy(&z,&bits,4);
         if(!std::isfinite(z)||z<=0)return fail();
-        const std::array<double,3> ray={(x-287.5)*z/focal-cal.translation[0],(y-161.5)*z/focal-cal.translation[1],z-cal.translation[2]};
+        const std::array<double,3> ray={(x-view.cx())*z/focal-cal.translation[0],(y-view.cy())*z/focal-cal.translation[1],z-cal.translation[2]};
         bool inside=ray[0]*centre[0]+ray[1]*centre[1]+ray[2]*centre[2]>1e-9;
         for(const auto &n:planes)inside=inside&&(n[0]*ray[0]+n[1]*ray[1]+n[2]*ray[2]>=-1e-9);
         if(inside)++pixels;else qToLittleEndian<quint32>(0,depth+4*i);

@@ -1,4 +1,4 @@
-﻿param(
+param(
     [Parameter(Mandatory)][string]$BuildDirectory,
     [ValidatePattern('^[A-Za-z0-9_-]+$')][string]$RunName=''
 )
@@ -10,7 +10,7 @@ $results=Join-Path $work "sandbox-results$suffix"
 if((Test-Path -LiteralPath $inputFolder) -or (Test-Path -LiteralPath $results)){
     throw 'Sandbox evidence directories already exist. Preserve them before generating a new run.'
 }
-$installer=@(Get-ChildItem -LiteralPath (Join-Path $work 'delivery') -Filter 'DCTS-Setup-*-x64.exe' -File)
+$installer=@(Get-ChildItem -LiteralPath (Join-Path $work 'delivery') -Filter '触想工作台-内测版-v*-x64.exe' -File)
 if($installer.Count -ne 1){throw 'Expected a single setup EXE.'}
 New-Item -ItemType Directory -Path $inputFolder,$results | Out-Null
 Copy-Item -LiteralPath $installer[0].FullName -Destination $inputFolder
