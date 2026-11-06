@@ -30,4 +30,4 @@ bash tools/tiny_nv12_board/build.sh /absolute/private /absolute/new-output
 
 设备管理的“安装板端推理与自动切换”使用相同受信任原生 worker：核验空闲、身份、原文件哈希，保留 SHA 命名备份，认证加载后启用 `/root/dtof_candidates_20261009/dcts-tiny-nv12-128x80-v1/`。同时更新协调器 `control.sh`、`session.sh`、`litesr_gui.sh`；`dtof-switch.sh` 增加 mode18 的 16×16／33 ms／Signal 开／Noise 关会话预设，保留 v1/v2/v3 精确迁移模板。Tiny 原始相机由同一会话所有权管理，停止后恢复完整相机格式/crop，主机模式恢复 H.265，LiteSR 384 保持相机关闭。长期参数不写入。
 
-现有 Tiny 只适配上述固定设备；其他标定或输入方向在主机禁用该条目。全量程物理精度及已有 INT8 数值限制仍沿用研究记录，本次功能接入不重新宣称精度验收。
+Tiny 要求与参考设备相同的 F1 装配、`rv20261008-f1` 标定、安装 180°和模型输入 0°，不锁定序列号；相同装配的新设备可经首次导入登记使用。其他标定或输入方向在主机禁用该条目。全量程物理精度及已有 INT8 数值限制仍沿用研究记录，本次功能接入不重新宣称精度验收。
