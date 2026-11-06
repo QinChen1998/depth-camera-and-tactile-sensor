@@ -1,5 +1,4 @@
 #pragma once
-#include "TactileMockSource.h"
 #include "TactileHistory.h"
 #include "TactileMetrics.h"
 #include "TactileSerialSource.h"
@@ -31,20 +30,17 @@ class TactileVisualizationWidget final : public QWidget {
 public:
     explicit TactileVisualizationWidget(QWidget *parent = nullptr);
     ~TactileVisualizationWidget() override;
-    // Construction/show never starts a source. Dock owner must explicitly call start().
+    // Starts view refresh only; hardware acquisition needs an explicit connection.
     void start();
     // The normal application explicitly requests one attempt; offline tests and
     // standalone widgets do not acquire hardware just by being shown.
     void connectDefaultSerial();
     void serialPortChanged(const QString &port,bool arrived);
     void stop();
-    void setPaused(bool paused);
-    void setScenario(tactile::Scenario scenario);
     bool running() const;
-    bool paused() const { return m_userPaused; }
     void setDockManaged(bool managed) { m_dockManaged=managed; }
     void setSuspended(bool suspended);
-    const tactile::TactileHistory &history() const { return m_finger==m_hardwareType?m_serialHistory:m_history; }
+    const tactile::TactileHistory &history() const { return m_serialHistory; }
     quint64 paintCount() const { return m_paintCount; }
     void recordPaint() { ++m_paintCount; if(m_metrics.enabled)m_metrics.curve.record(m_refreshCount,m_metrics.sampleMs); }
     void recordView() { if(m_metrics.enabled)m_metrics.view.record(m_refreshCount,m_metrics.sampleMs); }
@@ -70,6 +66,7 @@ protected:
 private:
     friend class TactileCurveCanvas;
     friend int runTactileVisualizationTests(const QString &path);
+    friend struct TactileTestAccess;
     void receiveSerialSample(const tactile::SerialSample &received);
     void refresh();
     void refreshDisplay(bool liveChanged);
@@ -112,11 +109,15 @@ private:
     void clearHardwareDisplay();
     void setDisplayZero();
     void applyDisplayZero(const tactile::Frame &baseline);
+    bool awaitingDisplayZero() const;
+    void updateZeroStatus();
+    tactile::AutoZeroResult m_autoZeroResult;
+    QLabel *m_zeroStatus;
     tactile::TactileDisplayFilter m_displayFilter;
     tactile::TactileSerialSource m_serial;
     tactile::TactileHistory m_serialHistory;
     tactile::SerialSample m_serialSample;
-    tactile::Frame m_mockFrame, m_liveFrame, m_heldTableFrame;
+    tactile::Frame m_liveFrame, m_heldTableFrame;
     tactile::Frame m_arrowFrom;
     qint64 m_trustedReceivedMs=-1;
     QElapsedTimer m_arrowTransition;
@@ -158,15 +159,12 @@ private:
     QPushButton *m_displaySettings;
     QToolButton *m_minimizeConnection, *m_minimizeDisplay;
     QWidget *m_displayControls;
-    QPushButton *m_connect, *m_disconnect, *m_simulate, *m_connectionSettings, *m_scanPorts;
+    QPushButton *m_connect, *m_disconnect, *m_connectionSettings, *m_scanPorts;
     QLabel *m_serialStatus;
     QWidget *m_serialControls;
-    tactile::TactileMockSource m_source;
-    tactile::TactileHistory m_history;
     tactile::DisplayMetrics m_metrics;
-    bool m_userPaused=false, m_suspended=false, m_dockManaged=false;
+    bool m_started=false, m_suspended=false, m_dockManaged=false;
     quint64 m_paintCount=0;
-    void applyPause();
     tactile::Frame m_frame;
     QTimer m_timer;
     QTimer m_readingsTimer, m_curveTimer;
@@ -193,8 +191,6 @@ private:
     QToolButton *m_foldSensors;
     std::array<QLabel *,3> m_values;
     QButtonGroup *m_fingers;
-    QPushButton *m_pause;
-    QComboBox *m_scenarios;
     QComboBox *m_density;
     QComboBox *m_displayMode;
 };

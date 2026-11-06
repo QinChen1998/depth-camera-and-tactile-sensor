@@ -1,0 +1,35 @@
+{
+  "schema": 1,
+  "camera_profile": "wide",
+  "output_size": [
+    576,
+    324
+  ],
+  "source_size": [
+    2304,
+    1296
+  ],
+  "source_relation": "source=4*wire+1.5",
+  "rectified_intrinsics_integer_centres": [
+    260.0,
+    260.0,
+    287.5,
+    161.5
+  ],
+  "rectify_sha256": "0317f36006702df342d78a0ff19ed8250d58b91424b4b09f11327d81f31c6191",
+  "intrinsics_sha256": "8198bdfde1916c72e4d472e73448ebf7341fc080e38c14733e479ce6bc11b9ba",
+  "extrinsics_sha256": "bfccd95d93042dd45e5a45924aac6c05dff778d9e9ac09738a0cb08a9e9241fb",
+  "fov_degrees": [
+    95.84995589831274,
+    63.85216228349926
+  ],
+  "source_bounds_xyxy": [
+    116.42279566901516,
+    56.68879997592376,
+    2212.145198628957,
+    1235.4086020991583
+  ],
+  "status": "derived_virtual_view_requires_live_edge_validation",
+  "physical_parameters_changed": false,
+  "trained": false
+}

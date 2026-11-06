@@ -10,6 +10,6 @@ https://code.qt.io/cgit/qt/qtmultimedia.git/tree/coin?h=v6.11.1
 
 Microsoft Visual C++ x64 runtime is deployed application-locally.
 ADB attribution and version are in platform-tools.
-ONNX Runtime, NVIDIA runtime and model notices are in UniDepthRuntimeWide576FP16/licenses.
+ONNX Runtime, NVIDIA runtime and model notices are in UniDepthRuntimeRgb672VgaFP16RTX/licenses.
 libssh2, OpenSSL and board tooling notices are in rv_control.
 VLC H.265/RTSP libraries, copyright and release source information are in licenses/VLC.

@@ -4,12 +4,12 @@
 
 // One bounded current-frame payload. Nothing is written until an explicit save.
 namespace RvDepthDiagnostic {
-inline constexpr int Pixels=576*324, DepthBytes=Pixels*4, ReasonBytes=1536;
+inline constexpr int Pixels=640*480, DepthBytes=Pixels*4, ReasonBytes=1536;
 inline constexpr int PayloadBytes=DepthBytes+2*ReasonBytes;
 // Fixed-capacity reason slots preserve v1 IPC; native16 uses slots 0..255,
 // with the remaining slots explicitly NoMeasurement, never extra ToF samples.
 QByteArray encode(const std::vector<float> &mono,const RvAssistFusion::Result &result,int nativeCount=ReasonBytes);
-bool validPayload(const QByteArray &payload);
+bool validPayload(const QByteArray &payload,int depthBytes=DepthBytes);
 struct Snapshot {
     DepthSnapshot output;
     RvTofFrame native;

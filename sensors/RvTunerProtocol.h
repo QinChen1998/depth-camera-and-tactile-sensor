@@ -17,7 +17,6 @@ struct Settings {
     bool nativeCompatible() const;
     bool liteSrCompatible() const;
     bool hostDepthCompatible() const;
-    bool depthorCompatible() const;
     bool fp16Native16Compatible() const;
     QJsonObject json() const;
     QString arguments() const;

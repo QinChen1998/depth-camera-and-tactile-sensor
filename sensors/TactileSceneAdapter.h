@@ -139,6 +139,6 @@ private:
     double m_arrowWidthGain=1;
     double m_resultantSizeGain=1;
     bool m_lowCostRendering=false;
-    QString m_sourceLabel="SIMULATED";
+    QString m_sourceLabel;
     bool m_communicationStatusVisible=true;
 };

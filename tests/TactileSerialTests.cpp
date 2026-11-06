@@ -36,6 +36,37 @@ int runTactileSerialTests(const QString &path)
     for(int interval:{10,11,20,100,60000}){auto valid=s;valid.intervalMs=interval;
         check(valid.valid(),"10 ms, intermediate and upper-bound request gaps are accepted");}
     const auto sealConfig=[](QByteArray b){const auto crc=tactileCrc(b);b.append(char(crc));b.append(char(crc>>8));return b;};
+    for(int model=1;model<=3;++model){
+        const auto identity=identifyTactileDevice(7,[&](const QByteArray &tx){
+            check(tx==sealConfig(QByteArray::fromHex("070344c00001")),"model read uses register 17600 and one word");
+            QByteArray reply=QByteArray::fromHex("0703020000");reply[4]=char(model);return sealConfig(reply);
+        });
+        check(identity.type==model-1&&identity.address==7,"F, G and S map to their actual layouts independently of UI selection");
+    }
+    const auto modelF=sealConfig(QByteArray::fromHex("0103020001"));
+    auto corruptModel=modelF;corruptModel.back()^=1;
+    for(const auto &reply:{QByteArray{},corruptModel,modelF.first(6),modelF+QByteArray(1,0),
+            sealConfig(QByteArray::fromHex("0203020001")),sealConfig(QByteArray::fromHex("0104020001")),
+            sealConfig(QByteArray::fromHex("018302")),sealConfig(QByteArray::fromHex("0103020000")),
+            sealConfig(QByteArray::fromHex("0103020004"))}){
+        check(identifyTactileDevice(1,[&](const QByteArray &){return reply;}).type<0,
+            "untrusted, incomplete, exceptional and unknown model replies cannot select a layout");
+    }
+    for(bool mismatch:{false,true}){
+        QVector<QByteArray> traffic;
+        const auto identity=identifyTactileDevice(7,[&](const QByteArray &tx){
+            traffic.append(tx);
+            if(tx[0]==7)return QByteArray{};
+            if(tx[0]==0&&tx.mid(2,2)==QByteArray::fromHex("466c"))return sealConfig(QByteArray::fromHex("0003020009"));
+            QByteArray reply=QByteArray::fromHex("0003020003");reply[0]=tx[0];
+            if(mismatch&&tx[0]==9)reply[4]=1;
+            return sealConfig(reply);
+        });
+        check(traffic.size()==4&&std::all_of(traffic.begin(),traffic.end(),[](const QByteArray &tx){return tx[1]==3;}),
+            "public-address recovery reads the stored ID and verifies its model using only read requests");
+        check(mismatch?identity.type<0:(identity.type==2&&identity.address==9),
+            "public recovery requires matching model at the discovered address");
+    }
     // Wire emulator uses literal register addresses and reply formats; no port opens.
     int deviceAddress=1,configuredAddress=1,writeCount=0,saveRegister=0,readCount=0;
     bool immediate=false,badCrc=false,badEcho=false,dropWrite=false,badReadback=false;
@@ -294,11 +325,111 @@ int runTactileSerialTests(const QString &path)
         "00010000000020000180000000580040030000001f570008745600081d000001"
         "24000000009c00fc708e0020010000000000000040160020a55c0300ff000000"
         "80000000e1");
+    const auto zeroFrame=[&](int type,int ms,int offset=0) {
+        auto settings=s;settings.type=type;
+        auto frame=serialFrame(decodeTactileResponse(capturedGood,settings),settings,
+            QUuid("{578a438a-a6c4-49a9-b341-3a968d224001}"),1,quint64(ms+1),qint64(ms+1)*1000000);
+        auto &finger=frame.fingers[type];auto &module=finger.modules[0];module.resultant={};
+        for(int p=0;p<module.points.size();++p) {
+            module.points[p].force={double(200+p+offset),double(-300-p+offset),double(500+p+offset)};
+            module.resultant+=module.points[p].force;
+        }
+        finger.resultant=module.resultant;return frame;
+    };
+    for(int type=0;type<3;++type) {
+        TactileAutoZero zero;
+        for(int ms=0;ms<500;ms+=10)zero.observe(zeroFrame(type,ms,ms<150?8000:(ms%20?10:-10)),ms);
+        check(zero.collecting()&&!zero.result().baseline.valid,"auto zero never uses the settling transient or finishes before 500 ms");
+        zero.observe(zeroFrame(type,500,-10),500);
+        const auto result=zero.result();
+        check(result.phase==AutoZeroPhase::Complete&&result.elapsedMs==500&&result.sampleCount==31
+            &&validateFrame(result.baseline)&&result.baseline.hardwareType==type,
+            "F/G/S auto zero averages a stable native window with valid identity and sums at 500 ms");
+        const auto &points=result.baseline.fingers[type].modules[0].points;
+        bool mean=true;
+        for(int p=0;p<points.size();++p)mean &= sameForce(points[p].force,{double(200+p),double(-300-p),double(500+p)});
+        check(mean,"every native point and axis uses its rounded multi-frame mean, independent of selected UI point");
+        zero.observe(zeroFrame(type,600,2000),600);
+        check(zero.result().baseline.sequence==result.baseline.sequence&&zero.result().elapsedMs==500,
+            "auto zero is fixed after completion and cannot absorb later contact");
+    }
+    {
+        TactileAutoZero noisy,drifting,sparse,duplicates,foreign;
+        for(int ms=0;ms<=900;ms+=10) {
+            noisy.observe(zeroFrame(0,ms,ms%20?200:-200),ms);
+            drifting.observe(zeroFrame(0,ms,ms/3),ms);
+            if(ms%200==0)sparse.observe(zeroFrame(0,ms),ms);
+            duplicates.observe(zeroFrame(0,0),ms);
+            auto f=zeroFrame(0,ms);if(ms>0)f.generation=2;foreign.observe(f,ms);
+        }
+        sparse.advance(900);
+        for(const auto *zero:{&noisy,&drifting,&sparse,&duplicates,&foreign})
+            check(zero->result().phase==AutoZeroPhase::Complete&&validateFrame(zero->result().baseline)
+                &&zero->result().sampleCount==1&&zero->result().elapsedMs==900,
+                "deadline automatically sets one zero from the last valid frame when a stable mean is unavailable");
+        check(noisy.result().baseline.sequence==901&&drifting.result().baseline.sequence==901
+            &&sparse.result().baseline.sequence==801&&duplicates.result().baseline.sequence==1
+            &&foreign.result().baseline.generation==1&&foreign.result().baseline.sequence==1,
+            "deadline zero uses the latest trusted native frame without accepting duplicates or a foreign session");
+        const auto fallbackSequence=noisy.result().baseline.sequence;
+        noisy.observe(zeroFrame(0,1000,2000),1000);
+        check(noisy.result().baseline.sequence==fallbackSequence&&noisy.result().sampleCount==1,
+            "deadline fallback runs only once and does not follow later measurements");
+        for(bool badCrc:{false,true}) {
+            TactileAutoZero tail;tail.observe(zeroFrame(0,0),0);
+            auto bad=zeroFrame(0,901,4000);
+            if(badCrc){bad.crcVerified=false;bad.crcOk=false;}else bad.rangeOk=false;
+            tail.observe(bad,901);
+            check(tail.result().phase==AutoZeroPhase::Complete&&tail.result().baseline.sequence==1
+                &&tail.result().baseline.crcOk&&tail.result().baseline.rangeOk,
+                "corrupt or out-of-range deadline data cannot replace the previous valid zero candidate");
+        }
+        TactileAutoZero cancelled;cancelled.observe(zeroFrame(0,0),0);cancelled.cancel();cancelled.advance(900);
+        check(cancelled.result().phase==AutoZeroPhase::Failed&&!cancelled.result().baseline.valid,
+            "explicit cancellation does not trigger deadline fallback");
+        TactileAutoZero invalid;
+        for(int ms=0;ms<=1000;ms+=10){auto f=zeroFrame(0,ms);f.crcVerified=false;f.crcOk=false;invalid.observe(f,ms);}
+        check(!invalid.result().started&&!invalid.result().baseline.valid,"CRC-off diagnostic data cannot start or initialize auto zero");
+        TactileAutoZero gaps;
+        for(int ms=0;ms<=500;ms+=10){auto f=zeroFrame(0,ms);if(ms%70==0&&ms>0)f.crcOk=false;gaps.observe(f,ms);}
+        check(gaps.result().phase==AutoZeroPhase::Complete&&gaps.result().sampleCount<31,
+            "isolated corrupt replies are excluded while a sufficiently dense stable series still completes");
+        TactileAutoZero slowWire;
+        for(int ms=0;ms<=540;ms+=45)slowWire.observe(zeroFrame(0,ms),ms);
+        check(slowWire.result().phase==AutoZeroPhase::Complete&&slowWire.result().elapsedMs<=900,
+            "native transmission time at the slow supported baud can still supply a stable multi-frame zero");
+    }
+    for(int interval:{10,100,1000,60000}) {
+        TactileSerialSource zeroing;SerialSettings settings=s;settings.intervalMs=interval;
+        zeroing.m_exchangeForTests=[&](const QByteArray &tx){
+            return tx==sealConfig(QByteArray::fromHex("010344c00001"))?modelF:capturedGood;
+        };
+        zeroing.begin(settings,false,true);QElapsedTimer elapsed;elapsed.start();SerialSample sample;
+        while(elapsed.elapsed()<1300) {
+            SerialSample next;if(zeroing.takeLatest(next))sample=next;
+            if(sample.autoZero.phase==AutoZeroPhase::Complete)break;
+            QThread::msleep(1);
+        }
+        check(sample.autoZero.phase==AutoZeroPhase::Complete&&sample.autoZero.elapsedMs>=500
+            &&sample.autoZero.elapsedMs<=900&&sample.autoZero.sampleCount>=6&&elapsed.elapsed()<1000
+            &&sample.settings.intervalMs==interval&&sample.effectiveIntervalMs==10,
+            "10/100/1000/60000 ms preferences all complete the worker zero in 500-900 ms using temporary 10 ms polling");
+        const auto sequence=sample.autoZero.baseline.sequence;
+        // Delivery is persistent across the latest-value mailbox, and changing
+        // the user's interval during/after zero never overwrites their choice.
+        zeroing.setIntervalMs(20);elapsed.restart();bool restored=false;
+        while(elapsed.elapsed()<300&&!restored){SerialSample next;if(zeroing.takeLatest(next))
+            restored=next.settings.intervalMs==20&&next.effectiveIntervalMs==20
+                &&next.autoZero.baseline.sequence==sequence;QThread::msleep(1);}
+        check(restored,"normal polling resumes at the current requested interval and retains the completed zero result");
+        zeroing.stop();check(zeroing.wait(500),"auto-zero worker stops promptly including the longest user interval");
+    }
     {
         TactileSerialSource paced;SerialSettings settings;settings.port="OFFLINE_TACTILE_PACING";
         QElapsedTimer elapsed;elapsed.start();std::atomic_int requests{0};
         std::vector<qint64> sent,completed;
         paced.m_exchangeForTests=[&](const QByteArray &tx){
+            if(tx==sealConfig(QByteArray::fromHex("010344c00001")))return modelF;
             sent.push_back(elapsed.nsecsElapsed());
             QThread::msleep(2); // Response time must be additional to the gap.
             completed.push_back(elapsed.nsecsElapsed());++requests;
@@ -327,7 +458,10 @@ int runTactileSerialTests(const QString &path)
     }
     {
         TactileSerialSource edited;SerialSettings settings;settings.port="OFFLINE_TACTILE_INTERVAL_EDIT";settings.intervalMs=60000;
-        std::atomic_int requests{0};edited.m_exchangeForTests=[&](const QByteArray &){++requests;return capturedGood;};
+        std::atomic_int requests{0};edited.m_exchangeForTests=[&](const QByteArray &tx){
+            if(tx==sealConfig(QByteArray::fromHex("010344c00001")))return modelF;
+            ++requests;return capturedGood;
+        };
         edited.begin(settings);QElapsedTimer deadline;deadline.start();
         while(requests.load()<1&&deadline.elapsed()<1000)QThread::msleep(1);
         check(requests.load()==1&&!edited.setIntervalMs(5)&&!edited.setIntervalMs(9)&&!edited.setIntervalMs(60001),
@@ -471,7 +605,7 @@ int runTactileSerialHardwareUi(const QString &path,const QString &port,bool life
     w.resize(1060,800);w.show();wait(500);w.start();
     auto *crc=w.findChild<QCheckBox*>("tactileVerifyCrc");auto *connectButton=w.findChild<QPushButton*>("tactileConnect");
     auto *table=w.findChild<QTableWidget*>("tactilePointValues");auto *adapter=w.findChild<TactileSceneAdapter*>();
-    check(crc->isChecked()&&w.frame().sourceMode=="Mock","default CRC on; startup simulated");
+    check(crc->isChecked()&&!w.frame().valid,"default CRC on; startup waits for device data");
     w.findChild<QPushButton*>("tactileConnectionSettings")->click();w.findChild<QComboBox*>("tactilePort")->setCurrentText(port);connectButton->click();
     if(lifecycleOnly){
         auto *disconnectButton=w.findChild<QPushButton*>("tactileDisconnect");
@@ -548,9 +682,10 @@ int runTactileSerialHardwareUi(const QString &path,const QString &port,bool life
         if(phase)check(unverified,"CRC off displays explicitly unverified frames");
     }
     for(int type:{1,2}) {w.findChild<QPushButton*>(QString("finger%1").arg(type))->click();wait(100);
-        check(w.frame().valid&&w.frame().sourceMode=="Mock"&&adapter->sourceLabel()=="SIMULATED"&&table->rowCount()==(type==2?16:20),"G/S stay simulated during F connection");}
-    w.findChild<QPushButton*>("finger0")->click();w.setPaused(true);wait(300);const auto n=w.refreshCount();wait(150);check(n==w.refreshCount()&&!w.frame().valid,"hardware pause clears current sample and suspends updates");w.setPaused(false);wait(500);
+        check(!w.frame().valid&&!adapter->valid()&&table->rowCount()==(type==2?16:20)
+            &&table->item(0,1)->text()=="--","unconnected G/S models remain unavailable during F acquisition");}
+    w.findChild<QPushButton*>("finger0")->click();w.setSuspended(true);wait(300);const auto n=w.refreshCount();wait(150);check(n==w.refreshCount()&&!w.frame().valid,"hardware visibility suspension clears current sample and suspends updates");w.setSuspended(false);wait(500);
     w.findChild<QPushButton*>("tactileDisconnect")->click();check(!w.frame().valid&&table->item(0,1)->text()=="--","disconnect clears hardware table without mock fallback");
-    w.findChild<QPushButton*>("tactileUseMock")->click();wait(100);check(w.frame().sourceMode=="Mock"&&w.frame().valid,"explicit return to simulated mode");
+    wait(100);check(!w.findChild<QWidget*>("tactileUseMock")&&!w.frame().valid&&!adapter->valid(),"disconnect cannot return to a simulated source");
     w.close();return failures?1:0;
 }

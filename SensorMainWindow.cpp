@@ -82,6 +82,8 @@ SensorMainWindow::SensorMainWindow(LanguageManager *language, QWidget *parent)
     m_cameraDock=new QDockWidget(this);m_cameraDock->setObjectName("rtspCameraDock");
     m_camera=new RtspCameraPage(m_cameraDock);m_camera->setSessionController(m_session);
     m_cameraDock->setWidget(m_camera);
+    connect(m_session,&RvSessionController::dtofCandidateSelectionChanged,this,&SensorMainWindow::updateCameraVisibility);
+    connect(m_cameraDock,&QDockWidget::visibilityChanged,this,[this](bool shown){if(shown&&m_session->depthOnlyMode())m_cameraDock->hide();});
     m_docks={m_tactile,m_depthDock,m_cameraDock};
     for(auto *dock:m_docks)dock->setAllowedAreas(Qt::AllDockWidgetAreas);
     connect(m_session->tuner(),&RvTunerController::shutdownFinished,this,[this]{
@@ -129,6 +131,7 @@ SensorMainWindow::SensorMainWindow(LanguageManager *language, QWidget *parent)
     QSettings settings;
     if(settings.contains("workspace/geometry"))restoreGeometry(settings.value("workspace/geometry").toByteArray());
     if(settings.contains("workspace/state"))restoreState(settings.value("workspace/state").toByteArray(),1);
+    updateCameraVisibility();
     retranslate();
 }
 
@@ -141,7 +144,7 @@ void SensorMainWindow::showAbout()
     auto *logo = new QLabel(dialog);
     logo->setPixmap(windowIcon().pixmap(QSize(112, 112), dialog->devicePixelRatioF()));
     auto *name = new QLabel(QApplication::applicationDisplayName(), dialog);
-    auto *version = new QLabel(QStringLiteral("v%1").arg(QApplication::applicationVersion()), dialog);
+    auto *version = new QLabel(QStringLiteral("v%1 · 内测版").arg(QApplication::applicationVersion()), dialog);
 
     auto *layout = new QVBoxLayout(dialog);
     layout->setContentsMargins(32, 24, 32, 24);
@@ -156,6 +159,8 @@ RvDeviceManagerDialog *SensorMainWindow::showDeviceManager(bool modal)
 {
     if (!m_devices) {
         m_devices = new RvDeviceManagerDialog(m_session, this);
+        connect(m_devices, &RvDeviceManagerDialog::usbConnectionRequested,
+                this, &SensorMainWindow::usbDeviceConnectionRequested);
         m_devices->setAttribute(Qt::WA_DeleteOnClose);
     }
     if (modal && !m_devices->isModal()) {
@@ -230,6 +235,13 @@ SensorMainWindow::~SensorMainWindow()
     delete m_session;
 }
 
+void SensorMainWindow::updateCameraVisibility()
+{
+    const bool video=!m_session->depthOnlyMode();
+    m_cameraDock->toggleViewAction()->setEnabled(video);
+    m_cameraDock->setVisible(video);
+}
+
 void SensorMainWindow::resetLayout()
 {
     for(auto *dock:m_docks){removeDockWidget(dock);dock->setFloating(false);}
@@ -239,6 +251,7 @@ void SensorMainWindow::resetLayout()
     m_tactile->show();m_depthDock->show();m_cameraDock->show();m_depthDock->raise();
     resizeDocks({m_tactile,m_depthDock},{780,880},Qt::Horizontal);
     resizeDocks({m_depthDock,m_cameraDock},{480,480},Qt::Vertical);
+    updateCameraVisibility();
 }
 
 void SensorMainWindow::saveLayout()
@@ -252,7 +265,7 @@ void SensorMainWindow::refreshPresets()
     const auto names=settings.childGroups();m_deletePreset->setEnabled(!names.isEmpty());
     for(const auto &name:names){
         const auto state=settings.value(name+"/state").toByteArray();
-        auto *action=m_presets->addAction(name);connect(action,&QAction::triggered,this,[this,state]{restoreState(state,1);});
+        auto *action=m_presets->addAction(name);connect(action,&QAction::triggered,this,[this,state]{restoreState(state,1);updateCameraVisibility();});
     }
     if(names.isEmpty())m_presets->addAction(tr("No saved layouts"))->setEnabled(false);
 }
@@ -280,7 +293,7 @@ void SensorMainWindow::changeEvent(QEvent *event)
 
 void SensorMainWindow::retranslate()
 {
-    setWindowTitle(QApplication::applicationDisplayName());
+    setWindowTitle(QApplication::applicationDisplayName() + QStringLiteral("（内测版）"));
     m_tactile->setWindowTitle(tr("Magnetic tactile sensors"));m_depthDock->setWindowTitle(tr("Depth Map"));
     m_cameraDock->setWindowTitle(tr("Camera raw video"));
     m_file->setTitle(tr("File"));m_exit->setText(tr("Exit"));m_view->setTitle(tr("View"));

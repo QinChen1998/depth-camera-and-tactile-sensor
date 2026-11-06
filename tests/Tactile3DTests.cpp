@@ -1,3 +1,4 @@
+#include "TactileTestFixtures.h"
 #include "../sensors/TactileSceneAdapter.h"
 #include "../sensors/TactileSurfaceModel.h"
 #include "../sensors/TactileVisualizationWidget.h"
@@ -224,7 +225,7 @@ bool independentArrowWidths(TactileVisualizationWidget &widget,QObject *root)
     auto *width=widget.findChild<QDoubleSpinBox *>("tactileArrowWidthGain");
     auto *length=widget.findChild<QDoubleSpinBox *>("tactileArrowGain");
     auto *adapter=widget.findChild<TactileSceneAdapter *>();
-    if(!width||!length||!adapter||!widget.paused())return false;
+    if(!width||!length||!adapter||!widget.frame().valid)return false;
     const double previousWidth=width->value(),previousLength=length->value();
     width->setValue(1);length->setValue(2);pump(30);
     struct Transform { QObject *model;QVector3D scale;double y; };
@@ -291,15 +292,6 @@ bool componentContract()
             if(axis==2)okay &= a["offset"].value<QVector3D>().isNull()&&(direction*(a["length"].toFloat()+3)).z()*sign<0;
         }
     }
-    for(int step=0;step<100;++step)for(auto scenario:{tactile::Scenario::NoContact,tactile::Scenario::PressRelease,tactile::Scenario::Tangential,tactile::Scenario::MovingContact}) {
-        const auto frame=tactile::TactileMockSource::sample(scenario,step*.13);
-        okay &= tactile::validateFrame(frame);
-        for(const auto &finger:frame.fingers)for(const auto &module:finger.modules)for(const auto &point:module.points) {
-            const auto f=point.force;
-            okay &= std::abs(f.x)<=2500&&std::abs(f.y)<=2500&&f.z>=0&&f.z<=2500;
-            okay &= f.x==std::round(f.x)&&f.y==std::round(f.y)&&f.z==std::round(f.z);
-        }
-    }
     return okay;
 }
 
@@ -308,24 +300,25 @@ bool fixedPointSizes()
     TactileSceneAdapter adapter;
     QColor unloadedColor, loadedColor;
     bool okay=true;
-    for(const auto scenario:{tactile::Scenario::NoContact,tactile::Scenario::Tangential}) {
-        const auto frame=tactile::TactileMockSource::sample(scenario,1.0);
+    for(bool loaded:{false,true}) {
         for(int finger=0;finger<3;++finger) {
+            const auto frame=tactileTestFrame(finger,loaded?tactile::Force{600,-400,1000}:tactile::Force{});
             adapter.publish(frame,finger,false,0);
             okay &= adapter.valid() && adapter.points().size()==(finger==2?16:20);
             for(const auto &point:adapter.points())okay &= point.toMap()["radius"].toDouble()==1.75;
             const auto color=adapter.points().front().toMap()["color"].value<QColor>();
-            if(scenario==tactile::Scenario::NoContact)unloadedColor=color;else loadedColor=color;
+            if(!loaded)unloadedColor=color;else loadedColor=color;
         }
     }
     return okay && unloadedColor!=loadedColor;
 }
 
-tactile::Frame pressureColorFixture()
+tactile::Frame pressureColorFixture(int type=0)
 {
-    auto frame=tactile::TactileMockSource::sample(tactile::Scenario::NoContact,1);
+    auto frame=tactileTestFrame(type,{});
     const double pressures[]={0,500,1250,2000,2500,4000};
     for(auto &finger:frame.fingers) {
+        if(!finger.valid)continue;
         auto &module=finger.modules[0];module.resultant={};
         for(int i=0;i<module.points.size();++i) {
             module.points[i].force={1000,-500,pressures[i%6]};
@@ -348,9 +341,9 @@ bool pressureColorsContract()
         &&nearColor(red,QColor::fromRgbF(.8,.28,.28));
     for(double z:{-32767.,-1.,std::numeric_limits<double>::quiet_NaN()})okay &= TactileSceneAdapter::forceColor(z)==blue;
     for(double z:{2500.,2501.,32767.})okay &= TactileSceneAdapter::forceColor(z)==red;
-    const auto frame=pressureColorFixture();okay &= tactile::validateFrame(frame);
     TactileSceneAdapter adapter;
     for(int type=0;type<3;++type)for(int grid=2;grid<=4;++grid)for(bool dots:{false,true})for(bool reversed:{false,true}) {
+        const auto frame=pressureColorFixture(type);okay &= tactile::validateFrame(frame);
         adapter.setGridSize(grid);adapter.setDotMatrix(dots);adapter.setReverseZArrows(reversed);adapter.setArrowGain(reversed?100:.1);
         adapter.publish(frame,type,false,0);
         okay &= adapter.valid();const auto points=adapter.points();
@@ -374,9 +367,9 @@ bool pressureColorsContract()
 // Densification preserves raw measurements and resultants.
 bool interpolatedGrids()
 {
-    const auto frame=tactile::TactileMockSource::sample(tactile::Scenario::Tangential,1);
     TactileSceneAdapter adapter;bool okay=true;
     for(int type=0;type<3;++type) {
+        const auto frame=tactileTestFrame(type);
         adapter.setGridSize(2);adapter.publish(frame,type,false,0);
         const auto points=adapter.points();const int count=type==2?16:20;
         okay &= adapter.valid()&&points.size()==count&&adapter.gridSize()==2;
@@ -432,10 +425,10 @@ bool interpolatedGrids()
 
 bool pressureDotsContract()
 {
-    const auto seed=tactile::TactileMockSource::sample(tactile::Scenario::NoContact,1);
-    const auto fixture=[&](double xy,double z,bool varying) {
-        auto frame=seed;
+    const auto fixture=[](int type,double xy,double z,bool varying) {
+        auto frame=tactileTestFrame(type,{});
         for(auto &finger:frame.fingers) {
+            if(!finger.valid)continue;
             auto &module=finger.modules[0];module.resultant={};
             for(int i=0;i<module.points.size();++i) {
                 module.points[i].force={xy,-xy,z+(varying?i*50:0)};
@@ -448,7 +441,7 @@ bool pressureDotsContract()
     TactileSceneAdapter adapter;adapter.setDotMatrix(true);bool okay=true;
     for(int type=0;type<3;++type)for(int grid=2;grid<=4;++grid) {
         adapter.setGridSize(grid);
-        const auto frame=fixture(3000,100,true),otherXY=fixture(-21000,100,true);
+        const auto frame=fixture(type,3000,100,true),otherXY=fixture(type,-21000,100,true);
         for(double gain:{0.1,1.0,25.0,100.0}) {
             adapter.setArrowGain(gain);adapter.publish(frame,type,false,0);
             const auto points=adapter.points();
@@ -467,7 +460,7 @@ bool pressureDotsContract()
             for(int i=0;i<points.size();++i)okay &= adapter.points()[i].toMap()["dotPosition"]==points[i].toMap()["dotPosition"];
         }
         for(double pressure:{0.0,500.0,1500.0}) {
-            const auto frame=fixture(20000,pressure,false),baseline=fixture(0,1000,false);
+            const auto frame=fixture(type,20000,pressure,false),baseline=fixture(type,0,1000,false);
             adapter.publish(frame,type,false,0,&baseline);
             for(const auto &p:adapter.points()) {
                 const auto point=p.toMap();
@@ -476,7 +469,7 @@ bool pressureDotsContract()
                     &&std::abs(point["fz"].toDouble()-(pressure-1000))<1e-8;
             }
         }
-        adapter.publish(fixture(20000,0,false),type,false,0);
+        adapter.publish(fixture(type,20000,0,false),type,false,0);
         for(const auto &p:adapter.points())okay &= p.toMap()["dotPosition"]==p.toMap()["position"];
         adapter.invalidate();
         okay &= !adapter.valid()&&adapter.interpolatedPoints()->count()==0;
@@ -547,12 +540,13 @@ int runTactile3DTests(const QString &path)
     check("display saturation preserves force",TactileSceneAdapter::arrow({100,0,0},40,60)["length"].toDouble()==60&&TactileSceneAdapter::arrow({100,0,0},40,60)["fx"].toDouble()==100);
     check("surface projection retains top row and positive contact depth",TactileSceneAdapter::pointPosition(0).y()>TactileSceneAdapter::pointPosition(2).y()&&TactileSceneAdapter::pointPosition(0).z()>0);
     check("Z pressure colors span blue to red at 2500 counts and follow interpolated pressure independently of arrow reversal and gain",pressureColorsContract());
-    TactileSceneAdapter adapter;auto fixture=tactile::TactileMockSource::sample(tactile::Scenario::Tangential,1);bool mapping=true;
-    for(int f=0;f<3;++f)for(int m=-1;m<1;++m){adapter.publish(fixture,f,m>=0,qMax(0,m));const auto expected=m<0?fixture.fingers[f].resultant:fixture.fingers[f].modules[m].resultant;const auto value=adapter.resultant();mapping&=adapter.valid()&&adapter.points().size()==(f==2?16:20)&&value["fx"].toDouble()==expected.x&&value["fy"].toDouble()==expected.y&&value["fz"].toDouble()==expected.z;}
+    TactileSceneAdapter adapter;auto fixture=tactileTestFrame();bool mapping=true;
+    for(int f=0;f<3;++f)for(int m=-1;m<1;++m){fixture=tactileTestFrame(f);adapter.publish(fixture,f,m>=0,qMax(0,m));const auto expected=m<0?fixture.fingers[f].resultant:fixture.fingers[f].modules[m].resultant;const auto value=adapter.resultant();mapping&=adapter.valid()&&adapter.points().size()==(f==2?16:20)&&value["fx"].toDouble()==expected.x&&value["fy"].toDouble()==expected.y&&value["fz"].toDouble()==expected.z;}
     check("all finger module resultant mappings",mapping);fixture.valid=false;adapter.publish(fixture,0,false,0);check("invalid snapshot clears validity and old arrows",!adapter.valid()&&!adapter.resultant()["arrowVisible"].toBool());
-    TactileVisualizationWidget widget;widget.resize(900,620);widget.show();widget.start();pump(350);widget.setScenario(tactile::Scenario::Tangential);pump(2500);widget.setPaused(true);
-    const auto minimizedFrame=widget.frame();widget.showMinimized();pump(100);widget.showNormal();pump(100);
-    check("standalone minimize preserves frozen session and pause",widget.paused()&&widget.frame().valid&&widget.frame().sessionId==minimizedFrame.sessionId&&widget.frame().sequence==minimizedFrame.sequence);
+    TactileVisualizationWidget widget;widget.resize(900,620);widget.show();widget.start();pump(100);
+    widget.showMinimized();pump(100);widget.showNormal();pump(100);
+    check("standalone minimize and restore never manufacture data",widget.running()&&!widget.frame().valid&&widget.history().samples().empty());
+    TactileTestAccess::showSnapshot(widget);pump(100);
     auto *view=widget.findChild<QQuickWidget *>("tactileQuickView");auto *bridge=widget.findChild<TactileSceneAdapter *>();
     check("independent Quick 3D scene ready",view&&view->status()==QQuickWidget::Ready&&view->rootObject()&&bridge&&bridge->valid());
     if(view&&view->rootObject()){
@@ -563,9 +557,9 @@ int runTactile3DTests(const QString &path)
             if(text.startsWith('P')&&text.mid(1).toInt(&number)>0&&number)pointLabels=true;
         }
         check("permanent P1-P20/P16 labels are removed from the model",!pointLabels);
-        check("paused thickness control scales all shafts and heads without changing length, sphere size or measurements",independentArrowWidths(widget,root));
+        check("fixed-snapshot thickness control scales all shafts and heads without changing length, sphere size or measurements",independentArrowWidths(widget,root));
         tactileMouseDrag(view,Qt::LeftButton);
-        check("paused viewport receives orbit drag without selecting point",root->property("orbitYaw").toDouble()!=yaw&&root->property("inspectedPoint").toInt()==-1);
+        check("snapshot viewport receives orbit drag without selecting point",root->property("orbitYaw").toDouble()!=yaw&&root->property("inspectedPoint").toInt()==-1);
         check("camera does not alter force sequence or history",tactile::sameForce(force,widget.selectedForce())&&frame.sequence==widget.frame().sequence&&widget.history().samples().size()==historySize);
         const auto pan=root->property("cameraPan").value<QVector3D>();tactileMouseDrag(view,Qt::MiddleButton);check("middle drag changes only local camera pan",root->property("cameraPan").value<QVector3D>()!=pan);
         const double distance=root->property("cameraDistance").toDouble();const QPointF center(view->rect().center());
@@ -575,7 +569,7 @@ int runTactile3DTests(const QString &path)
         auto *density=widget.findChild<QComboBox *>("tactileDensity");
         const int previousMode=mode->currentIndex(),previousDensity=density->currentIndex();
         for(int type:{0,1,2})for(const auto &displayMode:{QStringLiteral("xyz"),QStringLiteral("dots")}) {
-            widget.findChild<QPushButton *>(QString("finger%1").arg(type))->click();
+            TactileTestAccess::showSnapshot(widget,type);
             mode->setCurrentIndex(mode->findData(displayMode));
             bool picked=true,expandedPicked=true;
             for(int level:{0,1,2}) {
@@ -586,7 +580,7 @@ int runTactile3DTests(const QString &path)
             check("every raw sensor point click selects its XYZ curve and visible table row at all interpolation levels",picked);
             check("clicks nine pixels outside raw spheres select the matching curve and row in XYZ and dot modes at all densities",expandedPicked);
         }
-        widget.findChild<QPushButton *>("finger2")->click();mode->setCurrentIndex(mode->findData("xyz"));density->setCurrentIndex(0);
+        TactileTestAccess::showSnapshot(widget,2);mode->setCurrentIndex(mode->findData("xyz"));density->setCurrentIndex(0);
         QMetaObject::invokeMethod(root,"frontView");pump(60);
         check("overlapping enlarged targets select the nearest point after zoom and empty space preserves chart selection",overlappingPointPicking(widget));
         QQmlExpression dragStart(qmlContext(root),root,"project(displayPosition(pointSnapshot[0]))");
@@ -596,14 +590,14 @@ int runTactile3DTests(const QString &path)
         check("dragging from an enlarged point target orbits without changing sensor selection",widget.selectedPoint()==beforeDragSelection
             &&root->property("orbitYaw").toDouble()!=beforeDragYaw&&root->property("inspectedPoint").toInt()==-1);
         mode->setCurrentIndex(previousMode);density->setCurrentIndex(previousDensity);
-        widget.findChild<QPushButton *>("finger0")->click();root->setProperty("inspectedPoint",-1);
+        TactileTestAccess::showSnapshot(widget,0);root->setProperty("inspectedPoint",-1);
         auto *legend=root->findChild<QObject *>("tactileLegend");
         check("model bottom-left legend is absent regardless of communication status",!legend);
         const auto directory=QFileInfo(path).absolutePath();
         widget.findChild<QPushButton *>("frontTactileView")->click();pump(100);check("front screenshot",widget.grab().save(directory+"/front.png"));
         widget.findChild<QPushButton *>("resetTactileView")->click();pump(100);check("oblique screenshot",widget.grab().save(directory+"/oblique.png"));
         root->setProperty("orbitYaw",82.0);root->setProperty("orbitPitch",0.0);pump(100);check("side screenshot",widget.grab().save(directory+"/side.png"));
-        const auto keptYaw=root->property("orbitYaw");widget.findChild<QPushButton *>("finger2")->click();
+        const auto keptYaw=root->property("orbitYaw");TactileTestAccess::showSnapshot(widget,2);
         check("selection retains camera and matches resultant",root->property("orbitYaw")==keptYaw&&bridge->resultant()["fz"].toDouble()==widget.selectedForce().z&&bridge->resultant()["fx"].toDouble()==widget.history().samples().back().forces[2][0].x);
         auto *resultant=root->findChild<QObject *>("resultantArrow");
         check("QML resultant uses adapter direction length and anchor",resultant&&(resultant->property("rotation").value<QQuaternion>().rotatedVector(QVector3D(0,1,0))-bridge->resultant()["rotation"].value<QQuaternion>().rotatedVector(QVector3D(0,1,0))).length()<1e-5&&std::abs(resultant->property("forceLength").toDouble()-bridge->resultant()["length"].toDouble())<1e-4&&resultant->property("position").value<QVector3D>()==bridge->resultant()["position"].value<QVector3D>());
@@ -625,7 +619,7 @@ int runTactile3DTests(const QString &path)
             check("scaled resultant screenshot",widget.grab().save(directory+"/resultant_2x.png"));
             sizeGain->setValue(1);
         }else check("resultant size control and QML node exist",false);
-        auto *point=root->findChild<QObject *>("tactilePoint0");widget.setPaused(false);pump(100);widget.setPaused(true);
+        auto *point=root->findChild<QObject *>("tactilePoint0");TactileTestAccess::advance(widget);pump(100);
         check("accepted frames retain the twelve scene nodes",point&&view->rootObject()==root&&root->findChild<QObject *>("tactilePoint0")==point&&root->findChild<QObject *>("tactilePoint11"));
         const auto paletteFrame=widget.frame();const auto paletteForce=widget.selectedForce();
         const auto originalPalette=widget.palette();QPalette alternate=originalPalette;
@@ -642,27 +636,23 @@ int runTactile3DTests(const QString &path)
             gainPalette.color(QPalette::Base).lightnessF()<.3&&gainPalette.color(QPalette::Text).lightnessF()>.7
             &&captionPalette.color(QPalette::WindowText).lightnessF()>.7
             &&curvePalette.color(QPalette::Base).lightnessF()<.3&&curvePalette.color(QPalette::Text).lightnessF()>.7);
-        auto *scenario=widget.findChild<QComboBox *>("scenario");
+        auto *displayMode=widget.findChild<QComboBox *>("tactileDisplayMode");
         auto *gain=widget.findChild<QDoubleSpinBox *>("tactileArrowGain");
-        const auto comboBackground=scenario->grab().toImage().pixelColor(scenario->width()-30,scenario->height()/2);
+        const auto comboBackground=displayMode->grab().toImage().pixelColor(displayMode->width()-30,displayMode->height()/2);
         const auto numericBackground=gain->grab().toImage().pixelColor(gain->width()-30,gain->height()/2);
         check("styled dropdown and numeric editor actually paint dark backgrounds after palette changes",
             comboBackground.alpha()>200&&comboBackground.lightnessF()<.3
             &&numericBackground.alpha()>200&&numericBackground.lightnessF()<.3);
         check("alternate palette screenshot",widget.grab().save(directory+"/palette_alternate.png"));
         widget.setPalette(originalPalette);pump(50);
-        widget.setPaused(false);const auto activeSession=widget.frame().sessionId;widget.showMinimized();pump(100);
-        const auto hiddenRefreshes=widget.refreshCount();pump(150);const bool suspended=widget.refreshCount()==hiddenRefreshes;
-        widget.showNormal();pump(150);
-        check("standalone active minimize suspends and resumes same session",suspended&&widget.running()&&widget.refreshCount()>hiddenRefreshes&&widget.frame().sessionId==activeSession);
-        widget.setPaused(true);mode->setCurrentIndex(mode->findData("xyz"));density->setCurrentIndex(0);
+        mode->setCurrentIndex(mode->findData("xyz"));density->setCurrentIndex(0);
         QMetaObject::invokeMethod(root,"frontView");pump(60);
         widget.findChild<QPushButton *>("tactileTare")->click();
         check("raw point clicks retain tare delta semantics",widget.hasDisplayBaseline()&&rawPointPicking(widget,out));
     }
     const auto closedSession=widget.frame().sessionId;widget.close();check("closed view invalidates old forces",!widget.running()&&!bridge->valid());
     widget.show();widget.start();pump(100);
-    check("3D reopen has a fresh session",bridge->valid()&&widget.frame().sessionId!=closedSession&&widget.history().samples().size()<10);
+    check("3D reopen stays unavailable until new hardware data",!bridge->valid()&&!widget.frame().valid&&widget.history().samples().empty());
     // Intentional missing resource: require explicit failure and no stale values.
     view->setSource(QUrl("qrc:/qml/__missing_tactile_test__.qml"));pump(30);
     check("QML load failure stops updates and clears stale values",view->status()==QQuickWidget::Error&&!widget.running()&&!bridge->valid()&&widget.findChild<QLabel *>("force0")->text().contains("--")&&widget.findChild<QLabel *>("tactileViewError")->isVisible());
@@ -677,7 +667,7 @@ int runTactileRenderSmoke(const QString &path)
     QFile file(path);if(!file.open(QIODevice::WriteOnly|QIODevice::Text))return 3;
     QTextStream out(&file);bool all=true;
     auto check=[&](const char *label,bool okay){out<<(okay?"PASS ":"FAIL ")<<label<<'\n';out.flush();all&=okay;};
-    check("positive Z including 1 and 199 retained, signed XY, linear lengths, inward Z and integer mock amplitudes within 2500 counts",componentContract());
+    check("positive Z including 1 and 199 retained, signed XY, linear lengths, inward Z and native signed-count directions",componentContract());
     check("sensor row counts, aspect ratios, raw forces and two interpolation levels",interpolatedGrids());
     check("all three sensor types keep small fixed sphere radius while force color changes",fixedPointSizes());
     check("all sensor types and both display modes color raw and interpolated points by 0 to 2500 Z pressure",pressureColorsContract());
@@ -688,36 +678,30 @@ int runTactileRenderSmoke(const QString &path)
         auto *dock=new TactileDockWidget(&host);host.addDockWidget(Qt::LeftDockWidgetArea,dock);
         dock->hide();host.resize(1100,750);host.show();pump(200);
         auto *display=dock->display();
-        check("hidden restored dock does not start Mock",!display->running()&&!display->frame().valid);
-        dock->show();pump(300); // No openSession/menu action: the restoreState visibility path.
+        check("hidden restored dock does not start acquisition",!display->running()&&!display->frame().valid);
+        dock->show();pump(300);
         auto *adapter=display->findChild<TactileSceneAdapter *>();
-        const auto session=display->frame().sessionId;
-        for(int type:{1,2}) {
-            display->findChild<QPushButton *>(QString("finger%1").arg(type))->click();pump(80);
-            check("visible restored terminal and ultrathin receive simulated frames",
-                display->running()&&display->frame().valid&&display->frame().sourceMode=="Mock"
-                &&display->frame().hardwareType==-1&&adapter->valid());
+        for(int type:{0,1,2}) {
+            display->findChild<QPushButton *>(QString("finger%1").arg(type))->click();pump(50);
+            check("restored model choices show no data without a connected sensor",display->running()&&!display->frame().valid&&!adapter->valid());
         }
-        check("automatic Mock does not connect hardware",!display->findChild<QPushButton *>("tactileDisconnect")->isEnabled());
-        display->setPaused(true);dock->hide();pump(200);dock->show();pump(250);
-        check("restore visibility preserves user pause and session",display->paused()&&!display->running()&&display->frame().sessionId==session);
-        display->findChild<QComboBox *>("tactileDensity")->setCurrentIndex(2);pump(100);
+        check("restoring a dock does not open hardware",!display->findChild<QPushButton *>("tactileDisconnect")->isEnabled());
         bool reattached=true;
         for(bool floating:{true,false}) {
             dock->setAttribute(Qt::WA_DontShowOnScreen);dock->setFloating(floating);pump(200);
             auto *quick=display->findChild<QQuickWidget *>("tactileQuickView");
-            reattached &= quick->status()==QQuickWidget::Ready&&interpolatedInstancesMatch(adapter,quick->rootObject(),&out)
-                &&!quick->grabFramebuffer().isNull()&&display->frame().sessionId==session&&display->paused();
+            reattached &= quick->status()==QQuickWidget::Ready&&!quick->grabFramebuffer().isNull()
+                &&!display->frame().valid&&!adapter->valid();
         }
-        check("dense instance buffers survive dock scene recreation and preserve paused session",reattached);
-        display->setPaused(false);dock->hide();pump(250);const auto count=display->refreshCount();pump(80);
-        check("hidden Mock remains suspended",!display->running()&&display->refreshCount()==count);
+        check("dock scene recreation keeps geometry and the unavailable state",reattached);
+        dock->hide();pump(250);const auto count=display->refreshCount();pump(80);
+        check("hidden dock suspends view refresh",!display->running()&&display->refreshCount()==count);
         dock->show();pump(250);
-        check("visible Mock resumes same session",display->running()&&display->frame().sessionId==session);
+        check("visible dock resumes refresh without generating data",display->running()&&!display->frame().valid);
         dock->close();pump(200);
-        check("closed restored dock stops and clears data",!display->running()&&!display->frame().valid);
+        check("closed dock stops and clears data",!display->running()&&!display->frame().valid);
         dock->openSession();pump(200);
-        check("reopen starts a fresh Mock session",display->running()&&display->frame().valid&&display->frame().sessionId!=session);
+        check("reopened dock waits for hardware",display->running()&&!display->frame().valid);
         dock->close();
     }
     TactileVisualizationWidget widget;
@@ -725,14 +709,14 @@ int runTactileRenderSmoke(const QString &path)
     // The preceding dock fixture persists its dense grid. This fixture starts
     // explicitly on raw points before testing the interpolation controls.
     widget.findChild<QComboBox *>("tactileDensity")->setCurrentIndex(0);
-    widget.resize(900,620);widget.show();widget.start();widget.setScenario(tactile::Scenario::Tangential);pump(900);
+    widget.resize(900,620);widget.show();TactileTestAccess::showSnapshot(widget);pump(100);
     auto *view=widget.findChild<QQuickWidget *>("tactileQuickView");
-    check("hidden Quick scene loads and accepts frames",view&&view->status()==QQuickWidget::Ready&&widget.frame().valid&&widget.refreshCount()>1);
+    check("hidden Quick scene loads and accepts frames",view&&view->status()==QQuickWidget::Ready&&widget.frame().valid&&widget.refreshCount()>0);
     if(view&&view->rootObject()) {
         const auto folder=QFileInfo(path).absolutePath();
         const auto framebuffer=view->grabFramebuffer();
         check("offscreen framebuffer available",!framebuffer.isNull());
-        widget.setPaused(true);
+
         check("loaded QML widths respond independently at minimum, typical, maximum and original thickness",independentArrowWidths(widget,view->rootObject()));
         auto *width=widget.findChild<QDoubleSpinBox *>("tactileArrowWidthGain");
         check("original thickness screenshot",view->grabFramebuffer().save(folder+"/arrow_width_1x.png"));
@@ -806,9 +790,9 @@ int runTactileRenderSmoke(const QString &path)
         check("opacity slider affects only model and preserves frame history camera",opacityOkay);
         check("two interpolation levels available",density&&density->isEnabled()&&density->count()==3);
         for(int type:{0,1,2,0}) {
-            widget.findChild<QPushButton *>(QString("finger%1").arg(type))->click();pump(100);
+            TactileTestAccess::showSnapshot(widget,type);pump(100);
             const int count=type==2?16:20;
-            check("type selection updates nodes without source history or camera changes",adapter->points().size()==count
+            check("type selection updates nodes without changing raw point counts or camera",adapter->points().size()==count
                 &&view->rootObject()->findChild<QObject *>(QString("tactilePoint%1").arg(count-1))
                 &&!view->rootObject()->findChild<QObject *>(QString("tactilePoint%1").arg(count))
                 &&widget.frame().sequence==held.sequence&&widget.history().samples().size()==historyCount
@@ -856,7 +840,7 @@ int runTactileRenderSmoke(const QString &path)
             &&!widget.findChild<QWidget *>("tactileForceScale")->isHidden();
         gain->setValue(1);
         for(int type:{0,1,2}) {
-            widget.findChild<QPushButton *>(QString("finger%1").arg(type))->click();
+            TactileTestAccess::showSnapshot(widget,type);
             for(int level:{0,1,2}) {
                 density->setCurrentIndex(level);pump(60);
                 dotsOkay &= interpolatedInstancesMatch(adapter,view->rootObject(),&out);
@@ -880,7 +864,7 @@ int runTactileRenderSmoke(const QString &path)
                 }
             }
         }
-        widget.findChild<QPushButton *>("finger0")->click();density->setCurrentIndex(2);
+        TactileTestAccess::showSnapshot(widget,0);density->setCurrentIndex(2);
         const auto atOne=adapter->points();gain->setValue(25);pump(60);
         for(int i=0;i<atOne.size();++i) {
             const auto p=atOne[i].toMap();const auto anchor=p["position"].value<QVector3D>();
@@ -890,7 +874,7 @@ int runTactileRenderSmoke(const QString &path)
             const auto screen=projected.evaluate().value<QVector3D>();
             dotsOkay &= !projected.hasError()&&screen.z()>0&&view->rect().contains(QPoint(qRound(screen.x()),qRound(screen.y())));
         }
-        check("paused dot controls update raw and instance spheres, suppress all force arrows and preserve source history",dotsOkay
+        check("fixed-snapshot dot controls update raw and instance spheres, suppress all force arrows and preserve source history",dotsOkay
             &&widget.frame().sequence==held.sequence&&widget.history().samples().size()==historyCount
             &&tactile::sameForce(widget.selectedForce(),heldForce));
         check("25x dot displacement capture",view->grabFramebuffer().save(folder+"/dots_25x.png"));
@@ -928,15 +912,15 @@ int runTactileRenderSmoke(const QString &path)
                 &&interpolatedInstancesMatch(adapter,view->rootObject());
         }
         check("invalid type changes clear instances and resize raw delegates without binding warnings",invalidTypes&&bindingWarnings==0);
-        widget.setPaused(false);pump(80);
+        TactileTestAccess::advance(widget);pump(80);
         check("right-side controls render",widget.grab().save(folder+"/tactile_right_layout.png"));
-        widget.findChild<QPushButton *>("finger2")->click();pump(180);
+        TactileTestAccess::showSnapshot(widget,2);pump(180);
         check("button selection keeps the same force mapping",widget.selectedFinger()==2&&!widget.moduleMode()&&widget.selectedModule()==0&&tactile::sameForce(widget.selectedForce(),widget.frame().fingers[2].resultant));
         QEnterEvent enter(QPointF(10,10),QPointF(10,10),QPointF(10,10));QApplication::sendEvent(widget.findChild<QPushButton *>("finger1"),&enter);pump(90);
         check("animated controls render",widget.grab().save(folder+"/tactile_selection.png"));
         auto *pointer=view->rootObject()->findChild<QObject *>("tactilePointerArea");
         check("no viewport hover prompts",view->toolTip().isEmpty()&&pointer&&!pointer->property("hoverEnabled").toBool());
-        widget.setPaused(true);tactileMouseDrag(view,Qt::LeftButton);view->grabFramebuffer();
+        tactileMouseDrag(view,Qt::LeftButton);view->grabFramebuffer();
         check("scene remains ready after interaction",view->status()==QQuickWidget::Ready);
     }
     widget.close();const auto closed=widget.refreshCount();pump(80);

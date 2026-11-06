@@ -41,7 +41,6 @@ bool Settings::nativeCompatible() const{return size()==QSize(48,32);}
 bool Settings::liteSrCompatible() const{return (mode==11||mode==12)&&objects==1&&signal&&!noise;}
 // UniDepth retains its calibrated M48 ordinary-mode policy.
 bool Settings::hostDepthCompatible() const{return mode==11&&objects==1&&!noise;}
-bool Settings::depthorCompatible() const{return ((mode>=0&&mode<=2)||mode==11)&&objects==1&&!noise;}
 bool Settings::fp16Native16Compatible() const{return (mode==5||mode==6)&&objects==1&&!noise;}
 QJsonObject Settings::json() const{return {{"mode",mode},{"iterations",iterations},{"snr",snr},{"period_ms",periodMs},{"short_iterations",shortIterations},{"objects",objects},{"signal",signal},{"noise",noise}};}
 Settings Settings::fromJson(const QJsonObject &j){
@@ -90,7 +89,7 @@ QVector<Frame> Decoder::feed(const QByteArray &bytes){
         // Bit 6 is the vendor's final subframe index. DTN1 already contains
         // the complete assembled measurement; it is not an extra channel.
         require(((u8(46)&7)?(u8(46)&7):1)==s.objects&&!(u8(46)&0xa0),"DTN1 result layout mismatch");
-        const auto warnings=u32(52);require((warnings==0||warnings==8)&&u8(49)==(1|warnings)&&((u8(50)|u8(51))&~1u)==warnings&&(u8(50)&u8(51)&1)==1,"DTN1 sensor fault/status mismatch");
+        const auto warnings=u32(52);require((warnings==0||warnings==8||warnings==16)&&u8(49)==(1|warnings)&&((u8(50)|u8(51))&~1u)==warnings&&(u8(50)&u8(51)&1)==1,"DTN1 sensor fault/status mismatch");
         if(m_buffer.size()<packet)break;
         Frame f;f.settings=s;f.token=m_token;f.sequence=u32(12);f.timestamp=qFromLittleEndian<quint64>(p+16);f.fov=u8(47);f.resultFormat=u8(46);f.temperature=qint8(p[48]);f.warnings=warnings;f.dropped=u32(56);f.sensorTick=u32(68);
         require(f.sequence>m_sequence&&f.timestamp>m_stamp,"DTN1 measurement did not advance");

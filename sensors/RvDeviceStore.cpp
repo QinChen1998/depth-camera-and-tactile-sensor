@@ -61,7 +61,7 @@ RvDeviceProfile RvDeviceProfile::fromJson(const QJsonObject &o) {
     RvDeviceProfile p;p.id=o["id"].toString();p.name=o["name"].toString();p.host=o["host"].toString();p.sshPort=o["ssh_port"].toInt(-1);
     p.serial=o["serial"].toString();p.publicKey=o["public_key"].toString();p.username=o["username"].toString();p.calibration=o["calibration"].toString();
     p.cameraMountRotation=hasMount?o["camera_mount_rotation"].toInt(-1):
-        (p.serial=="0000000000000002"&&p.publicKey=="AAAAC3NzaC1lZDI1NTE5AAAAIBZkEP0Wz9pUtqMBfg+IMC0J8+O7Sxx9Uu3zz8YXvv6g"?180:0);
+        (p.serial=="REDACTED_DEVICE_SERIAL"&&p.publicKey==""?180:0);
     require(!hasMount||(o["camera_mount_rotation"].isDouble()&&o["camera_mount_rotation"].toDouble()==p.cameraMountRotation),"Camera mounting angle must be an integer");
     p.inputRotation=o["input_rotation"].toInt(-2);p.legacyCoordinator=o["legacy_coordinator"].toBool();p.lastConnected=o["last_connected"].toString();
     require(o["ssh_port"].toDouble()==p.sshPort&&o["input_rotation"].toDouble()==p.inputRotation,"Integer device fields required");p.validate();return p;
@@ -96,13 +96,6 @@ QString RvDeviceStore::defaultPath() {
     const auto configured=qEnvironmentVariable("DCTS_DEVICE_STORE_PATH");
     return configured.isEmpty()?QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation)+"/RV1103/devices.json":configured;
 }
-QVector<RvDeviceProfile> RvDeviceStore::defaults() {
-    RvDeviceProfile p;p.id="0000000000000001";p.serial=p.id;p.name="RV1103 - "+p.serial;p.host="172.32.0.93";
-    p.publicKey="AAAAC3NzaC1lZDI1NTE5AAAAIBZkEP0Wz9pUtqMBfg+IMC0J8+O7Sxx9Uu3zz8YXvv6g";p.calibration="rv20261008-f1";p.inputRotation=180;
-    // Only the currently approved trust entry is migrated automatically. Other
-    // boards are added by the user, even when their historical keys are known.
-    return {p};
-}
 RvDeviceStore::RvDeviceStore(QString path):m_path(std::move(path)) { reload(); }
 QVector<RvDeviceProfile> RvDeviceStore::parseImport(const QByteArray &bytes) {
     QVector<RvDeviceProfile> result;for(const auto &value:document(bytes)["devices"].toArray()) {require(value.isObject(),"Invalid device entry");result.append(RvDeviceProfile::fromJson(value.toObject()));}
@@ -123,16 +116,7 @@ QVector<RvDeviceProfile> RvDeviceStore::mergeProfiles(const QVector<RvDeviceProf
 }
 void RvDeviceStore::reload() {
     const auto bytes=read(m_path);
-    if(!QFileInfo::exists(m_path)) {
-        m_profiles.clear();
-        m_active.clear();
-        m_disk.clear();
-        if(qEnvironmentVariable("RV_TEST_OFFLINE_ONLY")=="1") {
-            m_profiles=defaults();
-            m_active=m_profiles.first().id;
-        }
-        return;
-    }
+    if(!QFileInfo::exists(m_path)){m_profiles.clear();m_active.clear();m_disk.clear();return;}
     auto profiles=parseImport(bytes);const auto o=document(bytes);require(o["active"].isString(),"Missing active device");
     const auto active=o["active"].toString();bool found=active.isEmpty();for(const auto &p:profiles)found|=p.id==active;
     require(found,"Selected device is absent from registry");m_profiles=profiles;m_active=active;m_disk=bytes;

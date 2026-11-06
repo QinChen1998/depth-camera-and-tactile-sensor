@@ -27,15 +27,17 @@ RvDtofBoardStream::RvDtofBoardStream(const QJsonObject& receipt,const RvDtofCand
     :QObject(parent),expected([&]{auto value=receipt;if(RvDtofCandidates::isLiteSrFull(value["candidate_mode"].toInt(-1))&&value["paired_depth_native_protocol"]==LiteSrBoardContract::PairedProtocol)value["protocol"]=LiteSrBoardContract::PairedProtocol;return value;}()),settings(s),decoder(std::make_shared<Decoder>()),
      decodePool(pool?pool:liveDecodePool()) {
     socket.setProxy(QNetworkProxy::NoProxy);socket.setReadBufferSize(LiteSrBoardContract::isHighResolution(expected["candidate_mode"].toInt(-1))?1600000:800000);
-    poll.setInterval(20);timeout.setSingleShot(true);expiry.setSingleShot(true);progress.start();
+    poll.setInterval(LiteSrBoardContract::isNative16Depth(expected["candidate_mode"].toInt(-1))?8:20);timeout.setSingleShot(true);expiry.setSingleShot(true);progress.start();
     connect(&poll,&QTimer::timeout,this,[this]{ask();});
-    connect(&socket,&QTcpSocket::connected,this,[this]{socket.setSocketOption(QAbstractSocket::LowDelayOption,1);poll.start();ask();});
+    connect(&socket,&QTcpSocket::connected,this,[this]{socket.setSocketOption(QAbstractSocket::LowDelayOption,1);
+        if(RvDtofCandidates::isTinyNv12(expected["candidate_mode"].toInt(-1))){tinyClock.start();socket.write(expected["generation"].toString().toLatin1()+QByteArray(4,0));}
+        else {poll.start();ask();}});
     connect(&socket,&QTcpSocket::readyRead,this,[this]{read();});
     connect(&socket,&QTcpSocket::errorOccurred,this,[this]{fail(tr("RV1103 candidate stream disconnected"));});
     connect(&timeout,&QTimer::timeout,this,[this]{fail(tr("RV1103 candidate stream timed out"));});
     connect(&expiry,&QTimer::timeout,this,[this]{if(expired){const auto callback=expired;callback();}});
     connect(&watcher,&QFutureWatcher<Decoded>::finished,this,[this]{finish();});
-    timeout.start(3000);socket.connectToHost(host,port);
+    timeout.start(3000);socket.connectToHost(host,RvDtofCandidates::isTinyNv12(expected["candidate_mode"].toInt(-1))&&port==8832?8846:port);
 }
 RvDtofBoardStream::~RvDtofBoardStream() {
     // A queued/running job retains its own data, never this QObject. Destruction
@@ -65,6 +67,7 @@ void RvDtofBoardStream::ask() {
     pending=true;roundtrip.restart();timeout.start(3000);socket.write(bytes);
 }
 void RvDtofBoardStream::read() {
+    if(RvDtofCandidates::isTinyNv12(expected["candidate_mode"].toInt(-1))){readTiny();return;}
     if(failed)return;
     if(!pending||decoding||socket.bytesAvailable()+buffer.size()>(LiteSrBoardContract::isHighResolution(expected["candidate_mode"].toInt(-1))?1600000:800000)){fail(tr("Invalid candidate stream size"));return;}
     const bool lite=RvDtofCandidates::isLiteSr(expected["candidate_mode"].toInt(-1));
@@ -75,10 +78,10 @@ void RvDtofBoardStream::read() {
     const auto inputSize=lite?u(24):0,signalSize=lite?u(28):0;
     const auto sourceSize=paired?u(32):0;
     const auto grid=liteSrNativeGrid(expected);const auto nativeBytes=quint32(grid.width()*grid.height()*4);
-    const quint32 maximumPixels=lite?quint32(RvDtofCandidates::outputWidth(expected["candidate_mode"].toInt(-1))*RvDtofCandidates::outputHeight(expected["candidate_mode"].toInt(-1))):DtofM0::P;
+    const quint32 maximumPixels=quint32(RvDtofCandidates::outputWidth(expected["candidate_mode"].toInt(-1))*RvDtofCandidates::outputHeight(expected["candidate_mode"].toInt(-1)));
     if(u(0)!=(paired?LiteSrBoardContract::PairedResponseMagic:lite?LiteSrBoardContract::ResponseMagic:0x33465444)||jsonSize==0||jsonSize>4096||depthSize>maximumPixels*4||coverageSize>maximumPixels*5
         ||depthSize+coverageSize>maximumPixels*5||!RvDtofCandidates::supports(expected["candidate_mode"].toInt(-1))
-        ||!grid.isValid()||(rawSize&&rawSize!=nativeBytes)||(rgbSize&&rgbSize!=279936)||(inputSize&&inputSize!=nativeBytes)||(signalSize&&signalSize!=nativeBytes/2)||(sourceSize&&sourceSize!=6144)){fail(tr("Invalid candidate stream header"));return;}
+        ||!grid.isValid()||(rawSize&&rawSize!=nativeBytes)||(rgbSize&&rgbSize!=279936)||(inputSize&&inputSize!=nativeBytes)||(signalSize&&signalSize!=nativeBytes/2)||(sourceSize&&sourceSize!=nativeBytes)){fail(tr("Invalid candidate stream header"));return;}
     if(RvDtofCandidates::isLiteSrHd(expected["candidate_mode"].toInt(-1))&&rgbSize){fail(tr("HD mode cannot carry a second camera stream"));return;}
     const auto total=headerSize+jsonSize+depthSize+coverageSize+rawSize+rgbSize+inputSize+signalSize+sourceSize;
     if(buffer.size()<total)return;
@@ -117,8 +120,8 @@ RvDtofBoardStream::Decoded RvDtofBoardStream::decode(const std::shared_ptr<Decod
     const bool data=m["data"].toBool();
     if(RvDtofCandidates::isCaptureOnly(mode)&&(data||depthSize||coverageSize||sourceSize))return reject(tr("Capture-only stream contains unexpected model output"));
     if(RvDtofCandidates::isCaptureOnly(mode)&&(m["photon_data"]!=false||inputSize||signalSize))return reject(tr("Candidate identity or parameters mismatch"));
-    if(paired&&(!RvDtofCandidates::isLiteSrFull(mode)||sourceSize!=(data?6144u:0u)))return reject(tr("Invalid paired board inference native measurement"));
-    if(LiteSrBoardContract::isHighResolution(mode)&&(rgbSize||m["rgb_data"]!=false))return reject(tr("Candidate identity or parameters mismatch"));
+    if(paired&&(!RvDtofCandidates::isLiteSrFull(mode)||sourceSize!=(data?nativeBytes:0u)))return reject(tr("Invalid paired board inference native measurement"));
+    if(LiteSrBoardContract::isDepthOnly(mode)&&(rgbSize||m["rgb_data"]!=false))return reject(tr("Candidate identity or parameters mismatch"));
     if(lite&&(!liteSrBoardIdentity(m)||(data&&(m["encoding"]!="raw"||depthSize!=quint32(RvDtofCandidates::outputWidth(mode)*RvDtofCandidates::outputHeight(mode)*4)||coverageSize!=quint32(RvDtofCandidates::outputWidth(mode)*RvDtofCandidates::outputHeight(mode))
         ||m["input_rotation_degrees"]!=0||m["intensity_white_counts"]!=512||m["quantization"]!="INT8"
         ||(m["positive_near_policy"]!="model_output_no_native_near_fill"&&m["positive_near_policy"]!="positive_native_near_bilinear_not_model_prediction")))
@@ -147,9 +150,9 @@ RvDtofBoardStream::Decoded RvDtofBoardStream::decode(const std::shared_ptr<Decod
         lastSeq=seq;lastStamp=stamp;return true;
     };
     if(rawSize){
-        if(!identity("raw_sequence","raw_timestamp_ns","raw_age_ms",rawSequence,rawCapture,rawAge)||!m["tof_warning_flags"].isDouble()||(m["tof_warning_flags"].toDouble()!=0&&m["tof_warning_flags"].toDouble()!=8)){return reject(tr("Invalid candidate measurement identity"));}
+        if(!identity("raw_sequence","raw_timestamp_ns","raw_age_ms",rawSequence,rawCapture,rawAge)||!m["tof_warning_flags"].isDouble()||(m["tof_warning_flags"].toDouble()!=0&&m["tof_warning_flags"].toDouble()!=8&&m["tof_warning_flags"].toDouble()!=16)){return reject(tr("Invalid candidate measurement identity"));}
         native.samples=buffer.mid(headerSize+jsonSize+depthSize+coverageSize,rawSize);native.metadata=m;auto& n=native.metadata;
-        if(RvDtofCandidates::isCaptureOnly(mode)){
+        if(RvDtofCandidates::isCaptureOnly(mode)||LiteSrBoardContract::isNative16Depth(mode)){
             if(m["raw_fov_correction"]!=expectedFov)return reject(tr("Invalid candidate measurement identity"));
             n["dtof_fov_correction"]=m["raw_fov_correction"];
         }
@@ -169,13 +172,12 @@ RvDtofBoardStream::Decoded RvDtofBoardStream::decode(const std::shared_ptr<Decod
     if(data){bool a=false,b=false;const auto seq=m["tof_sequence"].toString().toULongLong(&a),stamp=m["tof_timestamp_ns"].toString().toULongLong(&b);const double age=m["age_ms"].toDouble(-1);
         if(!a||!b||!seq||!stamp||seq<=sequence||stamp<=capture||!std::isfinite(age)||age<0||!std::isfinite(m["compute_ms"].toDouble(-1))||m["compute_ms"].toDouble(-1)<0){return reject(tr("Invalid candidate measurement identity"));}
         sequence=seq;capture=stamp;out.depthAge=age;
-        if(lite){result.depth=buffer.mid(headerSize+jsonSize,depthSize);result.coverage=buffer.mid(headerSize+jsonSize+depthSize,coverageSize);}
-        else try{const auto* bytes=reinterpret_cast<const uint8_t*>(buffer.constData());const auto payload=DtofBoard::unpack(bytes+24+jsonSize,depthSize,bytes+24+jsonSize+depthSize,coverageSize,true,m["encoding"]=="runs");result.depth=QByteArray(reinterpret_cast<const char*>(payload.depth.data()),payload.depth.size());result.coverage=QByteArray(reinterpret_cast<const char*>(payload.coverage.data()),payload.coverage.size());}catch(...){return reject(tr("Invalid candidate depth values"));}
+        result.depth=buffer.mid(headerSize+jsonSize,depthSize);result.coverage=buffer.mid(headerSize+jsonSize+depthSize,coverageSize);
         const int width=RvDtofCandidates::outputWidth(mode),height=RvDtofCandidates::outputHeight(mode),pixels=width*height;
         for(int i=0;i<pixels;++i){float v;std::memcpy(&v,result.depth.constData()+i*4,4);if(!std::isfinite(v)||v<0||v>1.4f||(LiteSrBoardContract::isNear(mode)&&v>0&&v<.01f)||((v>0)!=(result.coverage[i]!=0))){return reject(tr("Invalid candidate depth values"));}}
         auto& meta=result.metadata;meta=m;meta["width"]=width;meta["height"]=height;meta["model"]=RvDtofCandidates::name(mode);meta["work_mode"]="dtof_candidate";meta["frame_id"]=qint64(seq);meta["tof_sequence"]=qint64(seq);meta["tof_timestamp_ns"]=qint64(stamp);
         meta["depth_location"]="rv1103";meta["compute_location"]="rv1103";meta["rgb_used"]=false;meta["simulation"]=false;meta["tof_filter_raw_preserved"]=true;meta["depth_method"]=RvDtofCandidates::name(mode);meta["candidate_parameters"]=RvDtofCandidates::parameters(mode,settings);
-        meta["depth_present"]=true;meta["depth_format"]="float32_le";meta["depth_unit"]="sensor_radial_m_float32";meta["depth_coordinate"]="sensor_radial_native";meta["depth_stride"]=width*4;meta["depth_bytes"]=result.depth.size();meta["wire_bytes"]=int(depthSize+coverageSize);meta["visual_only"]=false;meta["experimental"]=true;meta["accuracy_validated"]=false;meta["presentation_smoothing"]=lite?0:settings.presentation;meta["depth_usage"]=(lite?mode==RvDtofCandidates::LiteSrContour:settings.presentation>0)?"presentation":"current_frame_reconstruction";
+        meta["depth_present"]=true;meta["depth_format"]="float32_le";meta["depth_unit"]="sensor_radial_m_float32";meta["depth_coordinate"]="sensor_radial_native";meta["depth_stride"]=width*4;meta["depth_bytes"]=result.depth.size();meta["wire_bytes"]=int(depthSize+coverageSize);meta["visual_only"]=false;meta["experimental"]=true;meta["accuracy_validated"]=false;meta["presentation_smoothing"]=0;meta["depth_usage"]=(mode==RvDtofCandidates::LiteSrContour)?"presentation":"current_frame_reconstruction";
     }
     if(lite&&m["photon_data"].toBool()){
         auto& lastSequence=out.identities.photonSequence;auto& lastStamp=out.identities.photonCapture;
@@ -190,15 +192,20 @@ RvDtofBoardStream::Decoded RvDtofBoardStream::decode(const std::shared_ptr<Decod
         auto& n=light.tof.metadata;n=m;n["frame_id"]=qint64(seq);n["tof_sequence"]=qint64(seq);n["tof_timestamp_ns"]=qint64(stamp);n["work_mode"]="dtof_candidate";n["model"]=RvDtofCandidates::name(mode);n["dtof_width"]=grid.width();n["dtof_height"]=grid.height();n["dtof_bytes"]=int(nativeBytes);n["dtof_format"]="range_uq2_u16le_snr_u8_valid_u8";n["dtof_range_unit"]="0.25_mm";n["dtof_source"]="tmf8829_ipc_first_peak";n["dtof_coordinate"]="sensor_radial_native";n["tof_reused"]=false;n["tof_warning_flags"]=m.value("input_warning_flags");n["tof_fov_correction"]=light.fovCorrection;
         const auto warning=m.value("input_warning_flags");
         if(!light.tof.isValid()||light.fovCorrection!=expectedFov||m["input_fov_correction"]!=expectedFov||m["input_signal_format"]!=light.resultFormat||light.resultFormat<0||(light.resultFormat&8)==0||(light.resultFormat&7)!=1||(light.resultFormat&0xc0)
-            ||!warning.isDouble()||(warning.toDouble()!=0&&warning.toDouble()!=8))return reject(tr("Invalid candidate measurement identity"));
+            ||!warning.isDouble()||(warning.toDouble()!=0&&warning.toDouble()!=8&&warning.toDouble()!=16))return reject(tr("Invalid candidate measurement identity"));
         if(!repeated)out.photon=std::move(light);
     }
     if(paired&&data){
+        if(LiteSrBoardContract::isNative16Depth(mode)&&
+           (!m["photon_data"].toBool()||m["photon_sequence"]!=m["tof_sequence"]||m["photon_timestamp_ns"]!=m["tof_timestamp_ns"]
+            ||m["input_warning_flags"]!=m["depth_native_warning_flags"]||m["input_columns"]!=16||m["input_rows"]!=16
+            ||buffer.mid(headerSize+jsonSize+depthSize+coverageSize+rawSize+rgbSize,inputSize)!=buffer.right(sourceSize)))
+            return reject(tr("Invalid paired board inference native measurement"));
         if(m["depth_native_sequence"]!=m["tof_sequence"]||m["depth_native_timestamp_ns"]!=m["tof_timestamp_ns"]
-            ||m["depth_native_fov_correction"]!=expectedFov||(m["depth_native_warning_flags"]!=0&&m["depth_native_warning_flags"]!=8))
+            ||m["depth_native_fov_correction"]!=expectedFov||(m["depth_native_warning_flags"]!=0&&m["depth_native_warning_flags"]!=8&&m["depth_native_warning_flags"]!=16))
             return reject(tr("Invalid paired board inference native measurement"));
         RvTofFrame source;source.samples=buffer.right(sourceSize);source.metadata=result.metadata;
-        auto& n=source.metadata;n["dtof_width"]=48;n["dtof_height"]=32;n["dtof_bytes"]=6144;n["dtof_format"]="range_uq2_u16le_snr_u8_valid_u8";
+        auto& n=source.metadata;n["dtof_width"]=grid.width();n["dtof_height"]=grid.height();n["dtof_bytes"]=int(nativeBytes);n["dtof_format"]="range_uq2_u16le_snr_u8_valid_u8";
         n["dtof_range_unit"]="0.25_mm";n["dtof_source"]="tmf8829_ipc_first_peak";n["dtof_coordinate"]="sensor_radial_native";n["tof_reused"]=false;n["tof_warning_flags"]=m.value("depth_native_warning_flags");n["tof_fov_correction"]=expectedFov;
         if(!source.isValid())return reject(tr("Invalid paired board inference native measurement"));
         if(hostContour&&!decoder->cancelled.load()){
@@ -268,4 +275,34 @@ void RvDtofBoardStream::finish() {
     }
     if(!alive())return;
     decoding=false;pending=false;timeout.stop();
+}
+
+// TNY6 is an independent push stream. The token handshake binds this socket to
+// the already verified control receipt; native measurements travel in each frame.
+void RvDtofBoardStream::readTiny(){
+    if(failed)return;
+    constexpr int packetBytes=TinyNv12Contract::HeaderBytes+TinyNv12Contract::PayloadBytes;
+    if(socket.bytesAvailable()+buffer.size()>packetBytes*8){fail(tr("Invalid candidate stream size"));return;}
+    buffer+=socket.readAll();
+    if(!tinyBoardClock){
+        if(buffer.size()<8)return;
+        tinyBoardClock=qFromLittleEndian<quint64>(buffer.constData());buffer.remove(0,8);
+        if(!tinyBoardClock||!tinyClock.isValid()){fail(tr("Candidate identity or parameters mismatch"));return;}
+    }
+    while(buffer.size()>=packetBytes){
+        auto packet=buffer.left(packetBytes);buffer.remove(0,packetBytes);
+        RvTinyNv12::Frame out;
+        try{out=RvTinyNv12::decode(packet,expected,tinyIdentity,tinyBoardClock+quint64(tinyClock.nsecsElapsed()));}
+        catch(const std::exception& e){fail(QString::fromUtf8(e.what()));return;}
+        tinyIdentity=out.identity;progress.restart();timeout.start(3000);
+        QPointer<RvDtofBoardStream> guard(this);
+        if(out.rawAge<220&&rawFrame){const auto callback=rawFrame;callback(out.native);}
+        if(!guard||failed)return;
+        if(out.photon.isValid()&&photonFrame){const auto callback=photonFrame;callback(out.photon);}
+        if(!guard||failed)return;
+        if(out.rgbAge<500&&rgbFrame){const auto callback=rgbFrame;callback(out.camera,out.cameraMetadata);}
+        if(!guard||failed)return;
+        if(out.result.fresh){expiry.start(std::max(1,int(1000-out.rawAge)));if(frame){const auto callback=frame;callback(out.result);}}
+        if(!guard||failed)return;
+    }
 }

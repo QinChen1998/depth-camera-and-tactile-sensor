@@ -1,6 +1,6 @@
 #include "RvLiteSrContour.h"
 #include "../tools/litesr_board/Contour.h"
-#include "../tools/litesr_board/Contour512.h"
+#include "../tools/litesr_board/Contour384.h"
 #include <QtCore/QCryptographicHash>
 #include <QtCore/QElapsedTimer>
 #include <QtCore/QtEndian>
@@ -13,7 +13,8 @@
 
 namespace RvLiteSrContour {
 Result refineBoard(const QByteArray &input,const QByteArray &native,const RepairSettings &settings){
-    const int side=input.size()==512*512*4?512:256;const int Pixels=side*side;
+    const bool rect=input.size()==384*256*4;
+    const int Pixels=rect?384*256:256*256;
     if(input.size()!=Pixels*4||native.size()!=48*32*4)
         throw std::runtime_error("Board LiteSR refinement requires a complete paired depth/native frame");
     std::vector<float> values(Pixels);
@@ -21,7 +22,7 @@ Result refineBoard(const QByteArray &input,const QByteArray &native,const Repair
     const auto finish=[&](const auto& filtered){
     Result out;out.depth.resize(Pixels*4);out.coverage=QByteArray(reinterpret_cast<const char*>(filtered.coverage.data()),Pixels);
     for(int i=0;i<Pixels;++i){quint32 bits;std::memcpy(&bits,&filtered.depth[i],4);qToLittleEndian(bits,out.depth.data()+4*i);}
-    out.diagnostic={{"algorithm",side==512?"litesr_board_contour_512_v1":"litesr_board_contour_fast_v2"},{"location","host_cpu_background"},{"base_model","board_area_full_int8"},
+    out.diagnostic={{"algorithm",rect?"litesr_board_contour_384x256_v1":"litesr_board_contour_fast_v2"},{"location","host_cpu_background"},{"base_model","board_area_full_int8"},
         {"base_depth_sha256",QString::fromLatin1(QCryptographicHash::hash(input,QCryptographicHash::Sha256).toHex())},
         {"hole_mode",settings.holeMode},{"maximum_hole_native_cells",settings.holeMode==1?4:settings.holeMode==2?64:0},
         {"isolated_outlier_repair",settings.removeOutliers},{"filled_native_cells",filtered.repairs.filledCells},{"outlier_native_cells",filtered.repairs.outlierCells},
@@ -29,15 +30,8 @@ Result refineBoard(const QByteArray &input,const QByteArray &native,const Repair
         {"repair_ms",filtered.repairs.ms},{"postprocess_ms",filtered.totalMs},{"max_adjustment_m",.012},{"tangent_passes",4},
         {"native_measurements_modified",false},{"rgb_used",false},{"temporal_history_used",false},{"minimum_exclusive_m",0},
         {"coverage_semantics","display_opacity_only_never_multiplied_into_metres"}};
-    if(side==512){
-        out.diagnostic["reference_grid_size"]=256;out.diagnostic["pixel_scale"]=2;
-        out.diagnostic["spatial_radius_px"]=6;out.diagnostic["spatial_taps"]=13;
-        out.diagnostic["coverage_radius_px"]=4;out.diagnostic["coverage_taps"]=9;
-        out.diagnostic["tangent_step_px"]=2.5;out.diagnostic["gradient_threshold_m_per_pixel"]=.00005;
-        out.diagnostic["range_sigma_m"]=.012;out.diagnostic["layer_guard_m"]=.04;
-    }
     return out;};
-    if(side==512)return finish(LiteSrBoardContour512::refineFast(values.data(),reinterpret_cast<const uint8_t*>(native.constData()),0,{settings.holeMode,settings.removeOutliers}));
+    if(rect)return finish(LiteSrBoardContour384::refineFast(values.data(),reinterpret_cast<const uint8_t*>(native.constData()),0,{settings.holeMode,settings.removeOutliers}));
     return finish(LiteSrBoardContour::refineFast(values.data(),reinterpret_cast<const uint8_t*>(native.constData()),0,{settings.holeMode,settings.removeOutliers}));
 }
 namespace {

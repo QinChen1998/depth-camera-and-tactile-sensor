@@ -1,4 +1,5 @@
 @echo off
+chcp 65001 >nul
 setlocal
 if exist "%~dp0x64\Release\Qt6Multimedia.dll" if exist "%~dp0x64\Release\platforms\qwindows.dll" goto local_runtime
 set "DCTS_QT_ROOT="
@@ -19,5 +20,6 @@ set "QML_IMPORT_PATH=%~dp0x64\Release\qml"
 set "QML2_IMPORT_PATH=%~dp0x64\Release\qml"
 :launch
 cd /d "%~dp0"
-start "" "%~dp0x64\Release\Depth Camera and Tactile Sensor.exe" %*
+rem The default Release build selects the workspace TensorRT-RTX runtime.
+start "" "%~dp0x64\Release\触想工作台.exe" %*
 endlocal

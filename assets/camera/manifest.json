@@ -1,0 +1,123 @@
+{
+  "status": "user_selected_calibration_accuracy_not_certified",
+  "intrinsics_sha256": "8198bdfde1916c72e4d472e73448ebf7341fc080e38c14733e479ce6bc11b9ba",
+  "extrinsics_sha256": "bfccd95d93042dd45e5a45924aac6c05dff778d9e9ac09738a0cb08a9e9241fb",
+  "ray_mapping": [
+    [
+      0.0,
+      -1.0,
+      0.0
+    ],
+    [
+      -1.0,
+      0.0,
+      0.0
+    ],
+    [
+      0.0,
+      0.0,
+      1.0
+    ]
+  ],
+  "rectified_K": [
+    [
+      143.5,
+      0.0,
+      71.5
+    ],
+    [
+      0.0,
+      143.5,
+      40.0
+    ],
+    [
+      0.0,
+      0.0,
+      1.0
+    ]
+  ],
+  "files": {
+    "extrinsics.json": "bfccd95d93042dd45e5a45924aac6c05dff778d9e9ac09738a0cb08a9e9241fb",
+    "intrinsics.json": "8198bdfde1916c72e4d472e73448ebf7341fc080e38c14733e479ce6bc11b9ba",
+    "M48_geometry.bin": "83b49ace957a4f70982380c6f22a7c39236764ff7311232d03724e85273324db",
+    "nv12_rectify.bin": "00de89f4e6d95f09758b0d8274c2694168a27b5f601bdfeda667b0b179126b5d",
+    "nv12_rectify.json": "85d373a68e6b843707ed001fc1c9b605585beeecace4ee0d3ef6842d13228a90",
+    "nv12_rectify_144.bin": "7aa7e0661ff93d756e003dd112af60e32ba062472aceeed3c111e7a422e52582",
+    "nv12_rectify_144.json": "7e2552f6d1bc4c6c5a5346873bd4a055ea16462328a392db95a61d6cf8d0d18e",
+    "nv12_rectify_2304.bin": "a98e28d4cf1807bf2d2ea0e827de2fd3fa8a36d1b9eebd936202a7c92b7209a9",
+    "nv12_rectify_2304.json": "6decc729bdfecbf954eebd6ae4f61d20795a56c1938347256d061c8f1d64db45",
+    "preview576.bin": "d61aa97268b12aa34041456158c86cf73a7b7b241c388ea35f7d364fae004954",
+    "remap.bin": "77dbb2bf4561bec443490472c05fc6608df5e26d0a638d64e22a1604237cb1ac"
+  },
+  "contracts": {
+    "144": {
+      "map_sha256": "7aa7e0661ff93d756e003dd112af60e32ba062472aceeed3c111e7a422e52582",
+      "calibration_sha256": "8198bdfde1916c72e4d472e73448ebf7341fc080e38c14733e479ce6bc11b9ba",
+      "source_size": [
+        2304,
+        1296
+      ],
+      "wire_size": [
+        144,
+        81
+      ],
+      "output_size": [
+        144,
+        81
+      ],
+      "coded_height": 82,
+      "source_relation": "source=16*wire+7.5",
+      "model_grid_relation": "model=(rectified+0.5)/1.0-0.5",
+      "color_matrix": "canonical-full-601",
+      "range": "full",
+      "resize": "area16x16-round-half-up"
+    },
+    "576": {
+      "map_sha256": "00de89f4e6d95f09758b0d8274c2694168a27b5f601bdfeda667b0b179126b5d",
+      "calibration_sha256": "8198bdfde1916c72e4d472e73448ebf7341fc080e38c14733e479ce6bc11b9ba",
+      "source_size": [
+        2304,
+        1296
+      ],
+      "wire_size": [
+        576,
+        324
+      ],
+      "output_size": [
+        576,
+        324
+      ],
+      "coded_height": 324,
+      "source_relation": "source=4*wire+1.5",
+      "model_grid_relation": "model=(rectified+0.5)/4.0-0.5",
+      "color_matrix": "canonical-full-601",
+      "range": "full",
+      "resize": "area4x4-round-half-up"
+    },
+    "2304": {
+      "map_sha256": "a98e28d4cf1807bf2d2ea0e827de2fd3fa8a36d1b9eebd936202a7c92b7209a9",
+      "calibration_sha256": "8198bdfde1916c72e4d472e73448ebf7341fc080e38c14733e479ce6bc11b9ba",
+      "source_size": [
+        2304,
+        1296
+      ],
+      "wire_size": [
+        2304,
+        1296
+      ],
+      "output_size": [
+        2304,
+        1296
+      ],
+      "coded_height": 1296,
+      "source_relation": "source=1*wire+0.0",
+      "model_grid_relation": "model=(rectified+0.5)/16.0-0.5",
+      "color_matrix": "canonical-full-601",
+      "range": "full",
+      "resize": "identity"
+    }
+  },
+  "tof_fov_correction": 1,
+  "profile_device_serial": "aa8f7fef70fdb490",
+  "source_calibration_date": "2026-10-08"
+}

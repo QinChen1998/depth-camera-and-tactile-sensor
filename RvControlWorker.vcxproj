@@ -18,9 +18,11 @@
  <ItemDefinitionGroup Condition="'$(Configuration)' == 'Release'"><ClCompile><Optimization>MaxSpeed</Optimization><DebugInformationFormat>ProgramDatabase</DebugInformationFormat><PreprocessorDefinitions>NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions></ClCompile><Link><OptimizeReferences>true</OptimizeReferences><EnableCOMDATFolding>true</EnableCOMDATFolding></Link></ItemDefinitionGroup>
  <ItemDefinitionGroup Condition="'$(RvTransportTests)' == 'true'"><ClCompile><PreprocessorDefinitions>RV_CONTROL_TRANSPORT_TEST;%(PreprocessorDefinitions)</PreprocessorDefinitions></ClCompile></ItemDefinitionGroup>
  <ItemGroup><ClCompile Include="RvControlWorker.cpp"/><ClCompile Include="RvControlProtocol.cpp"/></ItemGroup>
- <ItemGroup><ClInclude Include="RvControlProtocol.h"/><ClInclude Include="tools\dtof_board\Options.h"/><ClInclude Include="tools\litesr_board\Contract.h"/></ItemGroup>
+ <ItemGroup><ClInclude Include="RvControlProtocol.h"/><ClInclude Include="tools\tiny_nv12_board\Contract.h" />
+    <ClInclude Include="tools\tiny_nv12_board\Receipt.h" />
+    <ClInclude Include="tools\litesr_board\Contract.h"/></ItemGroup>
  <Target Name="ValidateRvDependencies" BeforeTargets="ClCompile"><Error Condition="!Exists('$(RvDependencyRoot)\lib\libssh2.lib')" Text="Prepare pinned libssh2/OpenSSL with tools/rv_control/prepare_sdk.ps1."/></Target>
  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
 <ItemGroup><ClInclude Include="sensors\RvDeviceStore.h" /><ClCompile Include="sensors\RvDeviceStore.cpp" /></ItemGroup>
- <ItemGroup><ClInclude Include="sensors\RvTunerProtocol.h"/><ClCompile Include="sensors\RvTunerProtocol.cpp"/><ClInclude Include="tools\dtof_tuner\Worker.inc"/></ItemGroup>
+ <ItemGroup><ClInclude Include="sensors\RvTunerProtocol.h"/><ClCompile Include="sensors\RvTunerProtocol.cpp"/><ClInclude Include="tools\dtof_tuner\Worker.inc"/><ClInclude Include="tools\litesr_board\protected\Worker.inc"/><ClInclude Include="tools\rv_control\Bootstrap.inc"/></ItemGroup>
 </Project>

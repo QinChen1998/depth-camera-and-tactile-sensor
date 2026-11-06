@@ -4,6 +4,9 @@
 #include "../tools/rv_photon/Wire.h"
 #include "../LanguageManager.h"
 #include "../RuntimeDiscovery.h"
+#include "RvDeviceFixture.h"
+#include "../sensors/RvDtofBoardStream.h"
+#include "../sensors/RvDepthView.h"
 #include <QtCore/QFile>
 #include <QtCore/QTextStream>
 #include <QtCore/QTemporaryDir>
@@ -22,6 +25,10 @@
 #include <QtWidgets/QSplitter>
 #include <QtWidgets/QSplitterHandle>
 #include <QtGui/QMouseEvent>
+#include <QtNetwork/QTcpServer>
+#include <QtNetwork/QTcpSocket>
+#include <QtCore/QEventLoop>
+#include <QtCore/QTimer>
 #include <functional>
 #include <cstring>
 
@@ -36,9 +43,93 @@ QByteArray packet(const RvTuner::Settings &s,quint32 sequence=1){
 }
 bool rejects(const std::function<void()> &fn){try{fn();return false;}catch(const std::exception &){return true;}}
 }
+// In-process loopback server exercises the production asynchronous decoder,
+// fragmentation, shape validation and exact same-frame D/I pairing.
+enum class StreamOutcome { InfrastructureFailure, Accepted, Rejected };
+static StreamOutcome rectStreamCase(int warning,int defect){
+ QJsonObject receipt{{"state","running"},{"protocol","LSG1"},{"paired_depth_native_protocol","LSG2"},{"boot_id",Boot},{"generation",Token},
+   {"candidate_mode",16},{"options","1,1"},{"engine",LiteSrBoardContract::RectEngine},{"model_sha256",LiteSrBoardContract::RectModelSha},
+   {"checkpoint_sha256",LiteSrBoardContract::NearCheckpointSha},{"training_minimum_m",.01},{"width",384},{"height",256},{"fresh_ms",1000},
+   {"rgb_paused",true},{"video_transport","none"},{"video_fps",0},{"native_columns",48},{"native_rows",32},{"expected_fov",1}};
+ if(!dtofBoardReceipt(receipt,16,Token,"1,1"))return StreamOutcome::InfrastructureFailure;
+ QJsonObject m=receipt;m["protocol"]="LSG2";
+ for(const auto *key:{"tof_sequence","raw_sequence","photon_sequence","depth_native_sequence"})m[key]="1";
+ for(const auto *key:{"tof_timestamp_ns","raw_timestamp_ns","photon_timestamp_ns","depth_native_timestamp_ns"})m[key]="1000000000";
+ for(const auto *key:{"age_ms","raw_age_ms","photon_age_ms"})m[key]=5.;
+ for(const auto *key:{"tof_warning_flags","input_warning_flags","depth_native_warning_flags"})m[key]=warning;
+ m["request"]=1;m["data"]=true;m["raw_data"]=true;m["rgb_data"]=false;m["photon_data"]=true;
+ m["compute_ms"]=10.;m["encoding"]="raw";m["input_rotation_degrees"]=0;m["intensity_white_counts"]=512;m["quantization"]="INT8";
+ m["positive_near_policy"]="model_output_no_native_near_fill";m["raw_fov_correction"]=1;m["input_fov_correction"]=1;m["depth_native_fov_correction"]=1;
+ m["input_signal_format"]=9;m["input_columns"]=48;m["input_rows"]=32;
+ QByteArray native(6144,0),signal(3072,0),depth(393216,0),coverage(98304,char(255));const float value=.3f;
+ for(int i=0;i<1536;++i){qToLittleEndian<quint16>(1200,native.data()+i*4);native[i*4+2]=20;native[i*4+3]=1;qToLittleEndian<quint16>(100,signal.data()+2*i);}
+ for(int i=0;i<98304;++i)std::memcpy(depth.data()+4*i,&value,4);
+ auto source=native;
+ if(defect==1)m["depth_native_sequence"]="2";
+ if(defect==2)m["depth_native_fov_correction"]=2;
+ if(defect==3)m["video_transport"]="rtsp_h265";
+ if(defect==4)m["video_fps"]=30;
+ if(defect==5)m["input_warning_flags"]=24;
+ if(defect==6)source=QByteArray(1024,0);
+ if(defect==7){m["rgb_data"]=true;signal.clear();}
+ const auto input=defect==7?QByteArray():native;
+ const auto json=QJsonDocument(m).toJson(QJsonDocument::Compact);
+ QByteArray packet(36,0);quint32 sizes[]={LiteSrBoardContract::PairedResponseMagic,quint32(json.size()),393216,98304,6144,0,quint32(input.size()),quint32(signal.size()),quint32(source.size())};
+ for(int i=0;i<9;++i)qToLittleEndian(sizes[i],packet.data()+4*i);
+ packet+=json+depth+coverage+native+input+signal+source;
+ QTcpServer server;if(!server.listen(QHostAddress::LocalHost))return StreamOutcome::InfrastructureFailure;
+ QObject scope;QEventLoop loop;QTimer deadline;deadline.setSingleShot(true);
+ auto outcome=StreamOutcome::InfrastructureFailure;
+ bool requested=false;int raw=0,photons=0,position=0;QTcpSocket *peer=nullptr;std::function<void()> send;
+ QObject::connect(&deadline,&QTimer::timeout,&loop,&QEventLoop::quit);
+ send=[&]{if(!peer||position>=packet.size())return;const auto part=packet.mid(position,position<36?1:8191);position+=part.size();peer->write(part);QTimer::singleShot(0,&scope,send);};
+ QObject::connect(&server,&QTcpServer::newConnection,&scope,[&]{peer=server.nextPendingConnection();QObject::connect(peer,&QTcpSocket::readyRead,&scope,[&]{
+    if(peer->bytesAvailable()<32)return;const auto request=peer->read(32);if(qFromLittleEndian<quint32>(request.constData())!=LiteSrBoardContract::PairedRequestMagic){loop.quit();return;}requested=true;if(position==0)send();
+ });});
+ RvDtofCandidates::Settings settings;RvDtofBoardStream stream(receipt,settings,nullptr,"127.0.0.1",server.serverPort());
+ stream.rawFrame=[&](const RvTofFrame &f){raw+=f.isValid()&&f.columns()==48&&f.rows()==32;};
+ stream.photonFrame=[&](const RvPhotonFrame &f){photons+=f.tof.isValid()&&f.tof.columns()==48;};
+ stream.frame=[&](const RvDtofCandidates::Result &r){
+    if(requested&&r.fresh&&r.depth==depth&&r.coverage==coverage&&raw==1&&photons==1)outcome=StreamOutcome::Accepted;
+    loop.quit();
+ };
+ stream.error=[&](const QString &reason){
+    // A blocked loopback connection or a timeout must fail negative cases too.
+    if(requested&&position>=36&&!reason.isEmpty()
+       &&reason!=RvDtofBoardStream::tr("RV1103 candidate stream disconnected")
+       &&reason!=RvDtofBoardStream::tr("RV1103 candidate stream timed out"))outcome=StreamOutcome::Rejected;
+    loop.quit();
+ };
+ deadline.start(4000);loop.exec();return outcome;
+}
+
 int runRvTunerTests(const QString &path){
  QFile report(path);if(!report.open(QIODevice::WriteOnly|QIODevice::Text))return 3;QTextStream out(&report);bool passed=true;int checks=0;
  const auto check=[&](const QString &name,bool ok){++checks;out<<name<<' '<<(ok?"PASS":"FAIL")<<Qt::endl;passed&=ok;};
+ for(int mode:{9,10,11,12,13,15,17})check(QString("RETIRED_BOARD_MODE_%1_REJECTED").arg(mode),!RvDtofCandidates::supports(mode));
+ {
+    QJsonObject identity{{"candidate_mode",16},{"engine",LiteSrBoardContract::RectEngine},{"model_sha256",LiteSrBoardContract::RectModelSha},{"checkpoint_sha256",LiteSrBoardContract::NearCheckpointSha},{"training_minimum_m",.01},{"width",384},{"height",256},{"fresh_ms",1000},{"rgb_paused",true},{"video_transport","none"},{"video_fps",0}};
+    check("RECT_IDENTITY_ACCEPTED",liteSrBoardIdentity(identity));
+    identity["width"]=256;check("RECT_SQUARE_REJECTED",!liteSrBoardIdentity(identity));identity["width"]=384;
+    identity["model_sha256"]=QString(64,'0');check("RECT_LEGACY_HASH_REJECTED",!liteSrBoardIdentity(identity));
+    QByteArray depth(384*256*4,0),native(48*32*4,0);float value=.35f;quint32 bits;std::memcpy(&bits,&value,4);
+    for(int i=0;i<384*256;++i)qToLittleEndian(bits,depth.data()+4*i);
+    for(int i=0;i<48*32;++i){qToLittleEndian<quint16>(1400,native.data()+4*i);native[4*i+2]=20;native[4*i+3]=1;}
+    auto result=RvLiteSrContour::refineBoard(depth,native,{0,false});
+    check("RECT_CONTOUR_COMPLETE",result.depth.size()==depth.size()&&result.coverage.size()==384*256&&result.diagnostic["algorithm"]=="litesr_board_contour_384x256_v1");
+    check("RECT_PARTIAL_REJECTED",rejects([&]{RvLiteSrContour::refineBoard(depth.chopped(4),native,{0,false});}));
+    check("RETIRED_512_CONTOUR_REJECTED",rejects([&]{RvLiteSrContour::refineBoard(QByteArray(512*512*4,0),native,{0,false});}));
+    RvDepthView view;view.setRadialMode();view.setNativeGridSize({48,32});
+    const bool accepted=view.setDepth(result.depth,{{"width",384},{"height",256},{"depth_unit","sensor_radial_m_float32"},{"frame_id",1},{"generation","rect-test"}});
+    check("RECT_METRIC_CORNERS_AND_FOV",accepted&&std::abs(view.depthAt(0,0)-value)<1e-6f&&std::abs(view.depthAt(383,255)-value)<1e-6f&&view.depthAt(384,255)==0&&view.presentationSize()==QSizeF(32,48));
+ }
+ for(int warning:{0,8,16,24,32,64,128})check(QString("RECT_DEPTH_ONLY_FRAGMENTED_LSG2_WARNING_%1").arg(warning),rectStreamCase(warning,0)==(warning==0||warning==8||warning==16?StreamOutcome::Accepted:StreamOutcome::Rejected));
+ for(int defect=1;defect<=7;++defect)check(QString("RECT_DEPTH_ONLY_PAIR_CAMERA_SHAPE_REJECT_%1").arg(defect),rectStreamCase(0,defect)==StreamOutcome::Rejected);
+ {
+    RvDepthView view;view.setRadialMode();view.setNativeGridSize({16,16});QByteArray depth(128*128*4,0);const float v=.35f;
+    for(int i=0;i<128*128;++i)std::memcpy(depth.data()+4*i,&v,4);
+    check("NATIVE16_DISPLAY_GRID",view.setDepth(depth,{{"width",128},{"height",128},{"depth_unit","sensor_radial_m_float32"},{"frame_id",1},{"generation","native16-test"}})&&view.presentationSize()==QSizeF(16,16)&&std::abs(view.depthAt(127,127)-v)<1e-6);
+ }
  QTemporaryDir temporary;if(!temporary.isValid())return 3;QSettings::setDefaultFormat(QSettings::IniFormat);QSettings::setPath(QSettings::IniFormat,QSettings::UserScope,temporary.path());QSettings::setPath(QSettings::IniFormat,QSettings::SystemScope,temporary.path());
  using namespace RvTuner;Settings s;s.signal=true;
  for(int mode=0;mode<14;++mode){s.mode=mode;check(QString("MODE_%1_MAPPING").arg(mode),s.size()==(mode<=4?QSize(8,8):mode<=7?QSize(16,16):mode<=10?QSize(32,32):QSize(48,32)));check(QString("MODE_%1_PACKET").arg(mode),Decoder(Token,s,1).feed(packet(s)).size()==1);}
@@ -58,6 +149,8 @@ int runRvTunerTests(const QString &path){
  auto partial=Decoder(Token,s,1);check("TRUNCATED_NEVER_PUBLISHED",partial.feed(bytes.chopped(1)).isEmpty()&&partial.partial());
  check("OVERSIZED_BUFFER_REJECTED",rejects([&]{Decoder(Token,s,1).feed(QByteArray(512*1024+1,0));}));
  auto warning=bytes;warning[49]=warning[50]=9;qToLittleEndian<quint32>(8,warning.data()+52);check("OBSERVE_08_PRESERVED",Decoder(Token,s,1).feed(warning).first().warnings==8);
+ {auto b=bytes;b[49]=b[50]=17;qToLittleEndian<quint32>(16,b.data()+52);check("INFO_10_PRESERVED",Decoder(Token,s,1).feed(b).first().warnings==16);
+ b[49]=b[50]=25;qToLittleEndian<quint32>(24,b.data()+52);check("MIXED_08_10_REJECTED",rejects([&]{Decoder(Token,s,1).feed(b);}));}
  s.signal=false;const auto noSignal=Decoder(Token,s,1).feed(packet(s)).first();check("MISSING_SIGNAL_IS_CHANNEL_ABSENCE",!noSignal.settings.signal);auto forged=packet(s);forged[76]=1;check("MISSING_SIGNAL_NOT_ZERO_MEASUREMENT",rejects([&]{Decoder(Token,s,1).feed(forged);}));
  check("CHIP_ENCODING_SHARED_WITH_PHOTON",rv_photon_count(0x8002)==512&&rv_photon_count(0x7fff)==32767&&rv_photon_count(0xffff)==8388352);
  s.signal=true;auto frame=Decoder(Token,s,1).feed(packet(s)).first();check("TARGET_MAJOR_SAME_FRAME",frame.sample(2,0).range==1064&&frame.sample(1,0).range==1000);check("INVALID_TARGET_REJECTED",rejects([&]{frame.sample(4,0);}));
@@ -81,12 +174,11 @@ int runRvTunerTests(const QString &path){
     check("HIGH_ACCURACY_SAVE_READBACK_KEEPS_MODE_AND_SNR",scriptSettings(savedHighNative)==compatible&&scriptSettings(savedHighLite,true)==compatible&&scriptSettings(savedHighLite,true).snr==6);
     for(int mode=0;mode<14;++mode){auto candidate=compatible;candidate.mode=mode;
         check(QString("HOST_DEPTH_SENSOR_MODE_%1_SCOPE").arg(mode),candidate.hostDepthCompatible()==(mode==11));
-        check(QString("DEPTHOR_SENSOR_MODE_%1_SCOPE").arg(mode),candidate.depthorCompatible()==(mode<=2||mode==11));
         check(QString("FP16_NATIVE16_SENSOR_MODE_%1_SCOPE").arg(mode),candidate.fp16Native16Compatible()==(mode==5||mode==6));
-        candidate.signal=false;check(QString("DEPTHOR_SENSOR_MODE_%1_WITHOUT_SIGNAL").arg(mode),candidate.depthorCompatible()==(mode<=2||mode==11));
-        candidate.objects=2;check(QString("DEPTHOR_SENSOR_MODE_%1_SINGLE_TARGET").arg(mode),!candidate.depthorCompatible());
+        candidate.signal=false;
+        candidate.objects=2;
         check(QString("FP16_NATIVE16_SENSOR_MODE_%1_SINGLE_TARGET").arg(mode),!candidate.fp16Native16Compatible());
-        candidate.objects=1;candidate.noise=true;check(QString("DEPTHOR_SENSOR_MODE_%1_NOISE_REJECTED").arg(mode),!candidate.depthorCompatible());
+        candidate.objects=1;candidate.noise=true;
         check(QString("FP16_NATIVE16_SENSOR_MODE_%1_NOISE_REJECTED").arg(mode),!candidate.fp16Native16Compatible());}
     for(int mode:{0,1,11}){auto candidate=compatible;candidate.mode=mode;candidate.objects=2;
         check(QString("HOST_DEPTH_%1_SINGLE_TARGET").arg(mode),!candidate.hostDepthCompatible());
@@ -113,7 +205,10 @@ int runRvTunerTests(const QString &path){
  check("DUPLICATE_SENSOR_COMMAND_REJECTED",rejects([&]{scriptSettings(native+native);}));
  check("JSON_NONINTEGER_REJECTED",rejects([&]{auto j=s.json();j["snr"]=4.1;Settings::fromJson(j);}));
  check("JSON_NONBOOLEAN_REJECTED",rejects([&]{auto j=s.json();j["signal"]=1;Settings::fromJson(j);}));
- RvSessionController session(nullptr,temporary.filePath("devices.json"));auto *control=session.tuner();RvTunerWidget widget(control);widget.resize(1000,900);widget.setAttribute(Qt::WA_DontShowOnScreen);widget.show();QApplication::processEvents();
+ const auto devicePath=temporary.filePath("devices.json");
+ const auto fixture=offlineRvDevice();
+ RvDeviceStore(devicePath).save({fixture},fixture.id);
+ RvSessionController session(nullptr,devicePath);auto *control=session.tuner();RvTunerWidget widget(control);widget.resize(1000,900);widget.setAttribute(Qt::WA_DontShowOnScreen);widget.show();QApplication::processEvents();
  check("OPEN_INERT",control->state()==RvTunerController::Idle&&!control->pending()&&session.userStopped()&&!control->exclusive());
  {
     const auto initial=widget.settings().json();
@@ -187,8 +282,7 @@ int runRvTunerTests(const QString &path){
     check(QString("SAVE_GRID_%1_REACHES_TRANSACTION").arg(mode),calls.last().action=="persist"&&calls.last().request["settings"]==grid.json());
     const int pendingCount=calls.size();control->persist();check(QString("SAVE_GRID_%1_NO_DUPLICATE_TRANSACTION").arg(mode),calls.size()==pendingCount);
     reply({{"settings",grid.json()},{"snapshot",QString(64,'d')},{"litesr_compatible",grid.liteSrCompatible()},{"backup","mock"}});
-    check(QString("SAVE_GRID_%1_RECEIPT_AND_COMPATIBILITY").arg(mode),control->savedSettings()==grid.json()&&control->state()==RvTunerController::Running&&(grid.fp16Native16Compatible()?control->detail().contains("RGB576 FP16")&&control->detail().contains(QString::fromUtf8("16×16")):grid.liteSrCompatible()||control->detail().contains(QString::fromUtf8("48×32"))));
-    if(grid.size()==QSize(8,8))check(QString("SAVE_GRID_%1_DEPTHOR_COMPATIBILITY_NOTICE").arg(mode),control->detail().contains(QString::fromUtf8("8×8"))&&control->detail().contains("DEPTHOR V3"));
+    check(QString("SAVE_GRID_%1_RECEIPT_AND_COMPATIBILITY").arg(mode),control->savedSettings()==grid.json()&&control->state()==RvTunerController::Running&&(grid.fp16Native16Compatible()?control->detail().contains(QString::fromUtf8("640×480"))&&control->detail().contains(QString::fromUtf8("16×16")):grid.liteSrCompatible()||control->detail().contains(QString::fromUtf8("48×32"))));
     control->stop();reply({{"state","stopped"}});
  }
  LanguageManager language;language.setLanguage(LanguageManager::Language::SimplifiedChinese,false);QApplication::processEvents();check("EMBEDDED_CHINESE_TUNER_TRANSLATION",widget.m_buttons["Persist"]->text()==QString::fromUtf8("长期保存"));

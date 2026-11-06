@@ -25,6 +25,8 @@ public:
     TactileDockWidget *tactile() const { return m_tactile; }
     void resetLayout();
     void monitorCameraConnection();
+signals:
+    void usbDeviceConnectionRequested(RvDeviceManagerDialog *dialog);
 protected:
     bool nativeEvent(const QByteArray &eventType, void *message, qintptr *result) override;
     void changeEvent(QEvent *event) override;
@@ -44,6 +46,7 @@ private:
     DepthMapWidget *m_depth;
     RtspCameraPage *m_camera;
     QDockWidget *m_depthDock, *m_cameraDock;
+    void updateCameraVisibility();
     QPointer<RvDeviceManagerDialog> m_devices;
     QPointer<QTcpSocket> m_cameraProbe;
     QVector<QDockWidget *> m_docks;

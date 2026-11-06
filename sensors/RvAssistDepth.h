@@ -7,7 +7,7 @@
 #include <QtGui/QImage>
 #include <memory>
 class QElapsedTimer;
-struct RvAssistDirectTransport;
+struct RvAssistWorkerPaths;
 
 // Optional native computation process. Receives paired snapshots from the one
 // RV session; it never opens a camera, connects to the board or controls motion.
@@ -21,13 +21,9 @@ public:
     void submit(const QImage &camera,const RvTofFrame &tof,quint64 epoch);
     void submitHd(const QImage &rectifiedPreview,const QJsonObject &source,quint64 epoch,const QByteArray &nativeSamples={});
     void setInputRotationDegrees(int degrees);
-    void setColorRawPreview(bool enabled);
-    bool colorRawPreview() const {return (m_hostModel=="colorsr_rgb"||m_hostModel=="colorsr_nv12")&&m_colorRawPreview;}
     bool setHostModel(const QString &model);
     QString hostModel() const { return m_hostModel; }
     bool setExperiment(const QString &mode);
-    // One-way, stopped QCore test configuration; never enabled by GUI/defaults.
-    bool enableHeadlessFp16GTestMode();
     QString experiment() const {return isUniDepth(m_hostModel)?m_experiment:QStringLiteral("A");}
     static bool validExperiment(const QString &mode) {return mode=="H";}
     static bool supportsHostModel(const QString &model);
@@ -49,9 +45,8 @@ signals:
     void frameRejected(const QJsonObject &metadata,const QString &reason);
 private:
     friend int runRvAssistDepthTests(const QString &reportPath);
-    friend int runRvImagingSwitchTests(const QString &reportPath);
     struct Input {QImage camera;RvTofFrame tof;quint64 epoch=0,request=0;qint64 receivedMs=0;double serializeMs=0;};
-    void startWorker();
+    void startWorker(bool forceStaging = false);
     bool takePending();
     void sendLatest();
     void readOutput();
@@ -60,11 +55,10 @@ private:
     void fail(const QString &reason);
     static QString failureExplanation(const QString &reason);
     QString m_root,m_token;
-    QString m_hostModel=QStringLiteral("unidepth_wide_576_fp16_tof16");
+    QString m_hostModel=QStringLiteral("unidepth_rgb672_vga_fp16_tof16");
     QString m_experiment=QStringLiteral("H");
+    std::unique_ptr<RvAssistWorkerPaths> m_workerPaths;
     QProcess m_process;
-    std::unique_ptr<RvAssistDirectTransport> m_direct;
-    bool m_directMode=false;
     QTimer m_timeout;
     QByteArray m_buffer,m_stderr;
     Input m_pending,m_current;
@@ -76,12 +70,7 @@ private:
     QJsonObject m_dropReasons;
     double m_lastGuiPublishMs=0;
     bool m_enabled=false,m_ready=false,m_busy=false,m_stopping=false,m_failed=false,m_destroying=false,m_cancelling=false;
-    bool m_colorRawPreview=false;
-    bool m_workerCspn=false;
     int m_inputRotation=180; // Current RV camera mounting; independent of display rotation.
 };
 
 int runRvAssistWorker(const QString &runtimeRoot,const QString &token,const QString &hostModel=QString());
-int runRvAssistDirectTransportTest(const QString &runtimeRoot,const QString &token);
-int runRvAssistRuntimeTest(const QString &runtimeRoot,const QString &reportPath);
-int runRvAssistLiveTest(const QString &reportPath,const QString &hostModel=QStringLiteral("unidepth"));

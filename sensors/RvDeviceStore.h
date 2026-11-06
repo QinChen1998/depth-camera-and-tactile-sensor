@@ -25,7 +25,6 @@ class RvDeviceStore {
 public:
     explicit RvDeviceStore(QString path = defaultPath());
     static QString defaultPath();
-    static QVector<RvDeviceProfile> defaults();
     static QString keyFingerprint(const QString &key);
     static bool validHost(const QString &host);
     static QVector<RvDeviceProfile> parseImport(const QByteArray &bytes);

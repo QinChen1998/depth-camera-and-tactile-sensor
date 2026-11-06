@@ -1,535 +1,211 @@
 <?xml version="1.0" encoding="utf-8"?>
 <Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003" DefaultTargets="Build" ToolsVersion="17.0">
-  
-  
   <ItemGroup Label="ProjectConfigurations">
-    
-    
     <ProjectConfiguration Include="Debug|x64">
-      
-      
       <Configuration>Debug</Configuration>
-      
-      
       <Platform>x64</Platform>
-      
-    
     </ProjectConfiguration>
-    
-    
     <ProjectConfiguration Include="Release|x64">
-      
-      
       <Configuration>Release</Configuration>
-      
-      
       <Platform>x64</Platform>
-      
-    
     </ProjectConfiguration>
-    
-  
   </ItemGroup>
-  
-  
   <PropertyGroup Label="Globals">
-    
-    
     <ProjectGuid>{F64F6C2A-6A8D-40D0-8797-8D4E06E35E14}</ProjectGuid>
-    
-    
     <Keyword>QtVS_v304</Keyword>
-    
-    
     <RootNamespace>DepthCameraAndTactileSensor</RootNamespace>
-    
-    
     <WindowsTargetPlatformVersion>10.0.22621.0</WindowsTargetPlatformVersion>
-    
-    
     <QtMsBuild>$(UserProfile)\AppData\Local\QtMsBuild</QtMsBuild>
-    
-  
   </PropertyGroup>
-  
-  
   <Import Project="tools\QtDevelopment.props"/>
-  
-  
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props"/>
-  
-  
   <PropertyGroup Label="Configuration">
-    
-    
     <ConfigurationType>Application</ConfigurationType>
-    
-    
     <PlatformToolset>v143</PlatformToolset>
-    
-    
     <CharacterSet>Unicode</CharacterSet>
-    
-  
   </PropertyGroup>
-  
-  
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props"/>
-  
-  
-  <Import Project="$(QtMsBuild)\qt_defaults.props"/>
-  
-  
-  <PropertyGroup Label="QtSettings" Condition="'$(Configuration)' == 'Debug'">
-    
-    
-    <QtModules>core;gui;widgets;network;multimedia;serialport;qml;quick;quickwidgets;quick3d;concurrent</QtModules>
-    
-    
-    <QtBuildConfig>debug</QtBuildConfig>
-    
-  
-  </PropertyGroup>
-  
-  
-  <PropertyGroup Label="QtSettings" Condition="'$(Configuration)' == 'Release'">
-    
-    
-    <QtModules>core;gui;widgets;network;multimedia;serialport;qml;quick;quickwidgets;quick3d;concurrent</QtModules>
-    
-    
-    <QtBuildConfig>release</QtBuildConfig>
-    
-  
-  </PropertyGroup>
-  
-  
-  <Import Project="$(QtMsBuild)\Qt.props"/>
-  
-  
   <PropertyGroup>
-    
-    
     <OutDir>$(MSBuildProjectDirectory)\x64\$(Configuration)\</OutDir>
-    
-    
     <IntDir>$(MSBuildProjectDirectory)\x64\obj_$(Configuration)\</IntDir>
-    
-    
-    <TargetName>Depth Camera and Tactile Sensor</TargetName>
-    
-  
+    <TargetName>触想工作台</TargetName>
   </PropertyGroup>
-  
-  
+  <Import Project="$(QtMsBuild)\qt_defaults.props"/>
+  <PropertyGroup Label="QtSettings" Condition="'$(Configuration)' == 'Debug'">
+    <QtModules>core;gui;widgets;network;multimedia;serialport;qml;quick;quickwidgets;quick3d;concurrent</QtModules>
+    <QtBuildConfig>debug</QtBuildConfig>
+  </PropertyGroup>
+  <PropertyGroup Label="QtSettings" Condition="'$(Configuration)' == 'Release'">
+    <QtModules>core;gui;widgets;network;multimedia;serialport;qml;quick;quickwidgets;quick3d;concurrent</QtModules>
+    <QtBuildConfig>release</QtBuildConfig>
+  </PropertyGroup>
+  <Import Project="$(QtMsBuild)\Qt.props"/>
   <ItemDefinitionGroup>
-    
-    
     <ClCompile>
-      
-      
       <LanguageStandard>stdcpp17</LanguageStandard>
-      
-      
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
-      
-      
       <WarningLevel>Level3</WarningLevel>
-      
-      
       <AdditionalOptions>/utf-8 /Zc:__cplusplus %(AdditionalOptions)</AdditionalOptions>
-      
-      
       <AdditionalIncludeDirectories>$(ProjectDir)third_party\ffmpeg_7_1_3;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      
-      
       <PreprocessorDefinitions>NOMINMAX;%(PreprocessorDefinitions)</PreprocessorDefinitions>
-      
-    
     </ClCompile>
-    
-    
     <Link>
-      
-      
       <SubSystem>Windows</SubSystem>
-      
-      
       <AdditionalDependencies>bcrypt.lib;%(AdditionalDependencies)</AdditionalDependencies>
-      
-      
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      
-    
     </Link>
-    
-  
   </ItemDefinitionGroup>
-  
-  
   <ItemDefinitionGroup Condition="'$(DctsInstallerBuild)' == 'true'">
     <ClCompile><PreprocessorDefinitions>DCTS_INSTALLER_BUILD;%(PreprocessorDefinitions)</PreprocessorDefinitions></ClCompile>
   </ItemDefinitionGroup>
-
   <ItemDefinitionGroup Condition="'$(Configuration)' == 'Debug'">
-    
-    
     <ClCompile>
-      
-      
       <Optimization>Disabled</Optimization>
-      
-      
       <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
-      
-    
     </ClCompile>
-    
-  
   </ItemDefinitionGroup>
-  
-  
   <ItemDefinitionGroup Condition="'$(Configuration)' == 'Release'">
-    
-    
     <ClCompile>
-      
-      
       <Optimization>MaxSpeed</Optimization>
-      
-      
       <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
-      
-    
     </ClCompile>
-    
-  
   </ItemDefinitionGroup>
-  
-  
   <ItemGroup>
-    
-    
     <ClCompile Include="main.cpp"/>
-    
-    
     <ClCompile Include="SensorMainWindow.cpp"/>
-    
-    
-    <ClCompile Include="RuntimeDiscovery.cpp"/>
-    
-    
+    <ClCompile Include="RuntimeDiscovery.cpp">
+      <PreprocessorDefinitions Condition="'$(DctsUseCudaEp)' != 'true' or '$(DctsInstallerBuild)' == 'true'">DCTS_TENSORRT_RTX;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
     <ClCompile Include="tests\PortSmokeTests.cpp"/>
-    
-    
     <ClCompile Include="UiStyle.cpp"/>
-    
-    
     <ClCompile Include="RenderingSettings.cpp"/>
-    
-    
     <ClCompile Include="LanguageManager.cpp"/>
-    
-    
     <ClCompile Include="TactileDockWidget.cpp"/>
-    
-    
     <ClCompile Include="sensors\DepthMapWidget.cpp"/>
-    
-    
     <ClCompile Include="sensors\ImageDisplaySettings.cpp"/>
-    
-    
     <ClCompile Include="sensors\RtspCameraPage.cpp"/>
-    
-    
-    <ClCompile Include="sensors\RvAssistDepth.cpp"/>
-    
-    
+    <ClCompile Include="sensors\RvAssistDepth.cpp">
+      <PreprocessorDefinitions Condition="'$(DctsUseCudaEp)' != 'true' or '$(DctsInstallerBuild)' == 'true'">DCTS_TENSORRT_RTX;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
     <ClCompile Include="sensors\RvAssistFusion.cpp"/>
-    
-    
     <ClCompile Include="sensors\RvDepthCoverage.cpp"/>
-    
-    
     <ClCompile Include="sensors\RvDepthDiagnostic.cpp"/>
-    
-    
     <ClCompile Include="sensors\RvDepthView.cpp"/>
-    
-    
     <ClCompile Include="sensors\RvDeviceManagerDialog.cpp"/>
-    
-    
     <ClCompile Include="sensors\RvDeviceStore.cpp"/>
     <ClCompile Include="sensors\RvUsbEnrollment.cpp"/>
-    
-    
+    <ClCompile Include="sensors\RvImportDiagnostics.cpp"/>
     <ClCompile Include="sensors\RvDtofBoardStream.cpp"/>
-    
-    
     <ClCompile Include="sensors\RvDtofCandidates.cpp"/>
-    
-    
-    
-    
     <ClCompile Include="sensors\RvLiteSrContour.cpp"/>
-    
-    
-    <ClCompile Include="sensors\RvLiteSrDepth.cpp"/>
-    
-    
     <ClCompile Include="sensors\RvSessionController.cpp"/>
-    
-    
     <ClCompile Include="sensors\RvTunerController.cpp"/>
-    
-    
     <ClCompile Include="sensors\RvTunerProtocol.cpp"/>
-    
-    
     <ClCompile Include="sensors\RvTunerWidget.cpp"/>
-    
-    
     <ClCompile Include="sensors\TactileFrame.cpp"/>
-    
-    
-    <ClCompile Include="sensors\TactileMockSource.cpp"/>
-    
-    
     <ClCompile Include="sensors\TactileSceneAdapter.cpp"/>
-    
-    
     <ClCompile Include="sensors\TactileSerialSource.cpp"/>
-    
-    
+    <ClCompile Include="sensors\TactileAutoZero.cpp"/>
+    <ClInclude Include="sensors\TactileAutoZero.h"/>
     <ClCompile Include="sensors\TactileSurfaceModel.cpp"/>
-    
-    
     <ClCompile Include="sensors\TactileVisualizationWidget.cpp"/>
-    
-    
-    <ClCompile Include="sensors\Tmf8829Frame.cpp"/>
-    
-    
     <ClCompile Include="tests\RvAssistRecoveryTests.cpp"/>
-    
-    
     <ClCompile Include="tests\RvTunerTests.cpp"/>
-    
-    
     <ClCompile Include="tests\Tactile3DTests.cpp"/>
-    
-    
     <ClCompile Include="tests\TactileSerialTests.cpp"/>
-    
-    
     <ClCompile Include="tests\TactileVisualizationTests.cpp"/>
-    
-    
-    <ClCompile Include="tools\dtof_m0\M0.cpp"/>
-    
-    
-    <ClCompile Include="tools\dtof_followup\V1Depth.cpp"/>
-    
-    
     <QtMoc Include="LanguageManager.h"/>
-    
-    
     <QtMoc Include="RenderingSettings.h"/>
-    
-    
     <ClInclude Include="RuntimeDiscovery.h"/>
     <ClInclude Include="tools\model_protection\ModelProtectionApi.h"/>
-    
-    
     <ClInclude Include="RvControlProtocol.h"/>
-    
-    
     <QtMoc Include="SensorMainWindow.h"/>
-    
-    
     <ClInclude Include="TactileDockWidget.h"/>
-    
-    
     <ClInclude Include="UiStyle.h"/>
-    
-    
     <ClInclude Include="sensors\DepthColorScale.h"/>
-    
-    
     <QtMoc Include="sensors\DepthMapWidget.h"/>
-    
-    
-    <ClInclude Include="sensors\DepthorV3Geometry.h"/>
-    
-    
     <ClInclude Include="sensors\DepthPost.h"/>
-    
-    
     <ClInclude Include="sensors\DepthSnapshot.h"/>
-    
-    
     <QtMoc Include="sensors\ImageDisplaySettings.h"/>
-    
-    
     <ClInclude Include="sensors\ImageHoverTip.h"/>
-    
-    
     <ClInclude Include="sensors\ImagePresentation.h"/>
-    
-    
     <ClInclude Include="sensors\LatestSensorFrameBuffer.h"/>
-    
-    
     <ClInclude Include="sensors\LiteSrNativeBindings.h"/>
-    
-    
     <QtMoc Include="sensors\RtspCameraPage.h"/>
-    
-    
     <QtMoc Include="sensors\RvAssistDepth.h"/>
-    
-    
     <ClInclude Include="sensors\RvAssistFusion.h"/>
-    
-    
     <ClInclude Include="sensors\RvCameraStream.h"/>
-    
-    
     <ClInclude Include="sensors\RvCameraView.h"/>
-    
-    
-    <ClInclude Include="sensors\RvColorSurface.h"/>
-    
-    
     <ClInclude Include="sensors\RvDepthCoverage.h"/>
-    
-    
     <ClInclude Include="sensors\RvDepthDiagnostic.h"/>
-    
-    
     <ClInclude Include="sensors\RvDepthView.h"/>
-    
-    
     <QtMoc Include="sensors\RvDeviceManagerDialog.h"/>
-    
-    
     <ClInclude Include="sensors\RvDeviceStore.h"/>
     <ClInclude Include="sensors\RvUsbEnrollment.h"/>
-    
-    
+    <ClInclude Include="sensors\RvImportDiagnostics.h"/>
     <ClInclude Include="sensors\RvDtofBoardStream.h"/>
-    
-    
     <ClInclude Include="sensors\RvDtofCandidates.h"/>
-    
-    
     <ClInclude Include="sensors\RvHdVideoStream.h"/>
-    
-    
-    
-    
     <ClInclude Include="sensors\RvLiteSrContour.h"/>
-    
-    
-    <QtMoc Include="sensors\RvLiteSrDepth.h"/>
-    
-    
     <ClInclude Include="sensors\RvPhotonFrame.h"/>
-    
-    
     <QtMoc Include="sensors\RvSessionController.h"/>
-    
-    
     <ClInclude Include="sensors\RvTofFrame.h"/>
-    
-    
-    
-    
     <QtMoc Include="sensors\RvTunerController.h"/>
-    
-    
     <ClInclude Include="sensors\RvTunerProtocol.h"/>
-    
-    
     <QtMoc Include="sensors\RvTunerWidget.h"/>
-    
-    
-    <ClInclude Include="sensors\SensorTypes.h"/>
-    
-    
-    <ClInclude Include="sensors\TactileDataSource.h"/>
-    
-    
     <ClInclude Include="sensors\TactileFrame.h"/>
-    
-    
+    <ClInclude Include="tests\TactileTestFixtures.h"/>
     <ClInclude Include="sensors\TactileHistory.h"/>
-    
-    
     <ClInclude Include="sensors\TactileMetrics.h"/>
-    
-    
-    <ClInclude Include="sensors\TactileMockSource.h"/>
-    
-    
     <QtMoc Include="sensors\TactileSceneAdapter.h"/>
-    
-    
     <QtMoc Include="sensors\TactileSerialSource.h"/>
-    
-    
     <ClInclude Include="sensors\TactileSurfaceModel.h"/>
-    
-    
     <QtMoc Include="sensors\TactileVisualizationWidget.h"/>
-    
-    
-    <ClInclude Include="sensors\Tmf8829Frame.h"/>
-    
-    
     <ClInclude Include="tests\RvAssistRecoveryTests.h"/>
-    
-    
     <ResourceCompile Include="SensorApp.rc"/>
     <QtRcc Include="SensorResources.qrc"/>
-    
-    
     <QtRcc Include="Component_depth.qrc"/>
-    
-    
     <QtRcc Include="Component_tactile.qrc"/>
-    
-  
   </ItemGroup>
-  
-  
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets"/>
-  
-  
   <Import Project="$(QtMsBuild)\qt.targets"/>
-  
-  
   <PropertyGroup>
-    
-    
     <NativeWorkersBuild Condition="'$(NativeWorkersBuild)' == ''">true</NativeWorkersBuild>
-    
-  
   </PropertyGroup>
-  
-  
-  <Target Name="BuildSensorRvWorker" BeforeTargets="PrepareForBuild" Condition="'$(NativeWorkersBuild)' == 'true' and '$(DesignTimeBuild)' != 'true'">
-    
-    
-    <Exec Command="&quot;$(MSBuildProjectDirectory)/tools/build_rv_worker.cmd&quot; &quot;$(Configuration)&quot; &quot;$(QtInstall)&quot; &quot;$(MSBuildBinPath)/MSBuild.exe&quot;"/>
-    
-  
+  <Target Name="CopyInferenceWorker" AfterTargets="Build" Condition="'$(DctsUseCudaEp)' != 'true' or '$(DctsInstallerBuild)' == 'true'">
+    <Copy SourceFiles="$(TargetPath)" DestinationFiles="$(TargetDir)DctsInferenceWorker.exe" SkipUnchangedFiles="true"/>
   </Target>
-  
-
+  <Target Name="BuildSensorRvWorker" BeforeTargets="PrepareForBuild" Condition="'$(NativeWorkersBuild)' == 'true' and '$(DesignTimeBuild)' != 'true'">
+    <Exec Command="&quot;$(MSBuildProjectDirectory)/tools/build_rv_worker.cmd&quot; &quot;$(Configuration)&quot; &quot;$(QtInstall)&quot; &quot;$(MSBuildBinPath)/MSBuild.exe&quot;"/>
+  </Target>
   <ItemGroup>
     <ClCompile Include="tests\LiveValidation.cpp"/>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="tools\litesr_board\Contour384.h" />
+    <None Include="tools\litesr_board\common\NativeInput48.inc" />
+    <None Include="tools\litesr_board\Contour384Grid.inc" />
+    <None Include="tools\litesr_board\build.sh" />
+    <None Include="tools\litesr_board\protected384\runtime\main.cpp" />
+    <None Include="tools\litesr_board\protected384\runtime\Preprocess.h" />
+    <None Include="tools\litesr_board\protected384\runtime\ProtectedModel.inc" />
+    <None Include="tools\litesr_board\protected384\runtime\Gui.inc" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="tools\litesr_board\StatusPolicy.h" />
+    <None Include="tools\litesr_board\common\camera_rtsp_monitor.cpp" />
+    <None Include="tools\litesr_board\Contour.h" />
+    <None Include="tools\litesr_board\ContourGrid.inc" />
+    <None Include="tools\litesr_board\common\HdVideo.h" />
+    <None Include="tools\litesr_board\common\NativePacket.h" />
+    <None Include="tools\litesr_board\native\runtime\Gui.inc" />
+    <None Include="tools\litesr_board\native\runtime\main.cpp" />
+    <None Include="tools\litesr_board\common\SpiNative48.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="sensors\RvTinyNv12Protocol.h" />
+    <ClInclude Include="tests\TinyNv12Tests.h" />
+    <ClInclude Include="tools\tiny_nv12_board\Contract.h" />
+    <ClInclude Include="tools\tiny_nv12_board\Receipt.h" />
   </ItemGroup>
 </Project>

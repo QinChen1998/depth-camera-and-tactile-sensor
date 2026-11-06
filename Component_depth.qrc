@@ -6,5 +6,6 @@
     <file alias="nv12_rectify_2304.bin">assets/camera/nv12_rectify_2304.bin</file>
     <file alias="nv12_rectify.bin">assets/camera/nv12_rectify.bin</file>
     <file alias="nv12_rectify_wide.bin">assets/camera/nv12_rectify_wide.bin</file>
+    <file alias="rgb672_rectify.bin">assets/camera/rgb672_rectify.bin</file>
   </qresource>
 </RCC>
