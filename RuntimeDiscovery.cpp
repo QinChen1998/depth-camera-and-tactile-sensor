@@ -1,4 +1,5 @@
 #include "RuntimeDiscovery.h"
+#include "sensors/RvCameraView.h"
 #include <QCoreApplication>
 #include <QCryptographicHash>
 #include <QDir>
@@ -31,7 +32,7 @@ QString configError() {
     const auto object=document.object();for(auto it=object.begin();it!=object.end();++it)if(!it.value().isString())return "Runtime path must be a string: "+it.key();
     return {};
 }
-QString nativeExecutable(const char *name,const QString &root,const QString &,const QString &directory,const QString &file) {
+QString nativeExecutable(const char *name,const QString &root,const QString &directory,const QString &file) {
     if(qEnvironmentVariableIsSet(name))return absolute(qEnvironmentVariable(name));
     if(runtimeOverrides().contains(QLatin1String(name)))return absolute(runtimeOverrides()[QLatin1String(name)].toString());
 #ifdef QT_DEBUG
@@ -47,12 +48,16 @@ QString applicationRoot() {
     for(int i=0;i<4;++i){if(directory.exists("Depth Camera and Tactile Sensor.vcxproj")||directory.exists("DCTS_APP.json"))return directory.absolutePath();directory.cdUp();}
     return QCoreApplication::applicationDirPath();
 }
-bool componentAvailable(const QString &id){return id=="rv"||id=="tactile";}
-QString rvAssistRoot(){const auto path=overrideValue("RV_ASSIST_WIDE_576_FP16_ROOT");return path.isEmpty()?QDir(applicationRoot()).filePath("UniDepthRuntimeWide576FP16"):path;}
-QString rvAssistModelRoot(const QString &model){return model=="unidepth_wide_576_fp16_tof16"?rvAssistRoot():QString();}
-// Compatibility interfaces are inert: no host LiteSR runtime is distributed.
-QString rvLiteSrRoot(){return {};}
-QString rvLiteSrNearRoot(){return {};}
+QString rvAssistRoot(){return rvAssistModelRoot(QLatin1String(RvCameraView::UniDepthVgaNative16));}
+QString rvAssistModelRoot(const QString &model){
+#if defined(DCTS_TENSORRT_RTX)
+    if(RvCameraView::isUniDepthVga(model)){
+        const auto path=overrideValue("RV_ASSIST_RGB672_VGA_FP16_ROOT");
+        return path.isEmpty()?QDir(applicationRoot()).filePath("UniDepthRuntimeRgb672VgaFP16RTX"):path;
+    }
+#endif
+    return {};
+}
 QStringList vlcDirectories() {
     const auto configured = overrideValue("RTSP_VLC_DIR");
     if (!configured.isEmpty()) return {configured};
@@ -67,7 +72,7 @@ QStringList vlcDirectories() {
     directories.removeAll(QString()); directories.removeDuplicates();
     return directories;
 }
-QProcessEnvironment handPoseNativeEnvironment(const QString &executable) {
+QProcessEnvironment nativeWorkerEnvironment(const QString &executable) {
     auto env = QProcessEnvironment::systemEnvironment();
     // The standalone runtime owns its DLL closure. Do not inherit Conda/MinGW
     // loader paths or any Python interpreter configuration.
@@ -79,11 +84,10 @@ QProcessEnvironment handPoseNativeEnvironment(const QString &executable) {
     env.insert("QT_PLUGIN_PATH", QDir::toNativeSeparators(QFileInfo(executable).absolutePath() + "/plugins"));
     return env;
 }
-PythonResult rvControlForLaunch() {
-    PythonResult result;
-    if (!componentAvailable("rv")) { result.error = QStringLiteral("RV component not installed. Use MaintenanceTool and restart."); return result; }
+NativeWorkerResult rvControlForLaunch() {
+    NativeWorkerResult result;
     result.error = configError(); if (!result.error.isEmpty()) return result;
-    const auto executable = nativeExecutable("RV_CONTROL_CPP", applicationRoot(), "RV1103Runtime/worker/RvControlWorker.exe",
+    const auto executable = nativeExecutable("RV_CONTROL_CPP", applicationRoot(),
         "x64/rv_control", "RvControlWorker.exe");
     const QDir directory(QFileInfo(executable).absolutePath());
     QFile f(directory.filePath("implementation.json"));

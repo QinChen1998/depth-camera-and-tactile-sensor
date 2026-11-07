@@ -20,7 +20,7 @@ TactileDockWidget::TactileDockWidget(QWidget *parent) : QDockWidget(parent)
     connect(&m_visibilityTimer,&QTimer::timeout,this,[this]{
         const bool visible=m_contentVisible && isVisible() && !isMinimized() && !window()->isMinimized();
         // restoreState() shows the dock without invoking its menu action.
-        // Visibility starts only the local Mock. The normal application requests
+        // Visibility starts view refresh only. The normal application requests
         // its one default-port connection separately; offline runs never do.
         if(!m_sessionOpen && visible) {
             m_display->start();

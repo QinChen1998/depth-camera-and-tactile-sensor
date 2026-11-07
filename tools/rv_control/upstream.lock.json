@@ -6,7 +6,10 @@
     "cryptoBackend": "OpenSSL",
     "hostKeyAlgorithm": "ssh-ed25519"
   },
-  "openssl": {"version": "3.6.4", "source": "https://github.com/openssl/openssl/releases/tag/openssl-3.6.4"},
+  "openssl": {
+    "version": "3.6.4",
+    "source": "https://github.com/openssl/openssl/releases/tag/openssl-3.6.4"
+  },
   "host": "172.32.0.93",
   "knownHostsSource": "No pre-enrolled device keys in the public source distribution",
   "credentials": "Windows Credential Manager or native prompt; no credentials in the distribution"

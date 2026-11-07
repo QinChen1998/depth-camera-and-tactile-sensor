@@ -10,6 +10,7 @@ struct RvDeviceProfile {
     QString calibration, lastConnected;
     int sshPort = 22, inputRotation = -1, cameraMountRotation = 0;
     bool legacyCoordinator = true;
+    bool temporaryFovCalibration = false;
     QJsonObject json() const;
     static RvDeviceProfile fromJson(const QJsonObject &object);
     void validate() const;
@@ -25,7 +26,6 @@ class RvDeviceStore {
 public:
     explicit RvDeviceStore(QString path = defaultPath());
     static QString defaultPath();
-    static QVector<RvDeviceProfile> defaults();
     static QString keyFingerprint(const QString &key);
     static bool validHost(const QString &host);
     static QVector<RvDeviceProfile> parseImport(const QByteArray &bytes);

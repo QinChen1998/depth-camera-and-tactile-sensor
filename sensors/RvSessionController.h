@@ -27,7 +27,6 @@ class RvCameraStream;
 class RvHdVideoStream;
 class RvDtofBoardStream;
 class RvAssistDepth;
-class RvLiteSrDepth;
 class RvTunerController;
 struct RtspVlcBackend;
 
@@ -62,14 +61,12 @@ public:
     QString detailText() const { return m_detailText; }
     double videoFps() const { return m_videoFps; }
     QString depthInfoText() const { return m_depthInfoText; }
-    RvLiteSrDepth *liteSrDepth() const {return m_liteSr;}
     quint64 presentationEpoch() const {return m_presentationEpoch;}
     bool assistDepthEnabled() const;
     bool hostHdAssist() const {return m_dtofMode==RvDtofCandidates::NativeHd&&m_config.cameraWidth==2304;}
-    bool colorRawPreview() const;
-    void setColorRawPreview(bool enabled);
     int assistInputRotationDegrees() const;
     QString assistHostModel() const;
+    QString currentImagingScheme() const;
     QString hostInferencePreflightError() const;
     QString assistExperiment() const;
     QString assistDepthInfoText() const {return m_assistInfo;}
@@ -78,9 +75,11 @@ public:
     QJsonObject imagingSwitchDiagnostics() const;
     bool controlledSource() const;
     int dtofCandidateMode() const {return m_dtofMode;}
-    bool photonCountsEnabled() const {return RvDtofCandidates::isLiteSr(m_dtofMode)&&!RvDtofCandidates::isCaptureOnly(m_dtofMode);}
+    bool photonCountsEnabled() const {return (RvDtofCandidates::isTinyNv12(m_dtofMode)||RvDtofCandidates::isLiteSr(m_dtofMode))&&!RvDtofCandidates::isCaptureOnly(m_dtofMode);}
     RvDtofCandidates::Settings dtofCandidateSettings() const {return m_dtofSettings;}
-    bool boardLiteSrHostContourEnabled() const {return !RvDtofCandidates::isCaptureOnly(m_dtofMode)&&(RvDtofCandidates::isLiteSrHd(m_dtofMode)||LiteSrBoardContract::isHighResolution(m_dtofMode)||m_boardHostContour);}
+    bool tinyNv12Available() const {return m_device.calibration==TinyNv12Contract::Calibration&&m_device.cameraMountRotation==180&&m_device.inputRotation==0;}
+    bool depthOnlyMode() const {return LiteSrBoardContract::isDepthOnly(m_dtofMode);}
+    bool boardLiteSrHostContourEnabled() const {return depthOnlyMode()||!RvDtofCandidates::isTinyNv12(m_dtofMode)&&!LiteSrBoardContract::isNative16Depth(m_dtofMode)&&!RvDtofCandidates::isCaptureOnly(m_dtofMode)&&(RvDtofCandidates::isLiteSrHd(m_dtofMode)||LiteSrBoardContract::isHighResolution(m_dtofMode)||m_boardHostContour);}
     RvLiteSrContour::RepairSettings boardLiteSrHostRepairSettings() const {return m_boardHostRepair;}
     bool setBoardLiteSrHostContour(bool enabled,const RvLiteSrContour::RepairSettings& settings);
     bool setDtofCandidate(int mode,const RvDtofCandidates::Settings& settings);
@@ -99,7 +98,6 @@ public slots:
     static QString legacyHostInputRotationKey(const RvDeviceProfile &device);
     void setAssistExperiment(const QString &mode);
     // Fresh stopped QCore test sessions only; no persisted setting or GUI mode.
-    bool enableHeadlessFp16GTestOptimizations();
     void setDepthConfiguration(int width, const QString &location, const QString &method);
     void setConfiguration(int cameraWidth, const QString &model, int depthWidth,
                           const QString &location, const QString &method);
@@ -168,7 +166,6 @@ private:
     void resetQtPlayer();
     bool startVlc(const QUrl &source);
     void presentHostHdVideo();
-    void configureHeadlessFrameNotifications();
     void observeHostHdClock(const QJsonObject& metadata);
     void dispatchHostHdMeasurement();
     int nearestHostHdRgb(const RvTofFrame &frame,qint64 nowNs) const;
@@ -181,7 +178,6 @@ private:
     bool applyDtofCandidate(int mode,const RvDtofCandidates::Settings &settings);
     void finishImagingSwitch();
     void cancelImagingSwitch(const QString &reason);
-    QString currentImagingScheme() const;
     void clearCurrentFrame(const QString &reason);
     void presentVlcFrame();
     void presentLiteSrHdVideo();
@@ -223,8 +219,6 @@ private:
     RvCameraStream *m_nv12 = nullptr;
     RvHdVideoStream *m_hdVideo = nullptr;
     quint64 m_hdVideoSequence=0,m_hdOutputSequence=0;
-    bool m_headlessFp16GTest=false;
-    quint64 m_hdWakeRevision=0,m_hdEventWakeups=0,m_hdWatchdogChecks=0;
     std::deque<RvTofFrame> m_hdNativeFrames;
     struct HdRgb {QImage image;QJsonObject source;qint64 boardNs=0;};
     std::deque<HdRgb> m_hdRgbFrames;
@@ -233,7 +227,6 @@ private:
     qint64 m_hdRealtimeOffsetNs=0,m_hdBoardSampleNs=0,m_hdSampleReceivedNs=0;
     int m_hdClockSamples=0;
     RvAssistDepth *m_assist = nullptr;
-    RvLiteSrDepth *m_liteSr = nullptr;
     QString m_confirmedBoot;
     QString m_assistInfo;
     int m_assistLoadingState=0;
@@ -266,3 +259,4 @@ private:
     qint64 m_lastEncodedFrame = 0, m_lastRetrievedFrame = 0;
     QElapsedTimer m_encoderProgressClock, m_connectionClock;
 };
+

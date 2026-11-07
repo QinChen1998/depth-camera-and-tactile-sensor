@@ -1,3 +1,4 @@
+#include "TactileTestFixtures.h"
 #include <QQuickWidget>
 #include <QQuickItem>
 #include "../sensors/TactileVisualizationWidget.h"
@@ -49,6 +50,8 @@
 #include <atomic>
 #include <QJsonArray>
 #include <QJsonDocument>
+#include <QJsonObject>
+#include <QSerialPortInfo>
 #include <qt_windows.h>
 #include <dbt.h>
 
@@ -66,7 +69,8 @@ int runTactileVisualizationTests(const QString &path)
 {
     QFile output(path); if(!output.open(QIODevice::WriteOnly|QIODevice::Text)) return 3;
     QTextStream report(&output); int failures=0;
-    const auto check=[&](bool ok,const char *name) { report<<(ok?"PASS ":"FAIL ")<<name<<'\n'; if(!ok) ++failures; };
+    const auto folder=QFileInfo(path).absolutePath();
+    const auto check=[&](bool ok,const char *name) { report<<(ok?"PASS ":"FAIL ")<<name<<'\n';report.flush();if(!ok) ++failures; };
     const auto wait=[](int ms) { QElapsedTimer t; t.start(); while(t.elapsed()<ms) { QApplication::processEvents(QEventLoop::AllEvents,10); QThread::msleep(2); } };
     const auto waitFor=[&](auto ready,int timeoutMs=1500) {
         QElapsedTimer deadline;deadline.start();
@@ -75,6 +79,59 @@ int runTactileVisualizationTests(const QString &path)
     };
     const auto splitRatio=[](const QList<int> &sizes){return sizes.size()==2&&sizes[0]+sizes[1]>0?double(sizes[0])/(sizes[0]+sizes[1]):-1.0;};
     const auto arguments=QCoreApplication::arguments();
+    if(arguments.contains("--tactile-auto-zero-live")) {
+        // Explicit, read-only hardware validation with isolated main.cpp settings.
+        // This path cannot run in an offline suite or open an unverified adapter.
+        const auto port=qEnvironmentVariable("DCTS_TACTILE_LIVE_PORT");
+        const auto serial=qEnvironmentVariable("DCTS_TACTILE_LIVE_SERIAL");
+        QSerialPortInfo info(port);
+        if(qEnvironmentVariable("RV_TEST_OFFLINE_ONLY")=="1"||port.isEmpty()||serial.isEmpty()
+            ||info.isNull()||info.serialNumber()!=serial||info.vendorIdentifier()!=0x0403||info.productIdentifier()!=0x6001)return 3;
+        QTranslator chinese;
+        if(!chinese.load(":/i18n/hand_zh_CN.qm")||!QCoreApplication::installTranslator(&chinese))return 3;
+        TactileVisualizationWidget live;live.resize(1280,900);live.show();live.start();wait(250);
+        live.m_baud->setCurrentText("921600");live.m_slave->setValue(1);
+        live.m_port->setCurrentText(port);live.m_noiseEnabled->setChecked(true);live.m_noiseThreshold->setValue(150);
+        live.m_arrowGain->setValue(25);live.m_pointsToggle->setChecked(true);live.m_componentsToggle->setChecked(true);
+        for(int interval:{10,100,1000,60000}) {
+            live.m_fingers->button(2)->click();live.m_interval->setValue(interval);
+            QElapsedTimer elapsed;elapsed.start();live.m_connect->click();
+            const bool finished=waitFor([&]{return !live.m_waitingForFirstHardwareFrame
+                &&live.m_autoZeroResult.phase!=tactile::AutoZeroPhase::Inactive;},2500);
+            const auto result=live.m_autoZeroResult;
+            const int wallMs=int(elapsed.elapsed());
+            check(finished&&result.phase==tactile::AutoZeroPhase::Complete&&result.elapsedMs>=500
+                &&result.elapsedMs<=900&&wallMs<=1000&&result.sampleCount>=6,
+                "live connection establishes a stable multi-frame zero within one second");
+            check(live.selectedFinger()==0&&live.hasDisplayBaseline()&&live.m_connectionSettings->isChecked()
+                &&live.m_zeroStatus->isHidden()&&live.m_zeroStatus->text().isEmpty()&&live.m_zeroStatus->toolTip().isEmpty(),
+                "live model detection selects F and completes zero without a completion message");
+            const auto baselineSequence=result.baseline.sequence;
+            QJsonArray baselineValues;
+            if(result.baseline.valid)for(const auto &point:result.baseline.fingers[0].modules[0].points)
+                baselineValues.append(QJsonArray{point.force.x,point.force.y,point.force.z});
+            const auto first=live.m_serialSample;
+            bool restored=interval==60000;
+            if(interval!=60000)restored=waitFor([&]{return live.m_serialSample.frame.sequence>first.frame.sequence
+                &&live.m_serialSample.effectiveIntervalMs==interval;},interval+700);
+            else {wait(200);restored=live.m_serialSample.requests==first.requests;}
+            check(restored&&live.m_interval->value()==interval&&live.m_serialSample.settings.intervalMs==interval
+                &&live.m_tareFrame.sequence==baselineSequence,
+                "live completion restores the requested polling interval and keeps the zero fixed");
+            QJsonObject row{{"interval_ms",interval},{"elapsed_zero_ms",result.elapsedMs},{"elapsed_connection_ms",wallMs},
+                {"baseline_frames",result.sampleCount},{"phase",int(result.phase)},{"model",live.m_hardwareType},
+                {"requested_interval_after",live.m_serialSample.settings.intervalMs},
+                {"effective_interval_after",live.m_serialSample.effectiveIntervalMs},
+                {"next_response_gap_ms",double(live.m_serialSample.receivedMs-first.receivedMs)},
+                {"crc_errors",double(live.m_serialSample.crcErrors)},{"timeouts",double(live.m_serialSample.timeouts)},
+                {"status",live.m_zeroStatus->toolTip()},{"baseline_xyz",baselineValues}};
+            report<<QJsonDocument(row).toJson(QJsonDocument::Compact)<<'\n';report.flush();
+            if(interval==100)check(live.grab().save(QFileInfo(path).absolutePath()+"/live_zero_complete_100ms.png"),"capture live zero completion with force view");
+            live.m_disconnect->click();check(live.m_serial.wait(1500),"live test releases the serial port after each interval");wait(30);
+        }
+        live.close();QCoreApplication::removeTranslator(&chinese);
+        report<<(failures?"RESULT FAIL\n":"RESULT PASS\n");return failures?4:0;
+    }
     if(arguments.contains("--tactile-perf-replay")) {
         constexpr int warmupFrames=320, measuredFrames=180, frameMs=33;
         QVector<QByteArray> replies;
@@ -186,6 +243,7 @@ int runTactileVisualizationTests(const QString &path)
             QSettings expected(QSettings::IniFormat,QSettings::UserScope,QCoreApplication::organizationName(),QCoreApplication::applicationName());
             expected.setValue("tactile/display/gridSize",4);
             expected.setValue("tactile/display/statusVisible",true);
+            expected.setValue("tactile/display/expanded",true); // Legacy preference must not reopen the panel.
             expected.setValue("rendering/lowCostRendering",false);
             expected.setValue("tests/tactileLayoutRatio",splitRatio(child.m_splitter->sizes()));expected.sync();
             child.close();
@@ -202,11 +260,12 @@ int runTactileVisualizationTests(const QString &path)
             &&child.m_density->currentData().toInt()==4&&child.m_opacitySlider->value()==67
             &&!RenderingSettings::instance()->lowCostRendering()&&!child.m_adapter->lowCostRendering()
             &&child.m_pointsToggle->isChecked()&&!child.m_resultantToggle->isChecked()&&!child.m_componentsToggle->isChecked()
-            &&!child.m_statusToggle->isChecked()&&child.m_displaySettings->isChecked()
+            &&!child.m_statusToggle->isChecked()&&!child.m_displaySettings->isChecked()&&child.m_displayControls->isHidden()
+            &&child.m_connectionSettings->isChecked()&&child.m_serialControls->isVisible()
             &&child.m_filterStatus->isHidden()&&!child.m_adapter->communicationStatusVisible()
             &&child.m_adapter->arrowGain()==17.5&&child.m_adapter->gridSize()==4
             &&std::abs(child.m_adapter->modelOpacity()-0.67)<1e-6,
-            "fresh process restores the user's point density, rendering and display settings");
+            "fresh process restores display preferences with connection settings open and display settings closed");
         QSettings expected(QSettings::IniFormat,QSettings::UserScope,QCoreApplication::organizationName(),QCoreApplication::applicationName());
         check(child.m_splitterReady&&child.m_splitter->orientation()==Qt::Horizontal
             &&std::abs(splitRatio(child.m_splitter->sizes())-expected.value("tests/tactileLayoutRatio",-1).toDouble())<.02
@@ -251,33 +310,50 @@ int runTactileVisualizationTests(const QString &path)
             if(!crcOk)bytes[132]^=1;return bytes;
         };
         const auto good=reply(300,600),changed=reply(700,800),badCrc=reply(300,600,false),badRange=reply(300,40000);
+        const auto modelReply=[](const QByteArray &tx,int model=1){
+            if(tx.mid(1,5)!=QByteArray::fromHex("0344c00001"))return QByteArray{};
+            QByteArray bytes=QByteArray::fromHex("0103020001");bytes[0]=tx[0];bytes[4]=char(model);
+            const auto crc=tactile::tactileCrc(bytes);bytes.append(char(crc));bytes.append(char(crc>>8));return bytes;
+        };
         std::atomic_int phase{0},requests{0},unexpectedWrites{0};
         {
             TactileVisualizationWidget startup;startup.setAttribute(Qt::WA_DontShowOnScreen);
             QStringList available{"OFFLINE_TACTILE_DEFAULT"};
             startup.m_availableSerialPorts=[&]{return available;};
             startup.m_serial.m_exchangeForTests=[&](const QByteArray &tx){
-                ++requests;if(tx!=tactile::tactileReadRequest(1))++unexpectedWrites;
+                if(phase!=4&&!modelReply(tx).isEmpty())return modelReply(tx);
+                ++requests;if(tx.size()<2||tx[1]!=3)++unexpectedWrites;
                 switch(phase.load()){case 0:return badCrc;case 1:return badRange;case 2:return good;case 4:return QByteArray{};default:return changed;}
             };
             startup.show();wait(40);startup.connectDefaultSerial();
+            // CRC/range faults are advanced explicitly below. The separate
+            // silent-port case tests the real connection deadline; render cost
+            // must not terminate this staged fault fixture before its next phase.
+            startup.m_initialResponseTimer.stop();
             waitFor([&]{return startup.m_serialSample.requests>0;});
             check(startup.m_serial.isRunning()&&startup.m_serialSample.portOpen&&requests.load()>0
                 &&startup.m_connectionSettings->isChecked()&&!startup.m_tareFrame.valid,
                 "opening the port and receiving CRC-bad replies cannot collapse settings or initialize zero");
-            check(!startup.m_pause->isEnabled(),"serial acquisition disables the bottom pause button");
+            check(!startup.findChild<QWidget *>("pauseSimulation")&&!startup.findChild<QWidget *>("scenario")
+                &&!startup.findChild<QWidget *>("tactileUseMock"),"retired simulation controls do not exist during acquisition");
             phase=1;waitFor([&]{return startup.m_serialSample.crcOk&&!startup.m_serialSample.rangeOk;});
             check(startup.m_connectionSettings->isChecked()&&!startup.m_tareFrame.valid,
                 "CRC-valid out-of-range replies cannot count as a successful initial connection");
             startup.m_fingers->button(1)->click();
-            check(!startup.m_pause->isEnabled(),"selecting a simulated module cannot pause an active serial connection");
+            check(!startup.frame().valid&&!startup.m_adapter->valid()&&startup.m_serial.isRunning(),
+                "selecting an unconnected model shows no data without pausing serial acquisition");
             phase=2;
+            startup.m_fingers->button(0)->click(); // Return to the connected hardware view.
+            startup.updateValues();
+            check(!startup.hasDisplayBaseline()&&!startup.m_adapter->valid()&&!startup.m_tareButton->isEnabled()
+                &&startup.m_zeroStatus->isVisible(),
+                "stable zero waits briefly with raw arrows hidden and its status visible independently of communication diagnostics");
             waitFor([&]{return startup.m_tareFrame.valid&&!startup.m_waitingForFirstHardwareFrame;});
-            check(!startup.m_connectionSettings->isChecked()&&!startup.m_waitingForFirstHardwareFrame
+            check(startup.m_connectionSettings->isChecked()&&!startup.m_displaySettings->isChecked()&&!startup.m_waitingForFirstHardwareFrame
                 &&startup.m_tareFrame.valid&&startup.m_tareFrame.hardwareType==0
                 &&startup.m_tareFrame.fingers[0].modules[0].points[0].force.x==300
-                &&!startup.hasDisplayBaseline(),
-                "first trusted response collapses settings and zeroes the connected hardware even while another module is selected");
+                &&startup.hasDisplayBaseline()&&startup.selectedFinger()==0,
+                "stable native frames select and zero the identified module without changing either settings panel");
             startup.m_fingers->button(0)->click();
             waitFor([&]{return startup.m_pointTable->item(0,1)->text()=="0";});
             check(startup.hasDisplayBaseline()&&startup.m_pointTable->item(0,1)->text()=="0"
@@ -292,14 +368,15 @@ int runTactileVisualizationTests(const QString &path)
             startup.m_interval->setValue(10);waitFor([&]{return startup.m_serialSample.settings.intervalMs==10;});
             check(startup.m_interval->isEnabled()&&startup.m_serialSample.settings.intervalMs==10
                 &&startup.m_tareFrame.sequence==zeroSequence&&startup.m_connectionSettings->isChecked(),
-                "live interval edits reach the worker without replacing zero or collapsing a manually reopened card");
+                "live interval edits reach the worker without replacing zero or collapsing the open card");
             startup.disconnectSerial();check(startup.m_serial.wait(2000),"default-port worker stops asynchronously and joins in the offline check");
             wait(20);phase=2;startup.m_connect->click();
             waitFor([&]{return startup.hasDisplayBaseline()&&!startup.m_waitingForFirstHardwareFrame;});
-            check(startup.hasDisplayBaseline()&&!startup.m_connectionSettings->isChecked()
+            check(startup.hasDisplayBaseline()&&startup.m_connectionSettings->isChecked()
                 &&startup.m_tareFrame.generation>1&&unexpectedWrites.load()==0,
-                "manual reconnect zeroes its new session once and startup never writes device registers");
+                "manual reconnect keeps settings open, zeroes its new session once and never writes device registers");
             const auto generation=startup.m_serial.generation();
+            startup.m_connectionSettings->click();startup.m_displaySettings->click();
             phase=4;
             waitFor([&]{return startup.m_serialSample.timeouts>=2;});
             const auto scan=[&]{QMetaObject::invokeMethod(&startup.m_portScanTimer,"timeout",Qt::DirectConnection);};
@@ -313,9 +390,10 @@ int runTactileVisualizationTests(const QString &path)
             scan();
             waitFor([&]{return startup.m_connect->isEnabled();});
             check(!startup.m_serial.isRunning()&&startup.m_connect->isEnabled()&&!startup.m_disconnect->isEnabled()
-                &&startup.m_connectionSettings->isChecked()&&!startup.m_tareFrame.valid&&!startup.m_adapter->valid()
+                &&!startup.m_connectionSettings->isChecked()&&startup.m_displaySettings->isChecked()
+                &&!startup.m_tareFrame.valid&&!startup.m_adapter->valid()
                 &&startup.m_port->currentIndex()==-1,
-                "confirmed port removal reopens connection controls and clears the hardware session");
+                "confirmed port removal preserves both panel choices and clears the hardware session");
             available.append("OFFLINE_TACTILE_DEFAULT");scan();
             wait(5250);
             check(startup.m_serial.generation()==generation+1&&startup.m_serial.isRunning()
@@ -325,14 +403,16 @@ int runTactileVisualizationTests(const QString &path)
             waitFor([&]{return startup.hasDisplayBaseline()&&!startup.m_waitingForFirstHardwareFrame;});
             check(startup.m_port->currentText()=="OFFLINE_TACTILE_DEFAULT"&&startup.m_serial.generation()==generation+1
                 &&startup.m_disconnect->isEnabled()&&!startup.m_connect->isEnabled()&&startup.hasDisplayBaseline()
-                &&!startup.m_connectionSettings->isChecked(),
-                "replug automatically opens the remembered port and zeroes a fresh validated session");
+                &&!startup.m_connectionSettings->isChecked()&&startup.m_displaySettings->isChecked(),
+                "replug reconnects and zeroes the remembered port without changing either settings panel");
             startup.m_disconnect->click();
             waitFor([&]{return !startup.m_serial.isRunning()&&startup.m_connect->isEnabled();});
             scan();
             check(!startup.m_serial.isRunning()&&startup.m_serial.generation()==generation+1,
                 "explicit disconnect suppresses reconnect while the port remains present");
-            startup.close();check(startup.m_serial.wait(2000),"closing the connected startup widget releases its worker");
+            startup.close();check(startup.m_serial.wait(2000)
+                &&!startup.m_connectionSettings->isChecked()&&startup.m_displaySettings->isChecked(),
+                "closing the startup widget releases its worker without changing either panel choice");
         }
         settings.sync();
         check(settings.value("tactile/serial/port").toString()=="OFFLINE_TACTILE_DEFAULT"
@@ -346,7 +426,9 @@ int runTactileVisualizationTests(const QString &path)
             std::atomic_bool ready{false};
             missing.m_serial.m_exchangeForTests=[&](const QByteArray &tx){
                 ++requests;
-                requestedId=tx.isEmpty()?-1:quint8(tx.at(0));return ready.load()?good:QByteArray{};
+                if(!tx.isEmpty()&&tx[0]!=0)requestedId=quint8(tx.at(0));
+                if(!ready.load())return QByteArray{};
+                return modelReply(tx).isEmpty()?good:modelReply(tx);
             };
             missing.show();wait(30);missing.connectDefaultSerial();
             check(!missing.m_serial.isRunning()&&missing.m_connectionSettings->isChecked()&&missing.m_port->currentIndex()<0,
@@ -367,16 +449,22 @@ int runTactileVisualizationTests(const QString &path)
             scan();scan();
             check(!missing.m_serial.isRunning()&&missing.m_serial.generation()==generation
                 &&missing.m_connect->isEnabled()&&missing.m_disconnect->isEnabled()&&missing.m_serialRetryTimer.isActive()
-                &&missing.m_connectionSettings->isChecked()&&missing.m_baud->currentText()=="115200"
-                &&missing.m_slave->value()==7&&!missing.hasDisplayBaseline(),
-                "fast probe timeout opens editable settings and waits before retrying");
+                &&!missing.m_connectionSettings->isChecked()&&missing.m_baud->currentText()=="115200"
+                &&missing.m_slave->value()==7&&!missing.hasDisplayBaseline()&&missing.m_serialRetryTimer.interval()==3000,
+                "fast probe timeout preserves collapsed settings and waits before retrying");
+            // Advance the verified backoff explicitly. A busy renderer must not
+            // consume two backoff periods between observations of this fixture.
+            missing.m_serialRetryTimer.stop();
+            QMetaObject::invokeMethod(&missing.m_serialRetryTimer,"timeout",Qt::DirectConnection);
             waitFor([&]{return missing.m_serial.generation()==generation+1&&!missing.m_serial.isRunning()
-                &&missing.m_serialRetryTimer.isActive();},4000);
-            check(missing.m_serial.generation()==generation+1&&requests.load()==fastRequests+1
+                &&missing.m_serialRetryTimer.isActive();});
+            check(missing.m_serial.generation()==generation+1&&requests.load()==fastRequests+2
                 &&missing.m_connect->isEnabled()&&missing.m_serialRetryTimer.isActive(),
-                "failed low-rate retry sends exactly one request and releases the serial port between retries");
+                "failed low-rate retry tries the configured and public addresses once and releases the port");
             missing.m_baud->setCurrentText("921600");missing.m_slave->setValue(1);ready=true;
-            check(waitFor([&]{return missing.hasDisplayBaseline();},4000)
+            missing.m_serialRetryTimer.stop();
+            QMetaObject::invokeMethod(&missing.m_serialRetryTimer,"timeout",Qt::DirectConnection);
+            check(waitFor([&]{return missing.hasDisplayBaseline();})
                 &&missing.m_serial.generation()==generation+2&&missing.m_connectedSettings.baud==921600
                 &&missing.m_connectedSettings.slave==1&&!missing.m_serialRetryTimer.isActive()
                 &&!missing.m_connectionSettings->isChecked(),
@@ -397,10 +485,13 @@ int runTactileVisualizationTests(const QString &path)
             TactileVisualizationWidget remembered;remembered.setAttribute(Qt::WA_DontShowOnScreen);
             remembered.m_availableSerialPorts=[]{return QStringList{"OFFLINE_OTHER_DEVICE","OFFLINE_TACTILE_DEFAULT"};};
             std::atomic_int delivered{0};
-            remembered.m_serial.m_exchangeForTests=[&](const QByteArray &){++delivered;return good;};
+            remembered.m_serial.m_exchangeForTests=[&](const QByteArray &tx){
+                if(!modelReply(tx).isEmpty())return modelReply(tx);
+                ++delivered;return good;
+            };
             remembered.show();wait(30);remembered.connectDefaultSerial();
             QElapsedTimer deadline;deadline.start();
-            while(delivered.load()<2&&deadline.elapsed()<1000)QThread::msleep(1);
+            while(delivered.load()<55&&deadline.elapsed()<1000)QThread::msleep(1);
             QMetaObject::invokeMethod(&remembered.m_initialResponseTimer,"timeout",Qt::DirectConnection);
             check(remembered.hasDisplayBaseline()&&!remembered.m_waitingForFirstHardwareFrame,
                 "delayed GUI timeout consumes an already valid reply before deciding the connection failed");
@@ -420,7 +511,7 @@ int runTactileVisualizationTests(const QString &path)
             window.setAttribute(Qt::WA_DontShowOnScreen);
             auto &serial=*window.tactile()->display();
             serial.m_availableSerialPorts=[]{return QStringList{"COM241"};};
-            serial.m_serial.m_exchangeForTests=[&](const QByteArray &){return good;};
+            serial.m_serial.m_exchangeForTests=[&](const QByteArray &tx){return modelReply(tx).isEmpty()?good:modelReply(tx);};
             window.show();wait(30);serial.connectDefaultSerial();
             check(waitFor([&]{return serial.hasDisplayBaseline();}),"native hotplug fixture starts on its synthetic COM port");
             const auto generation=serial.m_serial.generation();
@@ -455,7 +546,7 @@ int runTactileVisualizationTests(const QString &path)
                 "removal notification suppresses stale enumeration of the unplugged port");
             sendPortEvent(DBT_DEVICEARRIVAL);
             check(waitFor([&]{return serial.hasDisplayBaseline();})&&serial.m_serial.generation()==generation+1
-                &&!serial.m_connectionSettings->isChecked(),
+                &&serial.m_connectionSettings->isChecked(),
                 "Windows removal and arrival reconnect the same COM name even when no enumeration sees it absent");
             serial.m_connectionSettings->setChecked(true);
             editBaud("115200");
@@ -485,6 +576,150 @@ int runTactileVisualizationTests(const QString &path)
                 "no valid response times out asynchronously and leaves editable connection settings open");
             check(!settings.contains("tactile/serial/port"),"failed startup does not replace the confirmed default port");
             silent.close();silent.m_serial.wait(2000);
+        }
+        settings.remove("tactile/serial");
+        {
+            TactileVisualizationWidget stable;stable.setAttribute(Qt::WA_DontShowOnScreen);
+            stable.m_availableSerialPorts=[]{return QStringList{"OFFLINE_STABLE_ZERO"};};
+            std::atomic_int count{0};std::atomic_bool unstable{false},readingsReady{false};QElapsedTimer elapsed;
+            stable.m_serial.m_exchangeForTests=[&](const QByteArray &tx){
+                if(!modelReply(tx).isEmpty())return modelReply(tx);
+                if(!readingsReady)return badCrc;
+                const int n=++count;
+                return reply(unstable?(n%2?800:1600):elapsed.elapsed()<150?8000:1000+(n%2?10:-10),600);
+            };
+            stable.show();wait(30);stable.refreshSerialPorts();stable.m_port->setCurrentText("OFFLINE_STABLE_ZERO");
+            stable.m_slave->setValue(1);
+            stable.m_interval->setValue(100);elapsed.start();stable.m_connect->click();
+            wait(30);stable.m_interval->setValue(1000);
+            check(stable.m_waitingForFirstHardwareFrame&&!stable.m_adapter->valid(),"waiting for valid startup data keeps raw arrows hidden during interval edits");
+            const int pendingContentTop=stable.m_splitter->mapTo(&stable,QPoint()).y();
+            const int pendingNoticeHeight=stable.m_zeroStatus->height();
+            // Debug rendering may outlast a nominal wait(200). Release valid
+            // data only after the edit so the pending-state check is causal.
+            elapsed.restart();readingsReady=true;
+            check(waitFor([&]{return stable.hasDisplayBaseline();})&&elapsed.elapsed()<1000
+                &&std::abs(stable.m_tareFrame.fingers[0].modules[0].points[0].force.x-1000)<=1,
+                "startup spike is discarded and interval edits during zero retain the stable mean within one second");
+            check(stable.m_serialSample.settings.intervalMs==1000&&stable.m_tareButton->isEnabled()
+                &&stable.m_autoZeroResult.sampleCount>=6&&stable.m_zeroStatus->isHidden()
+                &&stable.m_zeroStatus->text().isEmpty()&&stable.m_zeroStatus->toolTip().isEmpty()
+                &&!stable.m_statusToggle->isChecked(),"stable automatic zero completes without displaying a message, frame count or elapsed time");
+            stable.m_statusToggle->setChecked(true);
+            check(stable.m_zeroStatus->isHidden()&&stable.m_zeroStatus->text().isEmpty()&&stable.m_zeroStatus->toolTip().isEmpty(),
+                "communication diagnostics cannot reveal the retired automatic zero completion message");
+            stable.m_statusToggle->setChecked(false);
+            const auto &raw=stable.m_displayFilter.last;
+            check(raw.valid&&std::abs(raw.fingers[0].modules[0].points[0].force.x-1000)==10
+                &&stable.m_serialHistory.samples().size()==1
+                &&stable.m_serialHistory.samples().back().pointForces[0][0].x==raw.fingers[0].modules[0].points[0].force.x,
+                "averaged display baseline never replaces the acquired raw frame or history measurement");
+            wait(20);
+            auto *bodyLayout=stable.findChild<QWidget *>("tactileSettingsBody")->layout();
+            const int noticeIndex=bodyLayout->indexOf(stable.m_zeroStatus);
+            const int completedContentTop=stable.m_splitter->mapTo(&stable,QPoint()).y();
+            const int toolbarBottom=stable.m_connectionSettings->mapTo(&stable,QPoint(0,stable.m_connectionSettings->height())).y();
+            report<<"AUTO_ZERO_LAYOUT pending="<<pendingContentTop<<" complete="<<completedContentTop
+                <<" notice="<<pendingNoticeHeight<<" toolbarBottom="<<toolbarBottom<<" spacing="<<bodyLayout->spacing()<<'\n';
+            check(noticeIndex>=0&&bodyLayout->itemAt(noticeIndex)->isEmpty()
+                &&!stable.m_zeroStatus->sizePolicy().retainSizeWhenHidden()
+                &&completedContentTop<=pendingContentTop-pendingNoticeHeight
+                &&completedContentTop-toolbarBottom<=bodyLayout->spacing()+2,
+                "automatic completion reclaims the status row height and leaves only normal toolbar spacing");
+            check(stable.grab().save(folder+"/tactile_auto_zero_no_notice.png"),
+                "capture automatic zero completion without the retired status row");
+            stable.disconnectSerial();stable.m_serial.wait(1000);wait(20);
+            unstable=true;stable.m_interval->setValue(60000);elapsed.restart();stable.m_connect->click();
+            check(waitFor([&]{return !stable.m_waitingForFirstHardwareFrame;})&&elapsed.elapsed()<1100
+                &&stable.m_autoZeroResult.phase==tactile::AutoZeroPhase::Complete&&stable.hasDisplayBaseline()
+                &&stable.m_autoZeroResult.sampleCount==1&&stable.m_autoZeroResult.elapsedMs>=900
+                &&stable.m_adapter->valid()&&stable.m_connectionSettings->isChecked()&&stable.m_tareButton->isEnabled(),
+                "unstable data receives one single-frame zero at the deadline without collapsing settings");
+            check(stable.m_tareFrame.sequence==stable.m_serialSample.frame.sequence
+                &&stable.m_pointTable->item(0,1)->text()=="0"&&stable.m_zeroStatus->isHidden()
+                &&stable.m_zeroStatus->text().isEmpty()&&stable.m_zeroStatus->toolTip().isEmpty(),
+                "deadline fallback zeroes the current displayed frame without a completion message");
+            const auto sequence=stable.m_serialSample.frame.sequence;
+            wait(60);check(stable.m_serialSample.frame.sequence==sequence,"deadline fallback restores the long user interval");
+            unstable=false;stable.m_interval->setValue(10);
+            waitFor([&]{return stable.m_serialSample.frame.sequence>sequence;});
+            check(stable.m_tareFrame.sequence==sequence&&stable.m_autoZeroResult.sampleCount==1,
+                "later frames do not automatically repeat the deadline zero");
+            stable.m_tareButton->click();
+            check(stable.hasDisplayBaseline()&&stable.m_autoZeroResult.phase==tactile::AutoZeroPhase::Inactive,
+                "manual zero remains available after the automatic deadline fallback");
+            stable.stop();check(stable.m_serial.wait(500),"stop during long normal polling releases the auto-zero session");stable.close();
+            settings.remove("tactile/serial");settings.sync();
+        }
+        for(int model=1;model<=3;++model){
+            settings.remove("tactile/serial");settings.sync();
+            TactileVisualizationWidget detected;detected.setAttribute(Qt::WA_DontShowOnScreen);
+            detected.m_availableSerialPorts=[]{return QStringList{"OFFLINE_MODEL_DETECTION"};};
+            std::atomic_int address{1},writes{0};
+            detected.m_serial.m_exchangeForTests=[&](const QByteArray &tx){
+                if(tx[1]!=3){++writes;return QByteArray{};}
+                // This fixture deliberately does not support public address 0.
+                if(quint8(tx[0])!=address.load())return QByteArray{};
+                const auto identity=modelReply(tx,model);
+                if(!identity.isEmpty())return identity;
+                auto data=good;data[0]=tx[0];
+                if(model==3){
+                    // S has 16 native points. Unused F/G point slots must not
+                    // participate in range checks or become synthetic points.
+                    for(int i=48;i<60;++i){data[3+2*i]=char(0xff);data[4+2*i]=char(0xff);}
+                }
+                const auto crc=tactile::tactileCrc(data.first(131));data[131]=char(crc);data[132]=char(crc>>8);
+                return data;
+            };
+            detected.m_fingers->button(model%3)->click();
+            detected.show();wait(30);detected.connectDefaultSerial();
+            check(waitFor([&]{return detected.hasDisplayBaseline();})
+                &&detected.selectedFinger()==model-1&&detected.m_hardwareType==model-1
+                &&detected.m_fingers->checkedId()==model-1&&detected.m_serialSample.modelIdentified
+                &&detected.frame().fingers[model-1].modules[0].points.size()==(model==3?16:20),
+                "startup from the wrong selected model identifies F/G/S and uses its native data layout");
+            detected.m_disconnect->click();detected.m_serial.wait(2000);wait(20);
+            address=9;
+            detected.m_fingers->button(model%3)->click();detected.m_slave->setValue(7);detected.m_connect->click();
+            check(waitFor([&]{return !detected.m_serial.isRunning()&&!detected.m_waitingForFirstHardwareFrame;},2500)
+                &&detected.m_connectionSettings->isChecked()&&!detected.hasDisplayBaseline()
+                &&detected.selectedFinger()==model%3&&detected.m_configStatus->isVisible(),
+                "failed configured and public addresses leave the chosen model and editable connection settings visible");
+            detected.m_baud->setCurrentText("115200");detected.m_slave->setValue(9);detected.m_connect->click();
+            check(waitFor([&]{return detected.hasDisplayBaseline();})
+                &&detected.selectedFinger()==model-1&&detected.m_hardwareType==model-1
+                &&detected.m_connectedSettings.slave==9&&detected.m_connectedSettings.baud==115200
+                &&detected.m_connectionSettings->isChecked()&&detected.m_adapter->valid()
+                &&detected.m_tareFrame.hardwareType==model-1&&writes.load()==0,
+                "manual correction from the wrong model routes F/G/S to its matching 3D view and zeroes once");
+            settings.sync();
+            check(settings.value("tactile/serial/type").toInt()==model-1
+                &&settings.value("tactile/serial/slave").toInt()==9,
+                "confirmed model and actual communication ID replace the old saved selection");
+            detected.stop();detected.m_serial.wait(2000);detected.close();
+        }
+        settings.remove("tactile/serial");settings.sync();
+        {
+            TactileVisualizationWidget recovered;recovered.setAttribute(Qt::WA_DontShowOnScreen);
+            recovered.m_availableSerialPorts=[]{return QStringList{"OFFLINE_PUBLIC_RECOVERY"};};
+            std::atomic_int writes{0};
+            recovered.m_serial.m_exchangeForTests=[&](const QByteArray &tx){
+                if(tx[1]!=3){++writes;return QByteArray{};}
+                if(tx[0]!=0&&tx[0]!=9)return QByteArray{};
+                const auto identity=modelReply(tx,2);
+                if(!identity.isEmpty())return identity;
+                QByteArray bytes;
+                if(tx.mid(2,2)==QByteArray::fromHex("466c"))bytes=QByteArray::fromHex("0003020009");
+                else bytes=good.first(131);
+                bytes[0]=tx[0];const auto crc=tactile::tactileCrc(bytes);bytes.append(char(crc));bytes.append(char(crc>>8));return bytes;
+            };
+            recovered.show();wait(30);recovered.connectDefaultSerial();
+            check(waitFor([&]{return recovered.hasDisplayBaseline();})
+                &&recovered.selectedFinger()==1&&recovered.m_connectedSettings.slave==9&&recovered.m_slave->value()==9
+                &&recovered.m_serialSample.settings.slave==9&&recovered.m_serialSample.rx[0]==9
+                &&!recovered.m_serial.requestDeviceConfig(9,tactile::SaveCandidate::Decimal18013)&&writes.load()==0,
+                "public-address discovery updates UI, data reads and configuration validation to the actual device ID");
+            recovered.stop();recovered.m_serial.wait(2000);recovered.close();
         }
         settings.remove("tactile/serial");
         if(previousNoise.isValid())settings.setValue("tactile/display/noiseEnabled",previousNoise);
@@ -534,7 +769,7 @@ int runTactileVisualizationTests(const QString &path)
         layoutSettings.sync();
     }
     using namespace tactile;
-    auto frame=TactileMockSource::sample(Scenario::Tangential,1.25);
+    auto frame=tactileTestFrame();
     check(validateFrame(frame),"canonical 20 / 20 / 16 frame and all resultants");
     auto bad=frame; bad.fingers.removeLast(); check(!validateFrame(bad),"wrong finger count");
     bad=frame; bad.fingers[1].id=bad.fingers[0].id; check(!validateFrame(bad),"duplicate finger ID");
@@ -556,22 +791,13 @@ int runTactileVisualizationTests(const QString &path)
     bad=frame; ++bad.sequence; check(!gate.accept(bad),"non-increasing monotonic time rejected");
     ++bad.monotonicNs; ++bad.generation; check(!gate.accept(bad),"old/wrong generation rejected");
     bad=frame; bad.sessionId=QUuid::createUuid(); ++bad.sequence; ++bad.monotonicNs; check(!gate.accept(bad),"wrong session rejected");
-    bool scenes=true,different=true;
-    for(int s=0;s<4;++s) for(int t=0;t<80;++t) {
-        const auto a=TactileMockSource::sample(static_cast<Scenario>(s),t*0.13);
-        const auto b=TactileMockSource::sample(static_cast<Scenario>(s),t*0.13);
-        scenes &= validateFrame(a)&&sameForce(a.fingers[2].resultant,b.fingers[2].resultant);
-        if(s==0) scenes &= sameForce(a.fingers[2].resultant,{});
-    }
-    for(int f=1;f<3;++f) different &= !sameForce(frame.fingers[f].resultant,frame.fingers[f-1].resultant);
-    check(scenes&&different,"deterministic four scenarios, zero contact and distinct fingers");
     TactileHistory history; history.begin(frame.sessionId,frame.generation);
     bool historyOk=true;
     for(int i=0;i<1000;++i) { auto sample=frame; sample.sequence=i+1; sample.monotonicNs=qint64(i)*33000000;
         historyOk &= history.append(sample); }
     check(historyOk && history.samples().size()<=TactileHistory::Capacity && history.samples().back().timeNs-history.samples().front().timeNs<=TactileHistory::WindowNs,"history bounded by count and ten seconds");
     bool mapped=true;
-    for(int f=0;f<3;++f) { mapped &= sameForce(history.samples().back().forces[f][0],frame.fingers[f].resultant);
+    for(int f=0;f<3;++f) { if(!frame.fingers[f].valid){mapped &= history.samples().back().pointForces[f].isEmpty();continue;} mapped &= sameForce(history.samples().back().forces[f][0],frame.fingers[f].resultant);
         for(int m=0;m<1;++m) mapped &= sameForce(history.samples().back().forces[f][m+1],frame.fingers[f].modules[m].resultant); }
     check(mapped,"history maps all sensor resultant scopes");
     auto next=frame; next.sequence=1001;next.monotonicNs=33000000000LL;
@@ -584,19 +810,6 @@ int runTactileVisualizationTests(const QString &path)
     ++next.sequence;next.monotonicNs+=100000000;history.breakSegment();history.breakSegment(true);
     check(history.append(next)&&!history.samples().back().bridgeFromPrevious,"subsequent data errors cannot override a hard pause boundary");
     history.begin(QUuid::createUuid(),2);check(history.samples().empty()&&!history.append(next),"new session clears history and rejects previous identity");
-    TactileMockSource source; Frame live;
-    check(!source.latest(live)&&source.state()==SourceState::Stopped,"source initially stopped");
-    source.start(); source.latest(live); const auto first=live; source.start(); source.latest(live);
-    check(live.sessionId==first.sessionId&&live.generation==first.generation,"idempotent start");
-    source.setPaused(true); const auto frozen=live; wait(70);
-    check(!source.latest(live)&&live.sequence==frozen.sequence,"pause produces no samples");
-    source.setPaused(false); source.latest(live);
-    check(live.sequence==frozen.sequence+1&&live.monotonicNs>frozen.monotonicNs,"resume one sample, no backlog");
-    wait(100); source.latest(live); check(live.sequence==frozen.sequence+2,"late poll produces only one sample");
-    source.stop(); check(!source.latest(live),"stop produces no samples");
-    source.start(); source.latest(live); check(live.sessionId!=first.sessionId&&live.generation>first.generation&&live.sequence==1,"restart new identity");
-    const auto gen=live.generation; source.setScenario(Scenario::NoContact); source.latest(live);
-    check(live.generation>gen&&sameForce(live.fingers[0].resultant,{}),"scenario restarts session");
     {
         TactileVisualizationWidget preferences;
         preferences.resize(1000,900);preferences.show();wait(30);
@@ -635,10 +848,9 @@ int runTactileVisualizationTests(const QString &path)
                         &&preferences.m_baud->currentIndex()==baud&&preferences.m_slave->value()==slave&&!preferences.m_serial.isRunning(),
                         "top connection button reopens unchanged settings without connecting a device");
                     minimizeDisplay->click();wait(20);
-                    QSettings saved(QSettings::IniFormat,QSettings::UserScope,QCoreApplication::organizationName(),QCoreApplication::applicationName());
                     check(!drawer->isChecked()&&controls->isHidden()&&preferences.m_serialControls->isVisible()
-                        &&!saved.value("tactile/display/expanded",true).toBool(),
-                        "display minimize closes only its card and persists its collapsed state");
+                        &&preferences.m_arrowGain->value()==gain,
+                        "display minimize closes only its card without changing display preferences");
                     drawer->click();wait(20);
                     check(controls->isVisible()&&preferences.m_arrowGain->value()==gain&&!preferences.running(),
                         "top display button reopens unchanged settings without starting acquisition");
@@ -693,16 +905,16 @@ int runTactileVisualizationTests(const QString &path)
                 const QList<QWidget *> fixedControls={preferences.m_port,preferences.m_baud,preferences.m_slave,
                     preferences.m_timeout,preferences.m_interval,preferences.m_jumpThreshold,preferences.m_noiseThreshold,
                     preferences.m_arrowGain,preferences.m_arrowWidthGain,preferences.m_displayMode,preferences.m_density,
-                    preferences.m_scenarios,preferences.m_connect,preferences.m_disconnect,preferences.m_simulate,
+                    preferences.m_connect,preferences.m_disconnect,
                     preferences.m_writeAddress,preferences.m_scanPorts,preferences.m_resultantToggle,preferences.m_componentsToggle,
-                    preferences.m_resetView,preferences.m_frontView,preferences.m_pause,preferences.m_tareButton};
+                    preferences.m_resetView,preferences.m_frontView,preferences.m_tareButton};
                 QList<QSize> sizes;for(auto *control:fixedControls)sizes.append(control->size());
                 preferences.resize(1600,1100);wait(30);
                 bool fixed=true;
                 for(int i=0;i<fixedControls.size();++i)fixed &= fixedControls[i]->size()==sizes[i];
                 check(fixed,"dropdowns, numeric editors, switches and action buttons keep their size when the dock grows");
                 bool fullOptions=true;
-                for(auto *combo:{preferences.m_baud,preferences.m_displayMode,preferences.m_density,preferences.m_scenarios}) {
+                for(auto *combo:{preferences.m_baud,preferences.m_displayMode,preferences.m_density}) {
                     QStyleOptionComboBox option;option.initFrom(combo);option.editable=combo->isEditable();
                     const auto textArea=combo->style()->subControlRect(QStyle::CC_ComboBox,&option,QStyle::SC_ComboBoxEditField,combo);
                     for(int i=0;i<combo->count();++i)fullOptions &= combo->fontMetrics().horizontalAdvance(combo->itemText(i))<=textArea.width();
@@ -782,11 +994,9 @@ int runTactileVisualizationTests(const QString &path)
                     &&preferences.m_connect->x()==serialMargins.left()
                     &&preferences.m_writeAddress->geometry().right()+1==preferences.m_serialControls->width()-serialMargins.right(),
                     "three fixed-size connection actions span the row with equal gaps from left to right");
-                check(!preferences.m_serialControls->isAncestorOf(preferences.m_simulate)
-                    &&preferences.m_simulate->parentWidget()==preferences.m_pause->parentWidget()
-                    &&preferences.m_simulate->geometry().center().y()==preferences.m_pause->geometry().center().y()
-                    &&preferences.m_simulate->geometry().right()<preferences.m_pause->geometry().left(),
-                    "use simulated data shares the bottom row with pause acquisition");
+                check(!preferences.findChild<QWidget *>("tactileUseMock")
+                    &&!preferences.findChild<QWidget *>("scenario")&&!preferences.findChild<QWidget *>("pauseSimulation"),
+                    "simulation actions and their bottom controls are removed from the widget tree");
                 const int choicesWidth=preferences.m_fingerBox->width(),selectedFinger=preferences.m_finger;
                 const int sidebarLeft=sidebar->mapTo(&preferences,QPoint()).x();
                 const auto expandedTip=preferences.m_foldSensors->toolTip();
@@ -856,8 +1066,8 @@ int runTactileVisualizationTests(const QString &path)
             preferences.m_hideReadingsToggle->setChecked(true);wait(30);
             report<<"hidden details split="<<preferences.m_splitter->sizes()[0]<<','<<preferences.m_splitter->sizes()[1]<<'\n';
             check(preferences.m_tareButton->isVisible()&&preferences.m_tareButton->isEnabled()&&preferences.m_resetView->isVisible()
-                &&preferences.m_frontView->isVisible()&&!preferences.m_scenarios->isVisible()
-                &&!preferences.m_pause->isVisible()&&!preferences.m_pointTable->isVisible()
+                &&preferences.m_frontView->isVisible()
+                &&!preferences.m_pointTable->isVisible()
                 &&preferences.m_fingerBox->isVisible()&&preferences.m_canvas->isVisible()
                 &&controls->isVisible()&&preferences.findChild<QScrollArea *>("tactileDetailsScroll")->isVisible()
                 &&preferences.m_hideReadingsToggle->isVisible(),
@@ -880,8 +1090,8 @@ int runTactileVisualizationTests(const QString &path)
             check(preferences.grab().save(QFileInfo(path).absolutePath()+"/tactile_details_hidden.png"),"save compact display capture");
             preferences.resize(1000,900);preferences.m_hideReadingsToggle->setChecked(false);wait(30);
             check(preferences.m_tareButton->isVisible()&&preferences.m_resetView->isVisible()
-                &&preferences.m_frontView->isVisible()&&preferences.m_scenarios->isVisible()
-                &&preferences.m_pause->isVisible()&&preferences.m_pointTable->isVisible()
+                &&preferences.m_frontView->isVisible()
+                &&preferences.m_pointTable->isVisible()
                 &&std::abs(splitRatio(preferences.m_splitter->sizes())-expandedRatio)<.02,
                 "leaving compact display restores controls and previous split proportions");
             preferences.m_displaySettings->setChecked(true);
@@ -902,8 +1112,9 @@ int runTactileVisualizationTests(const QString &path)
             &&!saved.value("tactile/display/resultantArrow",true).toBool()
             &&!saved.value("tactile/display/componentArrows",true).toBool()
             &&!saved.contains("tactile/display/statusVisible")
-            &&saved.value("tactile/display/expanded").toBool(),
-            "display preferences are written to the isolated persistent INI");
+            &&!saved.contains("tactile/display/expanded"),
+            "display preferences persist without saving the panel's expanded state");
+        saved.setValue("tactile/display/expanded",true);saved.sync();
         TactileVisualizationWidget restored;restored.show();wait(30);
         auto *drawer=restored.findChild<QPushButton *>("tactileDisplaySettings");
         auto *controls=restored.findChild<QWidget *>("tactileDisplayControls");
@@ -913,10 +1124,12 @@ int runTactileVisualizationTests(const QString &path)
             &&restored.m_arrowWidthGain->value()==2.5
             &&restored.m_density->currentData().toInt()==4&&restored.m_opacitySlider->value()==63
             &&restored.m_pointsToggle->isChecked()&&!restored.m_resultantToggle->isChecked()&&!restored.m_componentsToggle->isChecked()
-            &&drawer&&drawer->isChecked()&&controls&&controls->isVisible()
+            &&drawer&&!drawer->isChecked()&&controls&&controls->isHidden()
+            &&restored.m_connectionSettings->isChecked()&&restored.m_serialControls->isVisible()
             &&statusToggle&&!statusToggle->isChecked()&&restored.m_serialStatus->isHidden()
             &&restored.m_filterStatus->isHidden()&&!restored.m_adapter->communicationStatusVisible(),
-            "new widget restores point density and the other display preferences");
+            "new widget restores display values but uses startup panel visibility even with a legacy expanded preference");
+        if(drawer)drawer->click();
         check(restored.m_adapter->gridSize()==4&&restored.m_adapter->arrowGain()==12.5&&std::abs(restored.m_adapter->modelOpacity()-0.63)<1e-6
             &&restored.m_adapter->arrowWidthGain()==2.5
             &&restored.m_adapter->pointArrows()&&!restored.m_adapter->resultantArrow()&&!restored.m_adapter->componentArrows(),
@@ -1054,7 +1267,7 @@ int runTactileVisualizationTests(const QString &path)
     }
     TactileVisualizationWidget widget;
     widget.m_density->setCurrentIndex(widget.m_density->findData(2));
-    widget.show(); wait(30); check(!widget.running()&&widget.refreshCount()==0,"construction and show do not start Mock");
+    widget.show(); wait(30); check(!widget.running()&&widget.refreshCount()==0,"construction and show do not start acquisition");
     check(widget.m_slave->prefix().isEmpty()&&widget.m_slave->suffix().isEmpty()
         &&widget.m_slaveLabel->buddy()==widget.m_slave&&!widget.m_slaveLabel->text().isEmpty()
         &&!widget.m_writeAddress->isEnabled(),"ID is numeric only with a separate label and disconnected save disabled");
@@ -1243,89 +1456,25 @@ int runTactileVisualizationTests(const QString &path)
     check(status->height()==statusHeight&&!status->wordWrap()&&scene->mapTo(&widget,QPoint())==sceneOrigin,"long transient serial warning cannot change layout height");
     status->setText("OK");wait(30);
     check(status->height()==statusHeight&&scene->mapTo(&widget,QPoint())==sceneOrigin,"clearing serial warning cannot shift scene");
-    widget.start(); wait(150);
-    check(widget.m_pause->isEnabled(),"running simulation enables the bottom pause button");
-    widget.m_pause->click();
-    check(!widget.running()&&widget.m_pause->isEnabled(),"bottom button pauses simulation and stays enabled for resume");
-    check(widget.frame().valid&&widget.refreshCount()>=2,"UI receives validated frames");
-    auto *readout=widget.findChild<QTableWidget *>("tactilePointValues");
-    const auto initialUpdates=widget.refreshCount();
-    const auto readoutBaseline=widget.frame();widget.setDisplayZero();
-    widget.setPaused(false);wait(420);widget.setPaused(true);
-    check(widget.refreshCount()>initialUpdates+3&&sameForce(widget.chartForce(),tactile::relativeForce(
-        widget.frame().fingers[0].modules[0].points[0].force,readoutBaseline.fingers[0].modules[0].points[0].force))
-        &&readout->item(0,1)->text()==QString::number(widget.chartForce().x,'f',0),"decoupled readout flushes the latest zero-point delta on pause");
-    widget.m_tareFrame={};widget.updateValues();
-    auto *scenario=widget.findChild<QComboBox *>("scenario"); scenario->setCurrentIndex(2); widget.setPaused(false); wait(1200); widget.setPaused(true);
-    bool selection=true;
-    auto *table=widget.findChild<QTableWidget *>("tactilePointValues");
-    check(table&&table->editTriggers()==QAbstractItemView::NoEditTriggers,"read-only XYZ point table");
-    check(!widget.findChild<QPushButton *>("mode0")&&!widget.findChild<QPushButton *>("mode1"),"retired resultant heading buttons removed");
-    for(int f=0;f<3;++f) {
-        widget.findChild<QPushButton *>(QString("finger%1").arg(f))->click();
-
-        selection &= sameForce(widget.selectedForce(),widget.frame().fingers[f].resultant);
-        const auto &points=widget.frame().fingers[f].modules[0].points;
-        selection &= table&&table->rowCount()==points.size()&&table->columnCount()==4;
-        if(table)for(int row=0;row<points.size();++row) {
-            selection &= table->item(row,0)->text()==points[row].id;
-            for(int axis=0;axis<3;++axis)selection &= table->item(row,axis+1)->text()==QString("--");
-        }
-
-        for(int m=0;m<1;++m) {
-
-            const auto expected=points[0].force;
-            selection &= sameForce(widget.chartForce(),expected);
-            selection &= sameForce(widget.history().samples().back().pointForces[f][0],expected);
-            selection &= widget.findChild<QLabel *>("force0")->text().contains(QString::number(expected.x,'f',0));
-            selection &= widget.findChild<QLabel *>("force1")->text().contains(QString::number(expected.y,'f',0));
-            selection &= widget.findChild<QLabel *>("force2")->text().contains(QString::number(expected.z,'f',0));
-        }
+    widget.start();wait(150);
+    const auto idleRefreshes=widget.refreshCount();
+    check(widget.running()&&!widget.frame().valid&&widget.history().samples().empty(),
+        "starting view refresh creates no measurements without a device");
+    auto *unavailable=scene->rootObject()->findChild<QObject *>("tactileNoDataMessage");
+    for(int type=0;type<3;++type) {
+        widget.m_fingers->button(type)->click();wait(40);
+        check(!widget.frame().valid&&!widget.m_adapter->valid()&&widget.history().samples().empty()
+            &&widget.m_pointTable->rowCount()==(type==2?16:20)&&widget.m_pointTable->item(0,1)->text()=="--"
+            &&unavailable&&unavailable->property("visible").toBool()
+            &&unavailable->property("text").toString()==QCoreApplication::translate("TactileView","Device disconnected / data unavailable"),
+            "every disconnected model keeps geometry with the unavailable message and no manufactured readings");
     }
-    check(selection,"all sensor selections, raw point rows and selected XYZ curves correspond");
-    table->setCurrentCell(5,0);
-    check(widget.selectedPoint()==5&&sameForce(widget.chartForce(),widget.frame().fingers[2].modules[0].points[5].force),"selected table row drives chart");
-    const auto baseline=widget.frame();
-    widget.findChild<QPushButton *>("tactileTare")->click();
-    bool zero=true;
-    for(int row=0;row<table->rowCount();++row)for(int col=1;col<4;++col)zero &= table->item(row,col)->text()=="0";
-    check(zero,"tare captures current values while paused");
-    check(sameForce(widget.chartForce(),{})&&widget.history().samples().size()==1&&widget.hasDisplayBaseline(),"tare restarts curve history and zeros selected XYZ curve");
-    check(sameForce(widget.frame().fingers[2].modules[0].points[5].force,baseline.fingers[2].modules[0].points[5].force),"tare preserves raw table source");
-    widget.setPaused(false);wait(120);widget.setPaused(true);
-    bool delta=true;
-    for(int row=0;row<table->rowCount();++row) {
-        const auto a=widget.frame().fingers[2].modules[0].points[row].force,b=baseline.fingers[2].modules[0].points[row].force;
-        const double raw[]={a.x,a.y,a.z},base[]={b.x,b.y,b.z};
-        for(int axis=0;axis<3;++axis)delta &= table->item(row,axis+1)->text()==QString::number(raw[axis]-base[axis],'f',0);
-    }
-    check(delta&&widget.selectedPoint()==5,"delta tracks captured baseline and selection survives refresh");
-    check(sameForce(widget.chartForce(),tactile::relativeForce(widget.frame().fingers[2].modules[0].points[5].force,baseline.fingers[2].modules[0].points[5].force)),"curve follows the same delta as table");
-    const auto old=widget.selectedForce();
-    auto *canvas=widget.findChild<QQuickWidget *>("tactileQuickView");
-    check(canvas&&canvas->status()==QQuickWidget::Ready,"3D viewport loaded");
-    if(canvas&&canvas->rootObject())canvas->rootObject()->setProperty("inspectedPoint",2);
-    check(sameForce(old,widget.selectedForce())&&widget.selectedModule()==0,"point inspection preserves resultant selection");
-    const auto folder=QFileInfo(path).absolutePath();
-     wait(30);
-    check(widget.grab().save(folder+"/tactile_fingertip.png"),"save fingertip UI capture");
-      wait(30);
-    check(widget.grab().save(folder+"/tactile_module.png"),"save module UI capture");
-    widget.resize(640,480); wait(30); check(widget.grab().save(folder+"/tactile_compact.png"),"save compact scrollable capture");
-    auto *curves=widget.findChild<QWidget *>("tactileCurves");auto *sumLabel=widget.findChild<QLabel *>("force0");
-    const int curveBottom=curves->mapTo(&widget,QPoint(0,curves->height())).y();
-    const int sumTop=sumLabel->mapTo(&widget,QPoint()).y();
-    report<<"compact curve bottom="<<curveBottom<<" sum top="<<sumTop<<'\n';
-    check(curveBottom<=sumTop,"compact chart and totals do not overlap");
-    const auto paused=widget.refreshCount(); wait(90); check(widget.refreshCount()==paused,"paused widget does not refresh");
-    const auto count=widget.history().samples().size();wait(60);check(widget.history().samples().size()==count,"pause does not append duplicate curve samples");
-    widget.setPaused(false); wait(60); widget.close(); const auto closed=widget.refreshCount(); wait(100);
-    check(!widget.running()&&widget.refreshCount()==closed,"close stops source and periodic refresh");
-    bool cleared=table!=nullptr;
-    if(table)for(int row=0;row<table->rowCount();++row)for(int col=1;col<4;++col)cleared &= table->item(row,col)->text()=="--";
-    check(cleared,"stop clears stale XYZ table values");
-    widget.show(); wait(60); check(widget.refreshCount()==closed,"re-show requires explicit start");
-    widget.start(); wait(60); check(widget.refreshCount()>closed,"explicit reopen start works"); widget.hide();
+    check(widget.refreshCount()==idleRefreshes,"idle view does not produce frames or curve samples");
+    check(widget.grab().save(QFileInfo(path).absolutePath()+"/tactile_disconnected.png"),"capture hardware-only disconnected view");
+    widget.close();const auto closed=widget.refreshCount();wait(70);
+    check(!widget.running()&&!widget.frame().valid&&widget.refreshCount()==closed,"close stops view refresh without leaving values");
+    widget.show();wait(40);check(!widget.running()&&!widget.frame().valid,"show does not create data or start acquisition");
+    widget.start();wait(60);check(widget.running()&&!widget.frame().valid&&!widget.m_serial.isRunning(),"reopen starts only view refresh until a device is connected");widget.hide();
     QPointer<TactileVisualizationWidget> owned=new TactileVisualizationWidget; owned->show(); owned->start(); delete owned; wait(70);
     check(owned.isNull(),"destroy active widget safely");
     TactileVisualizationWidget serialUi;serialUi.show();serialUi.start();wait(100);
@@ -1336,7 +1485,7 @@ int runTactileVisualizationTests(const QString &path)
     serialUi.m_port->setCurrentIndex(0);
     serialUi.findChild<QPushButton*>("tactileConnect")->click();wait(200);
     check(!serialUi.frame().valid&&serialUi.findChild<QTableWidget*>("tactilePointValues")->item(0,1)->text()=="--","failed F connection does not fall back to simulated values");
-    serialUi.findChild<QPushButton*>("finger1")->click();wait(80);check(serialUi.frame().valid&&serialUi.frame().sourceMode=="Mock","G remains simulated after F connection failure");
+    serialUi.findChild<QPushButton*>("finger1")->click();wait(80);check(!serialUi.frame().valid&&!serialUi.m_adapter->valid(),"G stays unavailable after F connection failure");
     serialUi.findChild<QCheckBox*>("tactileVerifyCrc")->setChecked(false);serialUi.findChild<QPushButton*>("finger0")->click();
     check(!serialUi.frame().valid,"CRC toggle cannot revive rejected hardware data");serialUi.close();
     {
@@ -1406,9 +1555,9 @@ int runTactileVisualizationTests(const QString &path)
         &&ui.hasDisplayBaseline()&&ui.curveForce(release.fingers[0].modules[0].points[0].force,0).z==-50,"new corrupt raw samples cannot extend trusted display age or change historical delta baseline");
     release.sequence=9;release.monotonicNs=9;feed(release);
     check(ui.m_adapter->valid()&&!ui.m_serialHistory.samples().back().bridgeFromPrevious,"recovery after trusted expiry starts without bridging the unavailable period");
-    ui.setPaused(true);
+    ui.setSuspended(true);
     check(!ui.m_adapter->valid()&&!ui.visualFrame().valid,"pause immediately removes held hardware arrows");
-    ui.setPaused(false);release.sequence=10;release.monotonicNs=10;feed(release);
+    ui.setSuspended(false);release.sequence=10;release.monotonicNs=10;feed(release);
     check(ui.m_adapter->valid()&&!ui.m_serialHistory.samples().back().bridgeFromPrevious,"resume requires fresh data and retains a hard curve boundary");
     ui.disconnectSerial();check(!ui.m_adapter->valid()&&!ui.hasDisplayBaseline()&&!ui.m_displayFilter.last.valid,"disconnect clears held arrows and baseline");
     TactileVisualizationWidget checked;checked.m_hardwareType=0;checked.m_serialHistory.begin(session,1);
@@ -1487,8 +1636,8 @@ int runTactileVisualizationTests(const QString &path)
     SerialSample portFailure;portFailure.requests=5;portFailure.verifyCrc=true;portFailure.error="Port removed";
     checked.receiveSerialSample(portFailure);checked.updateValues();
     check(!checked.m_adapter->valid()&&!checked.visualFrame().valid&&checked.m_pointTable->item(0,1)->text()=="--"
-        &&checked.m_connectionSettings->isChecked()&&!checked.hasDisplayBaseline(),
-        "terminal port error reopens settings and immediately clears held arrows, table and baseline");
+        &&!checked.m_connectionSettings->isChecked()&&!checked.hasDisplayBaseline(),
+        "terminal port error preserves collapsed settings and immediately clears held arrows, table and baseline");
     checked.m_tareButton->click();
     check(checked.m_tareButton->isEnabled()&&!checked.hasDisplayBaseline(),"tare remains harmless and clickable after disconnect");
     checked.m_hardwareType=0;checked.m_serialHistory.begin(session,1);
@@ -1716,9 +1865,9 @@ int runTactileVisualizationTests(const QString &path)
     {
         QTranslator chinese;
         check(chinese.load(":/i18n/hand_zh_CN.qm")&&QCoreApplication::installTranslator(&chinese),"load compiled Chinese translation for display methods");
-        TactileVisualizationWidget dense;dense.resize(1450,1000);dense.show();wait(40);dense.start();wait(80);dense.setPaused(true);
+        TactileVisualizationWidget dense;dense.resize(1450,1000);dense.show();wait(40);TactileTestAccess::showSnapshot(dense);
         check(dense.findChild<QLabel *>("tactileDensityLabel")->text()==QString::fromUtf8("显示方式"),"Chinese caption is Display method");
-        const auto canonical=dense.frame();
+        auto canonical=dense.frame();
         check(validateFrame(canonical),"dense readout fixture has a canonical raw frame");
         const auto expectedPoint=[&](int type,int grid,int point){
             const auto &raw=canonical.fingers[type].modules[0].points;
@@ -1731,7 +1880,7 @@ int runTactileVisualizationTests(const QString &path)
             return value;
         };
         for(int type=0;type<3;++type){
-            dense.m_fingers->button(type)->click();
+            TactileTestAccess::showSnapshot(dense,type);canonical=dense.frame();
             const int counts[3]={type==2?16:20,type==2?49:65,type==2?100:136};
             for(int mode=0;mode<3;++mode){
                 const int grid=mode+2,count=counts[mode];dense.m_tareFrame={};
@@ -1765,22 +1914,23 @@ int runTactileVisualizationTests(const QString &path)
                 &&dense.m_pointTable->selectionModel()->selectedRows().size()==1,
                 "reducing the output count keeps table and chart selection in range");
         }
-        dense.m_history.begin(canonical.sessionId,canonical.generation);bool replayed=true;
+        TactileTestAccess::showSnapshot(dense,0);canonical=dense.frame();
+        dense.m_serialHistory.begin(canonical.sessionId,canonical.generation);bool replayed=true;
         for(int i=0;i<81;++i){
-            auto sample=TactileMockSource::sample(Scenario::Tangential,i*.05);
+            auto sample=tactileTestFrame(0,{double(600+i),double(-400+i),double(1000+i)});
             sample.sessionId=canonical.sessionId;sample.generation=canonical.generation;
             sample.sequence=canonical.sequence+i+1;sample.monotonicNs=canonical.monotonicNs+qint64(i+1)*50000000;
             if(i==0)dense.m_tareFrame=sample;
-            replayed &= dense.m_history.append(sample);dense.m_mockFrame=sample;
+            replayed &= dense.m_serialHistory.append(sample);dense.m_liveFrame=dense.m_heldTableFrame=sample;dense.m_displayFilter.last=sample;
         }
-        check(replayed&&dense.m_history.samples().size()==81,"continuous offline history supplies the expanded output curves");
+        check(replayed&&dense.m_serialHistory.samples().size()==81,"continuous offline history supplies the expanded output curves");
         dense.m_fingers->button(0)->click();dense.m_density->setCurrentIndex(1);dense.updateValues();
         dense.selectPoint(64);dense.m_displaySettings->setChecked(true);dense.m_connectionSettings->setChecked(false);
         wait(20);check(dense.grab().save(folder+"/tactile_65_outputs.png"),"capture 65 output point display method");
         dense.m_displaySettings->setChecked(false);wait(20);
         dense.m_pointTable->scrollToItem(dense.m_pointTable->item(64,0),QAbstractItemView::PositionAtBottom);wait(10);
         check(dense.grab().save(folder+"/tactile_65_readings.png"),"capture P65 curve and selected output row with model labels removed");
-        dense.m_fingers->button(2)->click();dense.m_density->setCurrentIndex(2);dense.selectPoint(99);
+        TactileTestAccess::showSnapshot(dense,2);dense.setDisplayZero();dense.m_density->setCurrentIndex(2);dense.selectPoint(99);
         check(dense.grab().save(folder+"/tactile_100_outputs.png"),"capture ultrathin 100 output points");
         dense.m_density->setCurrentIndex(0);dense.close();QCoreApplication::removeTranslator(&chinese);
     }

@@ -45,23 +45,29 @@ QJsonObject payload(const QVector<RvDeviceProfile> &profiles,const QString &acti
 }
 }
 QJsonObject RvDeviceProfile::json() const {
-    return {{"id",id},{"name",name},{"host",host},{"ssh_port",sshPort},{"serial",serial},
+    QJsonObject result{{"id",id},{"name",name},{"host",host},{"ssh_port",sshPort},{"serial",serial},
         {"public_key",publicKey},{"username",username},{"calibration",calibration},
         {"input_rotation",inputRotation},{"camera_mount_rotation",cameraMountRotation},{"legacy_coordinator",legacyCoordinator},{"last_connected",lastConnected}};
+    if(temporaryFovCalibration)result["temporary_fov_calibration"]=true;
+    return result;
 }
 RvDeviceProfile RvDeviceProfile::fromJson(const QJsonObject &o) {
     QStringList fields={"id","name","host","ssh_port","serial","public_key","username","calibration","input_rotation","legacy_coordinator","last_connected"};
     const bool hasMount=o.contains("camera_mount_rotation");
-    require(o.size()==fields.size()+int(hasMount), "Incomplete device profile");
+    const bool hasTemporary=o.contains("temporary_fov_calibration");
+    require(o.size()==fields.size()+int(hasMount)+int(hasTemporary), "Incomplete device profile");
     for(const auto &key:fields)require(o.contains(key), "Incomplete device profile");
     if(hasMount)fields.append("camera_mount_rotation");
+    if(hasTemporary)fields.append("temporary_fov_calibration");
     for(const auto &key:o.keys())require(fields.contains(key), "Unknown device field; passwords/private keys are not permitted");
     for(const auto &key:QStringList{"id","name","host","serial","public_key","username","calibration","last_connected"})require(o[key].isString(), "Device field must be text");
     require(o["ssh_port"].isDouble()&&o["input_rotation"].isDouble()&&o["legacy_coordinator"].isBool(), "Invalid device field types");
     RvDeviceProfile p;p.id=o["id"].toString();p.name=o["name"].toString();p.host=o["host"].toString();p.sshPort=o["ssh_port"].toInt(-1);
+    require(!hasTemporary||o["temporary_fov_calibration"].isBool(),"Temporary FOV calibration must be boolean");
+    p.temporaryFovCalibration=o["temporary_fov_calibration"].toBool();
     p.serial=o["serial"].toString();p.publicKey=o["public_key"].toString();p.username=o["username"].toString();p.calibration=o["calibration"].toString();
     p.cameraMountRotation=hasMount?o["camera_mount_rotation"].toInt(-1):
-        (p.serial=="0000000000000002"&&p.publicKey=="AAAAC3NzaC1lZDI1NTE5AAAAIBZkEP0Wz9pUtqMBfg+IMC0J8+O7Sxx9Uu3zz8YXvv6g"?180:0);
+        (p.serial=="REDACTED_DEVICE_SERIAL"&&p.publicKey==""?180:0);
     require(!hasMount||(o["camera_mount_rotation"].isDouble()&&o["camera_mount_rotation"].toDouble()==p.cameraMountRotation),"Camera mounting angle must be an integer");
     p.inputRotation=o["input_rotation"].toInt(-2);p.legacyCoordinator=o["legacy_coordinator"].toBool();p.lastConnected=o["last_connected"].toString();
     require(o["ssh_port"].toDouble()==p.sshPort&&o["input_rotation"].toDouble()==p.inputRotation,"Integer device fields required");p.validate();return p;
@@ -74,6 +80,7 @@ void RvDeviceProfile::validate() const {
     require(QRegularExpression("^[A-Za-z0-9_.-]{1,64}$").match(username).hasMatch(), "Invalid login username");
     RvDeviceStore::keyFingerprint(publicKey);
     require(calibration=="unconfigured"||calibration=="rv20261008-f1"||calibration=="rv20261008-f2", "Unsupported calibration profile");
+    require(!temporaryFovCalibration||fov()>0,"Select F1/F2 before enabling temporary calibration");
     require(cameraMountRotation==0||cameraMountRotation==180, "Camera mounting angle must be 0 or 180 degrees");
     require(inputRotation==-1||inputRotation==0||inputRotation==180, "Inference orientation must be verified as 0 or 180 degrees");
     require(lastConnected.isEmpty()||(lastConnected.size()<=32&&QDateTime::fromString(lastConnected,Qt::ISODate).isValid()), "Invalid last connection time");
@@ -96,13 +103,6 @@ QString RvDeviceStore::defaultPath() {
     const auto configured=qEnvironmentVariable("DCTS_DEVICE_STORE_PATH");
     return configured.isEmpty()?QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation)+"/RV1103/devices.json":configured;
 }
-QVector<RvDeviceProfile> RvDeviceStore::defaults() {
-    RvDeviceProfile p;p.id="0000000000000001";p.serial=p.id;p.name="RV1103 - "+p.serial;p.host="172.32.0.93";
-    p.publicKey="AAAAC3NzaC1lZDI1NTE5AAAAIBZkEP0Wz9pUtqMBfg+IMC0J8+O7Sxx9Uu3zz8YXvv6g";p.calibration="rv20261008-f1";p.inputRotation=180;
-    // Only the currently approved trust entry is migrated automatically. Other
-    // boards are added by the user, even when their historical keys are known.
-    return {p};
-}
 RvDeviceStore::RvDeviceStore(QString path):m_path(std::move(path)) { reload(); }
 QVector<RvDeviceProfile> RvDeviceStore::parseImport(const QByteArray &bytes) {
     QVector<RvDeviceProfile> result;for(const auto &value:document(bytes)["devices"].toArray()) {require(value.isObject(),"Invalid device entry");result.append(RvDeviceProfile::fromJson(value.toObject()));}
@@ -123,16 +123,7 @@ QVector<RvDeviceProfile> RvDeviceStore::mergeProfiles(const QVector<RvDeviceProf
 }
 void RvDeviceStore::reload() {
     const auto bytes=read(m_path);
-    if(!QFileInfo::exists(m_path)) {
-        m_profiles.clear();
-        m_active.clear();
-        m_disk.clear();
-        if(qEnvironmentVariable("RV_TEST_OFFLINE_ONLY")=="1") {
-            m_profiles=defaults();
-            m_active=m_profiles.first().id;
-        }
-        return;
-    }
+    if(!QFileInfo::exists(m_path)){m_profiles.clear();m_active.clear();m_disk.clear();return;}
     auto profiles=parseImport(bytes);const auto o=document(bytes);require(o["active"].isString(),"Missing active device");
     const auto active=o["active"].toString();bool found=active.isEmpty();for(const auto &p:profiles)found|=p.id==active;
     require(found,"Selected device is absent from registry");m_profiles=profiles;m_active=active;m_disk=bytes;

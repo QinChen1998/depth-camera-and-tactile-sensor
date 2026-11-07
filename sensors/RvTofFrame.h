@@ -26,7 +26,9 @@ struct RvTofFrame {
                 && n <= 9007199254740991.0 && std::floor(n) == n;
         };
         const int mode=metadata["candidate_mode"].toInt(-1);
-        const bool protocol=(metadata["protocol"]=="DTF3"&&mode>=0&&mode<10)
+        const bool protocol=(mode==TinyNv12Contract::Mode&&metadata["protocol"]==TinyNv12Contract::Protocol
+            &&metadata["engine"]==TinyNv12Contract::Engine&&metadata["model_sha256"]==TinyNv12Contract::ModelSha)
+            ||(metadata["protocol"]=="DTF3"&&mode>=0&&mode<10)
             ||((metadata["protocol"]==LiteSrBoardContract::Protocol||metadata["protocol"]==LiteSrBoardContract::PairedProtocol)&&LiteSrBoardContract::supports(mode)
                 &&metadata["engine"]==LiteSrBoardContract::engine(mode)&&metadata["model_sha256"]==LiteSrBoardContract::modelSha(mode));
         const bool candidate = metadata["work_mode"]=="dtof_candidate" && protocol
@@ -57,7 +59,7 @@ struct RvTofFrame {
         const double delta=metadata["pair_delta_ms"].toDouble(1000),uncertainty=metadata["pair_clock_uncertainty_ms"].toDouble(-1);
         return metadata["assist_experiment"]=="H"&&metadata["source_protocol"]=="HDA1"
             &&metadata["dtof_present"]==true&&metadata["work_mode"]=="rgb_tof"
-            &&metadata["pairing_policy"]==QLatin1String(GlobalScaleReusePolicy)&&metadata["tof_warning_flags"]==0
+            &&metadata["pairing_policy"]==QLatin1String(GlobalScaleReusePolicy)&&(metadata["tof_warning_flags"]==0||metadata["tof_warning_flags"]==16)
             &&std::isfinite(delta)&&std::abs(delta)<=GlobalScaleMaxPairDeltaMs
             &&std::isfinite(uncertainty)&&uncertainty>=0&&uncertainty<=35
             &&metadata["rgb_timestamp_ns"].isDouble()&&metadata["rgb_timestamp_ns"].toDouble()>0

@@ -16,11 +16,14 @@ class CameraImageCanvas final : public QLabel
 {
 public:
     explicit CameraImageCanvas(QWidget *parent) : QLabel(parent) {}
-    void setImage(const QImage &image) { m_held=false;setProperty("recoveryFrameHeld",false);m_image=image; update(); }
+    void setImage(const QImage &image,QSizeF presentationSize) {
+        m_held=false;setProperty("recoveryFrameHeld",false);m_image=image;m_presentationSize=presentationSize;
+        setProperty("presentationSize",m_presentationSize);update();
+    }
     QImage image() const { return m_held?QImage():m_image; }
     bool held() const { return m_held; }
     void hold() { if(!m_image.isNull()){m_held=true;setProperty("recoveryFrameHeld",true);update();} }
-    void clear() { m_held=false;setProperty("recoveryFrameHeld",false);m_image={}; QLabel::clear(); update(); }
+    void clear() { m_held=false;setProperty("recoveryFrameHeld",false);m_image={};m_presentationSize={};setProperty("presentationSize",m_presentationSize); QLabel::clear(); update(); }
     void setRotation(int degrees) {
         m_rotation = ImagePresentation::normalizedRotation(degrees);
         setProperty("displayRotationDegrees", m_rotation);
@@ -31,7 +34,8 @@ protected:
         QPainter painter(this);
         painter.fillRect(rect(), QColor(QStringLiteral("#11161d")));
         const QRectF target = ImagePresentation::fittedRect(
-            QRectF(rect()).adjusted(8, 8, -8, -8), m_image.size(), m_rotation);
+            QRectF(rect()).adjusted(8, 8, -8, -8), m_presentationSize, m_rotation);
+        setProperty("presentationRect",target);
         ImagePresentation::drawImage(painter, target, m_image, m_rotation);
         painter.end();
         if(!m_image.isNull()&&m_image.cacheKey()!=m_lastPaintedKey){
@@ -47,6 +51,7 @@ private:
     qint64 m_lastPaintedKey=0;quint64 m_uniquePaints=0;
     int m_rotation = 0;
     QImage m_image;
+    QSizeF m_presentationSize;
 };
 
 RtspCameraPage::RtspCameraPage(QWidget *parent) : QWidget(parent)
@@ -139,12 +144,16 @@ void RtspCameraPage::setSessionController(RvSessionController *session)
     m_video->clear();
     if (m_session) {
         connect(session, &RvSessionController::configurationChanged, this, &RtspCameraPage::updateSessionUi);
+        connect(session, &RvSessionController::dtofCandidateSelectionChanged, this, &RtspCameraPage::updateSessionUi);
         connect(session, &RvSessionController::stateChanged, this, &RtspCameraPage::updateSessionUi);
         connect(session,&RvSessionController::assistStateChanged,this,&RtspCameraPage::updateSessionUi);
         connect(session,&RvSessionController::deviceChanged,this,&RtspCameraPage::updateSessionUi);
         connect(session, &RvSessionController::cameraFrameReady, this, [this](const QImage &image) {
+            if(m_session&&m_session->depthOnlyMode()){m_video->clear();return;}
             const bool sizeChanged = m_video->image().size() != image.size();
-            m_video->setImage(image);
+            const bool tiny=m_session&&RvDtofCandidates::isTinyNv12(m_session->dtofCandidateMode())
+                &&image.size()==QSize(TinyNv12Contract::Width,TinyNv12Contract::Height);
+            m_video->setImage(image,tiny?QSizeF(TinyNv12Contract::PresentationWidth,TinyNv12Contract::PresentationHeight):QSizeF(image.size()));
             if (sizeChanged) updateSessionUi();
         });
         connect(session, &RvSessionController::streamCleared, this, [this] {
@@ -166,6 +175,7 @@ void RtspCameraPage::setDisplayRotationDegrees(int degrees) { m_imageSettings->s
 void RtspCameraPage::updateSessionUi()
 {
     const bool available = !m_session.isNull();
+    if(available&&m_session->depthOnlyMode())m_video->clear();
     const bool busy = available && m_session->busy();
     const bool stopped = !available || m_session->userStopped();
     m_startButton->setEnabled(available && !busy && stopped);

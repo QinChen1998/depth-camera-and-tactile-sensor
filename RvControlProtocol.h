@@ -5,7 +5,7 @@
 
 namespace rvcontrol {
 constexpr auto Host = "172.32.0.93";
-constexpr auto Key = "AAAAC3NzaC1lZDI1NTE5AAAAIBZkEP0Wz9pUtqMBfg+IMC0J8+O7Sxx9Uu3zz8YXvv6g";
+constexpr auto Key = "";
 constexpr auto Implementation = "rv-control-cpp-v1";
 struct Error : std::runtime_error {
     int code;

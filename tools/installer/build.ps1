@@ -1,12 +1,11 @@
-﻿param(
+param(
     [Parameter(Mandatory)][string]$BuildDirectory,
     [string]$QtRoot='',
     [string]$MSBuild='',
     [string]$PlatformTools='',
     [string]$VlcRoot='',
     [string]$TensorRtRuntime='',
-    [string]$TensorRtSdk='',
-    [string]$Version='1.1.0',
+    [string]$Version='1.1.6',
     [switch]$StageOnly,
     [string]$Iscc='',
     [string]$ChineseMessages='',
@@ -22,7 +21,7 @@ if(-not $work.StartsWith($validation+'\',[StringComparison]::OrdinalIgnoreCase))
 }
 if($Version -notmatch '^\d+\.\d+\.\d+(\.\d+)?$'){throw 'Invalid installer version.'}
 $payload=Join-Path $work 'payload'
-$exe='Depth Camera and Tactile Sensor.exe'
+$exe='触想工作台.exe'
 
 function Invoke-Native([string]$Program,[string[]]$Arguments){
     & $Program @Arguments
@@ -44,7 +43,8 @@ function Write-Json([string]$Path,$Value){
 }
 
 if(-not $UseStagedPayload){
-    if(-not $TensorRtRuntime -or -not $TensorRtSdk -or -not $VlcRoot){throw 'Provide the verified TensorRT-RTX runtime, SDK and official VLC x64 directory.'}
+    if(-not $TensorRtRuntime){$TensorRtRuntime=Join-Path $project 'UniDepthRuntimeRgb672VgaFP16RTX'}
+    if(-not $VlcRoot){throw 'Provide the verified official VLC x64 directory.'}
     if(Test-Path -LiteralPath $payload){throw 'The payload already exists. Choose a fresh build directory.'}
     $toolchain=Resolve-Vs2022Toolchain -MSBuild $MSBuild -RequireMSBuild -RequireRedist
     $qt=Resolve-Qt611Root -QtRoot $QtRoot -MSBuild $toolchain.MSBuild
@@ -61,7 +61,8 @@ if(-not $UseStagedPayload){
         '/m:2','/nologo','/v:minimal',"/flp:logfile=$work/build.log;verbosity=normal")
 
     New-Item -ItemType Directory -Path $payload | Out-Null
-    Copy-Relative $desktop $payload $exe
+    Copy-Item -LiteralPath (Join-Path $desktop $exe) -Destination $payload
+    Copy-Relative $desktop $payload 'DctsInferenceWorker.exe'
     Invoke-Native (Join-Path $qt 'bin/windeployqt.exe') @(
         '--release','--qmldir',(Join-Path $project 'qml'),'--no-translations','--no-compiler-runtime',
         '--skip-plugin-types','qmltooling','--exclude-plugins','qtvirtualkeyboardplugin',(Join-Path $payload $exe))
@@ -89,52 +90,24 @@ if(-not $UseStagedPayload){
         Copy-Relative $PlatformTools (Join-Path $payload 'platform-tools') $name
     }
 
-    $runtime=Join-Path $project 'UniDepthRuntimeWide576FP16'
-    $modelPayload=Join-Path $payload 'UniDepthRuntimeWide576FP16'
+    $runtime=(Resolve-Path -LiteralPath $TensorRtRuntime).Path
+    $modelPayload=Join-Path $payload 'UniDepthRuntimeRgb672VgaFP16RTX'
     $manifest=Get-Content -LiteralPath (Join-Path $runtime 'runtime.json') -Raw | ConvertFrom-Json -AsHashtable
-    $graph='unidepthv2-small-rv576.onnx'
+    $graph='unidepthv2-small-rgb672-vga.onnx'
     $original=Join-Path $runtime $graph
     $originalHash=Digest $original
     $originalWrite=(Get-Item -LiteralPath $original).LastWriteTimeUtc
-    if($originalHash -ne $manifest.files[$graph]){throw 'Source model fingerprint mismatch.'}
-    $rtxSource=(Resolve-Path -LiteralPath $TensorRtRuntime).Path
-    $rtx=Get-Content -LiteralPath (Join-Path $rtxSource 'runtime.json') -Raw | ConvertFrom-Json -AsHashtable
-    if($rtx.backend -ne 'onnxruntime-tensorrt-rtx' -or $rtx.ort_version -ne '1.31.1' -or
-       $rtx.model_protection.plaintext_sha256 -ne $originalHash){throw 'RTX runtime or source graph identity mismatch.'}
-    $rtxLibraries=@(
-        'bin/onnxruntime.dll','bin/onnxruntime_providers_shared.dll','bin/onnxruntime_providers_nv_tensorrt_rtx.dll',
-        'bin/tensorrt_rtx_1_7.dll','bin/tensorrt_onnxparser_rtx_1_7.dll','bin/tensorrt_plugins.dll','bin/cudart64_12.dll')
+    if($manifest.backend -ne 'onnxruntime-tensorrt-rtx' -or $manifest.ort_version -ne '1.31.1' -or
+       $originalHash -ne '50d22cd33e126832793d905788a1efadeb4c9298de72cbfa634d49fdcdbc2dc1' -or
+       $originalHash -ne $manifest.files[$graph]){throw 'RGB672/VGA runtime or source graph identity mismatch.'}
     $files=@{}
-    foreach($name in $rtxLibraries){
-        Copy-Relative $rtxSource $modelPayload $name
-        $actual=Digest (Join-Path $modelPayload $name)
-        if($actual -ne $rtx.files[$name]){throw "RTX library fingerprint mismatch: $name"}
-        $files[$name]=$actual
-    }
-    foreach($name in 'model.json','conversion.json','licenses/ONNXRuntime-MIT.txt','licenses/Proprietary-Model-NOTICE.txt'){
+    foreach($name in $manifest.files.Keys){
+        if($name -eq $graph){continue}
         Copy-Relative $runtime $modelPayload $name
         $actual=Digest (Join-Path $modelPayload $name)
         if($actual -ne $manifest.files[$name]){throw "Model asset fingerprint mismatch: $name"}
         $files[$name]=$actual
     }
-    $sdk=(Resolve-Path -LiteralPath $TensorRtSdk).Path
-    $nvidia=Join-Path $sdk 'rtx-huawei/onnxruntime_ep_nv_tensorrt_rtx'
-    $ep=Join-Path $sdk 'source/TensorRT-RTX-EP-ABI-0.5.0'
-    $ort=Join-Path $sdk 'ort/onnxruntime-win-x64-1.31.1'
-    $rtxNotices=@{
-        'NVIDIA-TensorRT-RTX-Acknowledgements.txt'=(Join-Path $nvidia 'TRTRTX_Acknowledgements.txt')
-        'NVIDIA-ORT-EP-License.txt'=(Join-Path $ep 'LICENSE')
-        'NVIDIA-ORT-EP-ThirdPartyNotices.txt'=(Join-Path $ep 'ThirdPartyNotices.txt')
-        'ONNXRuntime-1.31.1-License.txt'=(Join-Path $ort 'LICENSE')
-        'ONNXRuntime-1.31.1-ThirdPartyNotices.txt'=(Join-Path $ort 'ThirdPartyNotices.txt')
-    }
-    foreach($notice in $rtxNotices.Keys){
-        $name="licenses/$notice"
-        Copy-Item -LiteralPath $rtxNotices[$notice] -Destination (Join-Path $modelPayload $name)
-        $files[$name]=Digest (Join-Path $modelPayload $name)
-    }
-    $manifest.backend=$rtx.backend
-    $manifest.ort_version=$rtx.ort_version
     $manifest.files=$files
     Copy-Relative $runtime $private $graph
     $protectionProject=Join-Path $project 'tools/model_protection/ModelProtection.vcxproj'
@@ -154,7 +127,7 @@ if(-not $UseStagedPayload){
     $manifest.model_protection=@{scheme='aes256-gcm-memory-v1';loader_abi=1;ciphertext='model.dctsm';loader='bin/DctsModelRuntime.dll';plaintext_sha256=$originalHash}
     Write-Json (Join-Path $modelPayload 'runtime.json') $manifest
     Write-Json (Join-Path $payload 'runtime-paths.json') @{
-        RV_ASSIST_WIDE_576_FP16_ROOT='UniDepthRuntimeWide576FP16'
+        RV_ASSIST_RGB672_VGA_FP16_ROOT='UniDepthRuntimeRgb672VgaFP16RTX'
         RV_CONTROL_CPP='rv_control/RvControlWorker.exe'
     }
 
@@ -205,13 +178,40 @@ foreach($name in 'libvlc.dll','libvlccore.dll','plugins/codec/libavcodec_plugin.
     }
 }
 
-$stagedModel=Join-Path $payload 'UniDepthRuntimeWide576FP16'
+foreach($name in $exe,'DctsInferenceWorker.exe'){
+    if(-not (Test-Path -LiteralPath (Join-Path $payload $name) -PathType Leaf)){
+        throw "Missing application executable in staged payload ($name)."
+    }
+}
+
+$stagedModel=Join-Path $payload 'UniDepthRuntimeRgb672VgaFP16RTX'
 $stagedManifest=Get-Content -LiteralPath (Join-Path $stagedModel 'runtime.json') -Raw | ConvertFrom-Json -AsHashtable
 if($stagedManifest.backend -ne 'onnxruntime-tensorrt-rtx' -or $stagedManifest.ort_version -ne '1.31.1' -or
    $stagedManifest.model_protection.scheme -ne 'aes256-gcm-memory-v1' -or
    -not (Test-Path -LiteralPath (Join-Path $stagedModel 'model.dctsm') -PathType Leaf)){
-    throw 'Expected the encrypted TensorRT-RTX runtime payload.'
+    throw 'Expected the encrypted RGB672/VGA TensorRT-RTX runtime payload.'
 }
+if($stagedManifest.model_protection.plaintext_sha256 -ne '50d22cd33e126832793d905788a1efadeb4c9298de72cbfa634d49fdcdbc2dc1'){
+    throw 'Unexpected protected VGA model identity.'
+}
+foreach($name in $stagedManifest.files.Keys){
+    if((Digest (Join-Path $stagedModel $name)) -ne $stagedManifest.files[$name]){throw "Staged model fingerprint mismatch: $name"}
+}
+$boardCipher=Join-Path $payload 'rv_control/litesr_board/rect-model.dctsm'
+$boardManifest=Get-Content -LiteralPath (Join-Path $payload 'rv_control/implementation.json') -Raw | ConvertFrom-Json -AsHashtable
+if((Digest $boardCipher) -ne $boardManifest.payload_files['litesr_board/rect-model.dctsm']){
+    throw 'Encrypted 384x256 board payload fingerprint mismatch.'
+}
+$boardHeader=[IO.File]::ReadAllBytes($boardCipher)
+if([Text.Encoding]::ASCII.GetString($boardHeader,0,8) -ne "DCTSM01`0"){
+    throw 'Invalid encrypted 384x256 board model header.'
+}
+$tinyCipher=Join-Path $payload 'rv_control/litesr_board/tiny-model.dctsm'
+foreach($name in 'tiny-model.dctsm','tiny-engine.bin','tiny-camera.bin','tiny-camera-session.sh'){
+    if((Digest (Join-Path $payload "rv_control/litesr_board/$name")) -ne $boardManifest.payload_files["litesr_board/$name"]){throw "Tiny NV12 payload fingerprint mismatch: $name"}
+}
+$tinyHeader=[IO.File]::ReadAllBytes($tinyCipher)
+if($tinyHeader.Length -ne 48275 -or [Text.Encoding]::ASCII.GetString($tinyHeader,0,8) -ne "DCTSM01`0"){throw 'Invalid encrypted Tiny NV12 model header.'}
 $unexpected=Get-ChildItem -LiteralPath $payload -File -Recurse | Where-Object {
     $_.Name -match '^(README|AGENTS)(\..*)?$|^PackModelCopy\.exe$|model_key_material' -or
     $_.Name -match '^(onnxruntime_providers_cuda|cudnn.*|cublas.*|cufft.*|nvrtc.*|zlibwapi|RvAssistTensorRtRtx)\.(dll|exe)$' -or
@@ -222,10 +222,10 @@ if($StageOnly){return}
 if(-not $Iscc -or -not $ChineseMessages){throw 'Provide -Iscc and -ChineseMessages for installer compilation.'}
 $out=Join-Path $work 'delivery'
 New-Item -ItemType Directory -Force $out | Out-Null
-$icon=(Get-ChildItem -LiteralPath (Join-Path $project 'assets') -Filter robot-hand.ico -Recurse -File | Select-Object -First 1).FullName
+$icon=(Resolve-Path -LiteralPath (Join-Path $project 'assets/cx.ico')).Path
 Invoke-Native (Resolve-Path -LiteralPath $Iscc).Path @(
     "/DVersion=$Version","/DOutput=$out","/DPayload=$payload","/DIconPath=$icon",
     "/DChineseMessages=$((Resolve-Path -LiteralPath $ChineseMessages).Path)",(Join-Path $PSScriptRoot 'Dcts.iss'))
-$installer=Join-Path $out "DCTS-Setup-$Version-x64.exe"
-"$(Digest $installer) *$(Split-Path $installer -Leaf)" | Set-Content -LiteralPath "$installer.sha256" -Encoding ascii
+$installer=Join-Path $out "触想工作台-内测版-v$Version-x64.exe"
+"$(Digest $installer) *$(Split-Path $installer -Leaf)" | Set-Content -LiteralPath "$installer.sha256" -Encoding utf8NoBOM
 Get-Item -LiteralPath $installer

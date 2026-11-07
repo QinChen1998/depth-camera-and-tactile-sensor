@@ -8,5 +8,5 @@
     "tmf8829_tuner": "06039c807cc833bf74f711c2a1839990255aa184078157e18ba4050a3663ed6d"
   },
   "runtime": "native ARM hard-float/uClibc; no host Python dependency",
-  "deployment": "not automatic; preflight requires installed matching assets"
+  "deployment": "USB enrollment provisions matching assets while the verified board is idle; experiment preflight still requires exact hashes"
 }

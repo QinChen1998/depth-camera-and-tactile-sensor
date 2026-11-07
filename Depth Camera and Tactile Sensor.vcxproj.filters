@@ -1,306 +1,140 @@
 <?xml version="1.0" encoding="utf-8"?>
 <Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003" ToolsVersion="4.0">
-  
-  
   <ItemGroup>
-    
-    
     <ClCompile Include="main.cpp"/>
-    
-    
     <ClCompile Include="SensorMainWindow.cpp"/>
-    
-    
     <ClCompile Include="RuntimeDiscovery.cpp"/>
-    
-    
     <ClCompile Include="tests\PortSmokeTests.cpp"/>
-    
-    
     <ClCompile Include="UiStyle.cpp"/>
-    
-    
     <ClCompile Include="RenderingSettings.cpp"/>
-    
-    
     <ClCompile Include="LanguageManager.cpp"/>
-    
-    
     <ClCompile Include="TactileDockWidget.cpp"/>
-    
-    
     <ClCompile Include="sensors\DepthMapWidget.cpp"/>
-    
-    
     <ClCompile Include="sensors\ImageDisplaySettings.cpp"/>
-    
-    
     <ClCompile Include="sensors\RtspCameraPage.cpp"/>
-    
-    
     <ClCompile Include="sensors\RvAssistDepth.cpp"/>
-    
-    
     <ClCompile Include="sensors\RvAssistFusion.cpp"/>
-    
-    
     <ClCompile Include="sensors\RvDepthCoverage.cpp"/>
-    
-    
     <ClCompile Include="sensors\RvDepthDiagnostic.cpp"/>
-    
-    
     <ClCompile Include="sensors\RvDepthView.cpp"/>
-    
-    
     <ClCompile Include="sensors\RvDeviceManagerDialog.cpp"/>
-    
-    
     <ClCompile Include="sensors\RvDeviceStore.cpp"/>
     <ClCompile Include="sensors\RvUsbEnrollment.cpp"/>
-    
-    
+    <ClCompile Include="sensors\RvImportDiagnostics.cpp"/>
     <ClCompile Include="sensors\RvDtofBoardStream.cpp"/>
-    
-    
     <ClCompile Include="sensors\RvDtofCandidates.cpp"/>
-    
-    
-    
-    
     <ClCompile Include="sensors\RvLiteSrContour.cpp"/>
-    
-    
-    <ClCompile Include="sensors\RvLiteSrDepth.cpp"/>
-    
-    
     <ClCompile Include="sensors\RvSessionController.cpp"/>
-    
-    
     <ClCompile Include="sensors\RvTunerController.cpp"/>
-    
-    
     <ClCompile Include="sensors\RvTunerProtocol.cpp"/>
-    
-    
     <ClCompile Include="sensors\RvTunerWidget.cpp"/>
-    
-    
     <ClCompile Include="sensors\TactileFrame.cpp"/>
-    
-    
-    <ClCompile Include="sensors\TactileMockSource.cpp"/>
-    
-    
     <ClCompile Include="sensors\TactileSceneAdapter.cpp"/>
-    
-    
     <ClCompile Include="sensors\TactileSerialSource.cpp"/>
-    
-    
+    <ClCompile Include="sensors\TactileAutoZero.cpp"/>
+    <ClInclude Include="sensors\TactileAutoZero.h"/>
     <ClCompile Include="sensors\TactileSurfaceModel.cpp"/>
-    
-    
     <ClCompile Include="sensors\TactileVisualizationWidget.cpp"/>
-    
-    
-    <ClCompile Include="sensors\Tmf8829Frame.cpp"/>
-    
-    
     <ClCompile Include="tests\RvAssistRecoveryTests.cpp"/>
-    
-    
     <ClCompile Include="tests\RvTunerTests.cpp"/>
-    
-    
     <ClCompile Include="tests\Tactile3DTests.cpp"/>
-    
-    
     <ClCompile Include="tests\TactileSerialTests.cpp"/>
-    
-    
     <ClCompile Include="tests\TactileVisualizationTests.cpp"/>
-    
-    
-    <ClCompile Include="tools\dtof_m0\M0.cpp"/>
-    
-    
-    <ClCompile Include="tools\dtof_followup\V1Depth.cpp"/>
-    
-    
     <QtMoc Include="LanguageManager.h"/>
-    
-    
     <QtMoc Include="RenderingSettings.h"/>
-    
-    
     <ClInclude Include="RuntimeDiscovery.h"/>
     <ClInclude Include="tools\model_protection\ModelProtectionApi.h"/>
-    
-    
     <ClInclude Include="RvControlProtocol.h"/>
-    
-    
     <QtMoc Include="SensorMainWindow.h"/>
-    
-    
     <ClInclude Include="TactileDockWidget.h"/>
-    
-    
     <ClInclude Include="UiStyle.h"/>
-    
-    
     <ClInclude Include="sensors\DepthColorScale.h"/>
-    
-    
     <QtMoc Include="sensors\DepthMapWidget.h"/>
-    
-    
-    <ClInclude Include="sensors\DepthorV3Geometry.h"/>
-    
-    
     <ClInclude Include="sensors\DepthPost.h"/>
-    
-    
     <ClInclude Include="sensors\DepthSnapshot.h"/>
-    
-    
     <QtMoc Include="sensors\ImageDisplaySettings.h"/>
-    
-    
     <ClInclude Include="sensors\ImageHoverTip.h"/>
-    
-    
     <ClInclude Include="sensors\ImagePresentation.h"/>
-    
-    
     <ClInclude Include="sensors\LatestSensorFrameBuffer.h"/>
-    
-    
     <ClInclude Include="sensors\LiteSrNativeBindings.h"/>
-    
-    
     <QtMoc Include="sensors\RtspCameraPage.h"/>
-    
-    
     <QtMoc Include="sensors\RvAssistDepth.h"/>
-    
-    
     <ClInclude Include="sensors\RvAssistFusion.h"/>
-    
-    
     <ClInclude Include="sensors\RvCameraStream.h"/>
-    
-    
     <ClInclude Include="sensors\RvCameraView.h"/>
-    
-    
-    <ClInclude Include="sensors\RvColorSurface.h"/>
-    
-    
     <ClInclude Include="sensors\RvDepthCoverage.h"/>
-    
-    
     <ClInclude Include="sensors\RvDepthDiagnostic.h"/>
-    
-    
     <ClInclude Include="sensors\RvDepthView.h"/>
-    
-    
     <QtMoc Include="sensors\RvDeviceManagerDialog.h"/>
-    
-    
     <ClInclude Include="sensors\RvDeviceStore.h"/>
     <ClInclude Include="sensors\RvUsbEnrollment.h"/>
-    
-    
+    <ClInclude Include="sensors\RvImportDiagnostics.h"/>
     <ClInclude Include="sensors\RvDtofBoardStream.h"/>
-    
-    
     <ClInclude Include="sensors\RvDtofCandidates.h"/>
-    
-    
     <ClInclude Include="sensors\RvHdVideoStream.h"/>
-    
-    
-    
-    
     <ClInclude Include="sensors\RvLiteSrContour.h"/>
-    
-    
-    <QtMoc Include="sensors\RvLiteSrDepth.h"/>
-    
-    
     <ClInclude Include="sensors\RvPhotonFrame.h"/>
-    
-    
     <QtMoc Include="sensors\RvSessionController.h"/>
-    
-    
     <ClInclude Include="sensors\RvTofFrame.h"/>
-    
-    
-    
-    
     <QtMoc Include="sensors\RvTunerController.h"/>
-    
-    
     <ClInclude Include="sensors\RvTunerProtocol.h"/>
-    
-    
     <QtMoc Include="sensors\RvTunerWidget.h"/>
-    
-    
-    <ClInclude Include="sensors\SensorTypes.h"/>
-    
-    
-    <ClInclude Include="sensors\TactileDataSource.h"/>
-    
-    
     <ClInclude Include="sensors\TactileFrame.h"/>
-    
-    
+    <ClInclude Include="tests\TactileTestFixtures.h"/>
     <ClInclude Include="sensors\TactileHistory.h"/>
-    
-    
     <ClInclude Include="sensors\TactileMetrics.h"/>
-    
-    
-    <ClInclude Include="sensors\TactileMockSource.h"/>
-    
-    
     <QtMoc Include="sensors\TactileSceneAdapter.h"/>
-    
-    
     <QtMoc Include="sensors\TactileSerialSource.h"/>
-    
-    
     <ClInclude Include="sensors\TactileSurfaceModel.h"/>
-    
-    
     <QtMoc Include="sensors\TactileVisualizationWidget.h"/>
-    
-    
-    <ClInclude Include="sensors\Tmf8829Frame.h"/>
-    
-    
     <ClInclude Include="tests\RvAssistRecoveryTests.h"/>
-    
-    
     <ResourceCompile Include="SensorApp.rc"/>
     <QtRcc Include="SensorResources.qrc"/>
-    
-    
     <QtRcc Include="Component_depth.qrc"/>
-    
-    
     <QtRcc Include="Component_tactile.qrc"/>
-    
-  
   </ItemGroup>
-  
-
   <ItemGroup>
     <ClCompile Include="tests\LiveValidation.cpp"/>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="tools\litesr_board\Contour384.h" />
+    <None Include="tools\litesr_board\common\NativeInput48.inc" />
+    <None Include="tools\litesr_board\Contour384Grid.inc" />
+    <None Include="tools\litesr_board\build.sh" />
+    <None Include="tools\litesr_board\protected384\runtime\main.cpp" />
+    <None Include="tools\litesr_board\protected384\runtime\Preprocess.h" />
+    <None Include="tools\litesr_board\protected384\runtime\ProtectedModel.inc" />
+    <None Include="tools\litesr_board\protected384\runtime\Gui.inc" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="tools\litesr_board\StatusPolicy.h" />
+    <None Include="tools\litesr_board\common\camera_rtsp_monitor.cpp" />
+    <None Include="tools\litesr_board\Contour.h" />
+    <None Include="tools\litesr_board\ContourGrid.inc" />
+    <None Include="tools\litesr_board\common\HdVideo.h" />
+    <None Include="tools\litesr_board\common\NativePacket.h" />
+    <None Include="tools\litesr_board\native\runtime\Gui.inc"><Filter>Source Files</Filter></None>
+    <None Include="tools\litesr_board\native\runtime\main.cpp" />
+    <None Include="tools\litesr_board\common\SpiNative48.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="sensors\RvTinyNv12Protocol.h" />
+    <ClInclude Include="tests\TinyNv12Tests.h" />
+    <ClInclude Include="tools\tiny_nv12_board\Contract.h" />
+    <ClInclude Include="tools\tiny_nv12_board\Receipt.h" />
+  </ItemGroup>
+  <ItemGroup><None Include="tools\rv_control\bootstrap\camera-takeover.sh"><Filter>Source Files</Filter></None></ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="tools\rv_control\SessionFov.h"><Filter>Source Files</Filter></ClInclude>
+    <ClInclude Include="tools\rv_control\DriverWarningPolicy.h"><Filter>Source Files</Filter></ClInclude>
+    <None Include="tools\rv_control\prepare_spi_driver.py"><Filter>Source Files</Filter></None>
+    <None Include="tests\SessionFovTests.c"><Filter>Source Files</Filter></None>
+  </ItemGroup>
+  <ItemGroup><ClInclude Include="sensors\RvCaptureCalibration.h"><Filter>Source Files</Filter></ClInclude></ItemGroup>
+  <ItemGroup>
+    <None Include="tools\thermal\monitor.sh"><Filter>Source Files</Filter></None>
+    <None Include="tools\thermal\run.py"><Filter>Source Files</Filter></None>
+    <None Include="tools\thermal\analyze.py"><Filter>Source Files</Filter></None>
+    <None Include="tests\test_thermal_analysis.py"><Filter>Source Files</Filter></None>
   </ItemGroup>
 </Project>

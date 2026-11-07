@@ -3,7 +3,7 @@
 #include <QtCore/QJsonObject>
 
 class RvSessionController;
-class QWidget;
+class SensorMainWindow;
 
-void watchRvUsbDevices(RvSessionController *session, QWidget *window);
+void watchRvUsbDevices(RvSessionController *session, SensorMainWindow *window);
 QJsonObject checkRvUsbEnrollment();

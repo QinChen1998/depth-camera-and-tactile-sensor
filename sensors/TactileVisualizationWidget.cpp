@@ -319,6 +319,7 @@ protected:
         plot.reserve(qsizetype(samples.size()));
         double low=0,high=0;
         for(const auto &sample:samples) {
+            if(m_owner->awaitingDisplayZero())break;
             const auto &raw=sample.pointForces[finger];
             if(raw.size()!=rawCount){plot.append(PlotSample{nullptr,{}});continue;}
             const auto f=tactile::zeroSmallComponents(
@@ -385,7 +386,7 @@ TactileVisualizationWidget::TactileVisualizationWidget(QWidget *parent) : QWidge
     m_minimizeDisplay=tactileMinimizeButton(displayLayout,m_displaySettings,"tactileMinimizeDisplay");
     bodyLayout->addWidget(m_displayControls);m_displayControls->hide();
     connect(m_displaySettings,&QPushButton::toggled,m_displayControls,&QWidget::setVisible);
-    m_splitter=new QSplitter;m_splitter->setObjectName("tactileContentSplitter");bodyLayout->addWidget(m_splitter);
+    m_splitter=new QSplitter;m_splitter->setObjectName("tactileContentSplitter");bodyLayout->addWidget(m_splitter,1);
     auto *left=new QWidget;left->setObjectName("tactileScenePanel");auto *leftLayout=new QVBoxLayout(left);leftLayout->setContentsMargins(0,0,0,0);leftLayout->setSpacing(5);
     m_adapter=new TactileSceneAdapter(this);m_adapter->setPalette(palette());
     auto *renderSettings=RenderingSettings::instance();
@@ -504,13 +505,8 @@ TactileVisualizationWidget::TactileVisualizationWidget(QWidget *parent) : QWidge
     connect(m_statusToggle,&QPushButton::toggled,this,[this](bool visible){
         m_adapter->setCommunicationStatusVisible(visible);updatePanelStatus();updateSerialStatus();
     });
-    auto *controls=new QHBoxLayout;m_scenarios=new TactileSettingsCombo;m_scenarios->setObjectName("scenario");for(int i=0;i<4;++i)m_scenarios->addItem(QString());m_scenarios->setCurrentIndex(1);
-    m_pause=new QPushButton;m_pause->setObjectName("pauseSimulation");m_pause->setCheckable(true);
-    controls->addWidget(m_simulate);controls->addStretch();controls->addWidget(m_scenarios);controls->addWidget(m_pause);detailLayout->addLayout(controls);
     m_splitter->addWidget(right);m_splitter->setChildrenCollapsible(false);m_splitter->setStretchFactor(0,1);m_splitter->setStretchFactor(1,1);m_splitter->setSizes({440,440});
     connect(m_fingers,&QButtonGroup::idClicked,this,[this](int id){m_finger=id;if(m_canvas->rootObject())m_canvas->rootObject()->setProperty("inspectedPoint",-1);updateValues();});
-    connect(m_pause,&QPushButton::clicked,this,&TactileVisualizationWidget::setPaused);
-    connect(m_scenarios,&QComboBox::currentIndexChanged,this,[this](int id){setScenario(static_cast<tactile::Scenario>(id));});
     connect(m_pointsToggle,&QPushButton::toggled,m_adapter,&TactileSceneAdapter::setPointArrows);connect(m_resultantToggle,&QPushButton::toggled,m_adapter,&TactileSceneAdapter::setResultantArrow);
     connect(m_componentsToggle,&QPushButton::toggled,m_adapter,&TactileSceneAdapter::setComponentArrows);
     connect(m_displayMode,&QComboBox::currentIndexChanged,this,[this]{
@@ -534,7 +530,9 @@ TactileVisualizationWidget::TactileVisualizationWidget(QWidget *parent) : QWidge
     connect(m_displaySettings,&QPushButton::toggled,this,&TactileVisualizationWidget::updateRightPanelLayout);
     connect(m_foldSensors,&QToolButton::toggled,this,[this]{updateSensorChoices();updateRightPanelLayout();});
     retranslate();restoreDisplaySettings();restoreSerialSettings();
-    m_connectionSettings->setChecked(true);updateRightPanelLayout();updateValues();
+    // Panel visibility is session-local and user-controlled after these startup defaults.
+    m_connectionSettings->setChecked(true);m_displaySettings->setChecked(false);
+    updateRightPanelLayout();updateValues();
     connect(m_jumpThreshold,&QSpinBox::valueChanged,this,&TactileVisualizationWidget::saveDisplaySettings);
     connect(m_noiseEnabled,&QPushButton::toggled,this,&TactileVisualizationWidget::saveDisplaySettings);
     connect(m_reverseZArrows,&QPushButton::toggled,this,&TactileVisualizationWidget::saveDisplaySettings);
@@ -549,7 +547,6 @@ TactileVisualizationWidget::TactileVisualizationWidget(QWidget *parent) : QWidge
     connect(m_resultantToggle,&QPushButton::toggled,this,&TactileVisualizationWidget::saveDisplaySettings);
     connect(m_componentsToggle,&QPushButton::toggled,this,&TactileVisualizationWidget::saveDisplaySettings);
     connect(m_hideReadingsToggle,&QPushButton::toggled,this,&TactileVisualizationWidget::saveDisplaySettings);
-    connect(m_displaySettings,&QPushButton::toggled,this,&TactileVisualizationWidget::saveDisplaySettings);
     connect(m_splitter,&QSplitter::splitterMoved,this,&TactileVisualizationWidget::saveSplitterLayout);
     // Wheel scrolling is navigation, never an option edit, even with focus.
     // Include popup views and editable children; keep page scrollbars
@@ -566,7 +563,7 @@ TactileVisualizationWidget::TactileVisualizationWidget(QWidget *parent) : QWidge
     }
     for(auto *slider:findChildren<QSlider *>())slider->installEventFilter(wheelGuard);
 }
-TactileVisualizationWidget::~TactileVisualizationWidget() {saveSplitterLayout();m_initialResponseTimer.stop();m_portScanTimer.stop();m_timer.stop();m_serial.stop();m_source.stop();delete m_canvas;m_canvas=nullptr;}
+TactileVisualizationWidget::~TactileVisualizationWidget() {saveSplitterLayout();m_initialResponseTimer.stop();m_portScanTimer.stop();m_timer.stop();m_serial.stop();delete m_canvas;m_canvas=nullptr;}
 void TactileVisualizationWidget::updateSensorChoices()
 {
     const bool collapsed=m_foldSensors->isChecked();
@@ -642,7 +639,6 @@ void TactileVisualizationWidget::restoreDisplaySettings()
     m_resultantToggle->setChecked(flag("resultantArrow",true));
     m_componentsToggle->setChecked(flag("componentArrows",true));
     m_hideReadingsToggle->setChecked(flag("hideReadings",false));
-    m_displaySettings->setChecked(flag("expanded",false));
 }
 void TactileVisualizationWidget::saveDisplaySettings()
 {
@@ -658,53 +654,50 @@ void TactileVisualizationWidget::saveDisplaySettings()
     settings.setValue("pointArrows",m_pointsToggle->isChecked());settings.setValue("resultantArrow",m_resultantToggle->isChecked());
     settings.setValue("componentArrows",m_componentsToggle->isChecked());
     settings.setValue("hideReadings",m_hideReadingsToggle->isChecked());
-    settings.setValue("expanded",m_displaySettings->isChecked());settings.sync();
+    settings.sync();
 }
 void TactileVisualizationWidget::start()
 {
-    if(m_canvas->status()!=QQuickWidget::Ready || !isVisible() || m_source.state()!=tactile::SourceState::Stopped) return;
-    m_userPaused=false; m_suspended=false;
-    m_source.start(); m_history.begin(m_source.sessionId(),m_source.generation());
-    m_tareFrame={};m_frame={}; m_pause->setChecked(false); m_timer.start(); refresh();
+    if(m_canvas->status()!=QQuickWidget::Ready || !isVisible() || m_started) return;
+    m_started=true;m_suspended=false;
+    m_timer.start();refresh();
 }
 void TactileVisualizationWidget::stop()
 {
     cancelSerialRetry();
     m_defaultConnectRequested=false;m_initialResponseTimer.stop();m_waitingForFirstHardwareFrame=false;
     if(auto *notice=findChild<QMessageBox *>("tactileSaveReminder"))notice->close();
-    m_connectionSettings->setChecked(true);
     m_configTimer.stop();m_configAwaitClose=false;
     if(m_serial.configBusy())setDeviceConfigStatus(tr("Configuration interrupted; device state may have changed. Reconnect and read parameters before another write."));
     m_verifyingAddress=false;
-    m_timer.stop(); m_serial.stop();m_displayFilter.reset();m_liveFrame={};m_mockFrame={};m_serialSample={};m_serialHistory.clear();
+    m_started=false;m_timer.stop();m_serial.stop();m_displayFilter.reset();m_liveFrame={};m_serialSample={};m_serialHistory.clear();
     clearHardwareDisplay();m_heldTableFrame={};
-    m_source.stop(); m_history.clear();m_tareFrame={}; m_frame={}; updateValues();
-}
-void TactileVisualizationWidget::setPaused(bool paused)
-{
-    m_userPaused=paused; applyPause();
+    m_tareFrame={};m_autoZeroResult={};m_frame={};updateValues();
 }
 void TactileVisualizationWidget::setSuspended(bool suspended)
 {
     if(m_suspended==suspended) return;
-    m_suspended=suspended; applyPause();
-}
-void TactileVisualizationWidget::applyPause()
-{
-    m_history.breakSegment();
-    m_source.setPaused(m_userPaused||m_suspended); m_pause->setChecked(m_userPaused);
-    m_serial.setPaused(m_userPaused||m_suspended);m_serialHistory.breakSegment();m_liveFrame={};clearHardwareDisplay();m_heldTableFrame={};
+    m_suspended=suspended;
+    m_serial.setPaused(suspended);m_serialHistory.breakSegment();m_liveFrame={};clearHardwareDisplay();m_heldTableFrame={};
     if(running()) m_timer.start(); else m_timer.stop(); updateValues();
 }
-bool TactileVisualizationWidget::running() const { return m_source.state()==tactile::SourceState::Running; }
-void TactileVisualizationWidget::setScenario(tactile::Scenario scenario)
-{
-    const QSignalBlocker blocker(m_scenarios);m_scenarios->setCurrentIndex(static_cast<int>(scenario));
-    m_source.setScenario(scenario);m_mockFrame={};m_tareFrame={}; m_history.begin(m_source.sessionId(),m_source.generation()); m_frame={};
-    if(running()) refresh(); else updateValues();
-}
+bool TactileVisualizationWidget::running() const { return m_started&&!m_suspended; }
 void TactileVisualizationWidget::receiveSerialSample(const tactile::SerialSample &received)
 {
+        if(m_waitingForFirstHardwareFrame&&received.modelIdentified&&!m_serial.stopping()
+            &&received.frame.sessionId==m_serial.sessionId()&&received.frame.generation==m_serial.generation()
+            &&received.settings.port==m_connectedSettings.port&&received.settings.baud==m_connectedSettings.baud
+            &&received.settings.type>=0&&received.settings.type<3&&received.frame.hardwareType==received.settings.type) {
+            const bool changed=m_finger!=received.settings.type||m_hardwareType!=received.settings.type;
+            m_connectedSettings.type=received.settings.type;m_connectedSettings.slave=received.settings.slave;
+            m_hardwareType=received.settings.type;m_finger=received.settings.type;
+            const QSignalBlocker blocker(m_slave);m_slave->setValue(received.settings.slave);
+            m_fingers->button(m_finger)->setChecked(true);
+            if(changed){
+                if(m_canvas->rootObject())m_canvas->rootObject()->setProperty("inspectedPoint",-1);
+                updateValues();
+            }
+        }
         if(m_trustedReceivedMs>=0&&!hardwareDisplayFrame(false).valid){clearHardwareDisplay();m_serialHistory.breakSegment();}
         if(received.requests>m_serialSample.requests+1)m_serialHistory.breakSegment(true);
         if(!received.portOpen&&!received.error.isEmpty()) {
@@ -713,13 +706,16 @@ void TactileVisualizationWidget::receiveSerialSample(const tactile::SerialSample
             disconnectSerial();return;
         }
         m_serialSample=received;
-        if(!received.portOpen||received.verifyCrc!=m_crc->isChecked()||m_userPaused||m_suspended) {
+        if(!received.portOpen||received.verifyCrc!=m_crc->isChecked()||m_suspended) {
             m_liveFrame={};m_heldTableFrame={};clearHardwareDisplay();m_serialHistory.breakSegment();return;
         }
         if(received.accepted&&tactile::validateFrame(received.frame)) {
             const auto previous=hardwareDisplayFrame(true);
             m_liveFrame=received.frame; // Table and diagnostics retain the current raw frame.
             if(received.frame.crcOk)m_heldTableFrame=received.frame;
+            // Startup transients cannot pin the jump gate to a pre-settling
+            // value. The native multi-frame stability gate admits the zero.
+            if(m_waitingForFirstHardwareFrame)m_displayFilter.reset();
             if(m_displayFilter.accept(received.frame,m_jumpThreshold->value())) {
                 if(m_serialHistory.append(received.frame)) {
                     m_trustedReceivedMs=received.receivedMs;
@@ -755,11 +751,8 @@ void TactileVisualizationWidget::refresh()
 }
 void TactileVisualizationWidget::refreshDisplay(bool liveChanged)
 {
-    tactile::Frame next;
-    if(!m_source.latest(next)) return;
-    if(!m_history.append(next)) { m_frame={}; stop(); return; }
-    m_mockFrame=std::move(next);selectFrame();
-    if(m_finger==m_hardwareType&&!liveChanged){
+    selectFrame();
+    if(!liveChanged){
         if(m_arrowTransition.isValid()) {
             m_adapter->publish(arrowFrame(),m_finger,false,0,&m_tareFrame,noiseDisplayThreshold());
             if(m_arrowTransition.elapsed()>=ArrowTransitionMs){m_arrowTransition.invalidate();m_arrowFrom={};}
@@ -798,20 +791,27 @@ tactile::Force TactileVisualizationWidget::displayPointForce(const QVector<tacti
 }
 tactile::Frame TactileVisualizationWidget::visualFrame() const
 {
-    if(m_finger!=m_hardwareType)return m_frame;
+    if(m_finger!=m_hardwareType)return {};
+    if(awaitingDisplayZero())return {};
     return hardwareDisplayFrame(false);
 }
 tactile::Frame TactileVisualizationWidget::tableFrame() const
 {
-    if(m_finger!=m_hardwareType)return m_frame;
+    if(m_finger!=m_hardwareType)return {};
     if(m_liveFrame.valid)return m_liveFrame;
-    if(m_crc->isChecked()&&m_serialSample.portOpen&&!m_userPaused&&!m_suspended
+    if(m_crc->isChecked()&&m_serialSample.portOpen&&!m_suspended
         &&m_serialSample.error==QStringLiteral("CRC mismatch"))return m_heldTableFrame;
     return {};
 }
 tactile::Frame TactileVisualizationWidget::arrowFrame() const
 {
-    return m_finger==m_hardwareType?hardwareDisplayFrame(true):m_frame;
+    if(awaitingDisplayZero())return {};
+    return m_finger==m_hardwareType?hardwareDisplayFrame(true):tactile::Frame{};
+}
+bool TactileVisualizationWidget::awaitingDisplayZero() const
+{
+    return m_finger==m_hardwareType&&(m_waitingForFirstHardwareFrame
+        ||(m_autoZeroResult.phase==tactile::AutoZeroPhase::Failed&&!hasDisplayBaseline()));
 }
 void TactileVisualizationWidget::clearHardwareDisplay()
 {
@@ -820,7 +820,7 @@ void TactileVisualizationWidget::clearHardwareDisplay()
 tactile::Frame TactileVisualizationWidget::hardwareDisplayFrame(bool interpolate) const
 {
     const auto age=tactileDisplayNowMs()-m_trustedReceivedMs;
-    if(m_trustedReceivedMs<0||age<0||age>TrustedHoldMs||m_userPaused||m_suspended)return {};
+    if(m_trustedReceivedMs<0||age<0||age>TrustedHoldMs||m_suspended)return {};
     auto display=m_displayFilter.last;
     if(!interpolate||!m_arrowTransition.isValid()||!tactile::matchingBaseline(display,m_arrowFrom))return display;
     const double amount=std::clamp(double(m_arrowTransition.elapsed())/ArrowTransitionMs,0.0,1.0);
@@ -843,7 +843,8 @@ tactile::Frame TactileVisualizationWidget::hardwareDisplayFrame(bool interpolate
 }
 bool TactileVisualizationWidget::hasDisplayBaseline() const
 {
-    const auto &reference=m_finger==m_hardwareType?(m_heldTableFrame.valid?m_heldTableFrame:m_displayFilter.last):m_frame;
+    if(m_finger!=m_hardwareType)return false;
+    const auto &reference=m_heldTableFrame.valid?m_heldTableFrame:m_displayFilter.last;
     return tactile::matchingBaseline(reference,m_tareFrame)&&m_tareFrame.fingers[m_finger].valid;
 }
 tactile::Force TactileVisualizationWidget::curveForce(const tactile::Force &raw,int point) const
@@ -861,19 +862,19 @@ double TactileVisualizationWidget::noiseDisplayThreshold() const
 }
 void TactileVisualizationWidget::setDisplayZero()
 {
+    if(m_waitingForFirstHardwareFrame)return;
     auto baseline=tableFrame();
     if(m_finger==m_hardwareType&&!baseline.crcOk)baseline=m_heldTableFrame;
     if(!tactile::validateFrame(baseline)||(m_finger==m_hardwareType&&!baseline.crcOk))return;
-    applyDisplayZero(baseline);
+    m_autoZeroResult={};applyDisplayZero(baseline);
 }
 void TactileVisualizationWidget::applyDisplayZero(const tactile::Frame &baseline)
 {
     m_tareFrame=baseline;
     m_arrowTransition.invalidate();m_arrowFrom={};
-    const bool hardware=baseline.sourceMode==QStringLiteral("Serial");
-    auto &history=hardware?m_serialHistory:m_history;
-    history.begin(baseline.sessionId,baseline.generation);
-    if(!hardware||(tactile::matchingBaseline(baseline,m_displayFilter.last)&&baseline.sequence==m_displayFilter.last.sequence))history.append(baseline);
+    m_serialHistory.begin(baseline.sessionId,baseline.generation);
+    if(tactile::matchingBaseline(baseline,m_displayFilter.last)&&baseline.sequence<=m_displayFilter.last.sequence)
+        m_serialHistory.append(m_displayFilter.last); // An averaged zero is never a raw history sample.
     updateValues();
 }
 void TactileVisualizationWidget::updateValues()
@@ -969,7 +970,6 @@ void TactileVisualizationWidget::updatePanelStatus()
     m_filterStatus->setVisible(m_statusToggle->isChecked()&&!filterText.isEmpty());
     m_filterStatus->setToolTip(filterText);
     m_filterStatus->setText(m_filterStatus->fontMetrics().elidedText(filterText,Qt::ElideRight,m_filterStatus->width()));
-    m_scenarios->setEnabled(m_finger!=m_hardwareType);
 }
 void TactileVisualizationWidget::hideEvent(QHideEvent *e) {
     m_portScanTimer.stop();
@@ -1115,9 +1115,7 @@ void TactileVisualizationWidget::retranslate()
     m_componentsToggle->setToolTip(tr("X red / Y green / Z blue; no Z display threshold. Z points into the surface."));
     m_resetView->setText(tr("Reset view"));m_frontView->setText(tr("Front view"));
     m_canvas->setToolTip(QString());
-    const QStringList scenes={tr("No contact"),tr("Press / release"),tr("Tangential change"),tr("Moving across modules")};
-    for(int i=0;i<4;++i) m_scenarios->setItemText(i,scenes[i]);
-    m_connectionSettings->setText(tr("Connection settings"));m_connect->setText(tr("Connect selected module"));
+    m_connectionSettings->setText(tr("Connection settings"));m_connect->setText(tr("Connect sensor"));
     m_displaySettings->setText(tr("Display settings"));m_statusToggle->setText(tr("Show communication status"));
     m_minimizeConnection->setToolTip(tr("Minimize connection settings"));
     m_minimizeConnection->setAccessibleName(m_minimizeConnection->toolTip());
@@ -1126,7 +1124,7 @@ void TactileVisualizationWidget::retranslate()
     m_hideReadingsToggle->setText(tr("Hide chart and values list"));
     tactileSettingCaption(m_statusToggle,tr("Show communication status"));
     tactileSettingCaption(m_hideReadingsToggle,tr("Hide chart and values list"));
-    m_disconnect->setText(tr("Disconnect"));m_simulate->setText(tr("Use simulated data"));
+    m_disconnect->setText(tr("Disconnect"));
     m_scanPorts->setText(tr("Refresh ports"));
     m_crc->setText(tr("Verify CRC"));
     m_port->setToolTip(tr("Serial port"));
@@ -1139,11 +1137,10 @@ void TactileVisualizationWidget::retranslate()
     tactileSettingCaption(m_timeout,tr("Response timeout"),tr("ms"));
     tactileSettingCaption(m_interval,tr("Request gap"),tr("ms"));
     m_interval->setToolTip(tr("Delay after each completed serial request. Changes apply during acquisition; response time is additional. The display refreshes separately."));
-    m_pause->setText(tr("Pause acquisition"));
 
     // Resolve widths from the current language, never from the dock width or
     // a changing port list. Language changes may resize controls; window changes cannot.
-    for(auto *combo:{m_port,m_baud,m_displayMode,m_density,m_scenarios}) {
+    for(auto *combo:{m_port,m_baud,m_displayMode,m_density}) {
         int width=combo==m_port?112:96;
         if(combo!=m_port)for(int i=0;i<combo->count();++i)width=qMax(width,combo->fontMetrics().horizontalAdvance(combo->itemText(i))+48);
         combo->setProperty("tactileCompactControl",true);combo->setFixedSize(width,30);
@@ -1173,6 +1170,9 @@ void TactileVisualizationWidget::createSerialControls(QVBoxLayout *root)
     for(auto *button:{m_connectionSettings,m_displaySettings,m_tareButton,m_resetView,m_frontView})
         actions->addWidget(button);
     actions->addStretch();actions->addWidget(m_crc);root->addLayout(actions);
+    m_zeroStatus=new QLabel;m_zeroStatus->setObjectName("tactileZeroStatus");
+    m_zeroStatus->setSizePolicy(QSizePolicy::Ignored,QSizePolicy::Fixed);
+    m_zeroStatus->setFixedHeight(m_zeroStatus->fontMetrics().height()+4);root->addWidget(m_zeroStatus);
     m_serialStatus=new QLabel;m_serialStatus->setObjectName("tactileSerialStatus");m_serialStatus->setWordWrap(false);
     m_serialStatus->setSizePolicy(QSizePolicy::Ignored,QSizePolicy::Fixed);
     m_serialStatus->setFixedHeight(m_serialStatus->fontMetrics().height()+4);root->addWidget(m_serialStatus);
@@ -1226,7 +1226,7 @@ void TactileVisualizationWidget::createSerialControls(QVBoxLayout *root)
     serialLayout->addLayout(connectionRow);
     serialLayout->addWidget(baudField);serialLayout->addWidget(slaveField);
     serialLayout->addWidget(tactileSettingRow(m_timeout,true));serialLayout->addWidget(tactileSettingRow(m_interval,true));
-    m_connect=new QPushButton;m_connect->setObjectName("tactileConnect");m_disconnect=new QPushButton;m_disconnect->setObjectName("tactileDisconnect");m_simulate=new QPushButton;m_simulate->setObjectName("tactileUseMock");
+    m_connect=new QPushButton;m_connect->setObjectName("tactileConnect");m_disconnect=new QPushButton;m_disconnect->setObjectName("tactileDisconnect");
     m_writeAddress=new QPushButton;m_writeAddress->setObjectName("tactileWriteAddress");
     auto *connectionActions=new QHBoxLayout;connectionActions->setContentsMargins(0,8,0,8);connectionActions->setSpacing(0);
     connectionActions->addWidget(m_connect);connectionActions->addStretch(1);connectionActions->addWidget(m_disconnect);connectionActions->addStretch(1);
@@ -1263,19 +1263,25 @@ void TactileVisualizationWidget::createSerialControls(QVBoxLayout *root)
         // A busy GUI may deliver the timeout before its 33 ms refresh. Consume
         // the worker's latest response before declaring a connection failure.
         tactile::SerialSample last;if(m_serial.takeLatest(last))receiveSerialSample(last);
-        if(!m_waitingForFirstHardwareFrame)return;
+        if(!m_waitingForFirstHardwareFrame||m_autoZeroResult.started)return;
         disconnectSerial();
         m_serialSample.error=tr("No valid sensor response. Check the serial port, baud rate and device ID.");
+        if(!m_serialSample.modelIdentified)
+            m_serialSample.error=tr("Could not identify the sensor model. Check the baud rate and device ID, then connect again.");
+        setDeviceConfigStatus(m_serialSample.error);
         updateSerialStatus();
     });
     connect(&m_serial,&tactile::TactileSerialSource::finished,this,[this]{
         tactile::SerialSample last;if(m_serial.takeLatest(last))receiveSerialSample(last);
+        if(m_waitingForFirstHardwareFrame&&!m_serialSample.modelIdentified){
+            m_serialSample.error=tr("Could not identify the sensor model. Check the baud rate and device ID, then connect again.");
+            setDeviceConfigStatus(m_serialSample.error);
+        }
         if(m_waitingForFirstHardwareFrame||(m_serialSample.portOpen&&!m_configTimer.isActive()))disconnectSerial();
         if(!m_connectionSettings->isChecked()&&!m_autoConnectEnabled)m_portScanTimer.stop();
         updateSerialStatus();refreshSerialPorts();
     });
-    connect(m_simulate,&QPushButton::clicked,this,[this]{cancelSerialRetry();disconnectSerial();m_hardwareType=-1;m_tareFrame={};updateValues();});
-    connect(m_crc,&QCheckBox::toggled,this,[this](bool on){m_serial.setVerifyCrc(on);m_displayFilter.reset();m_liveFrame={};m_heldTableFrame={};clearHardwareDisplay();m_serialHistory.clear();m_tareFrame={};updateValues();});
+    connect(m_crc,&QCheckBox::toggled,this,[this](bool on){m_serial.setVerifyCrc(on);m_displayFilter.reset();m_liveFrame={};m_heldTableFrame={};clearHardwareDisplay();m_serialHistory.clear();m_tareFrame={};m_autoZeroResult={};updateValues();});
 }
 QStringList TactileVisualizationWidget::refreshSerialPorts()
 {
@@ -1349,32 +1355,31 @@ void TactileVisualizationWidget::connectSerial(SerialAttempt attempt)
     if(m_serial.isRunning()||m_canvas->status()!=QQuickWidget::Ready)return;
     m_defaultConnectRequested=false;m_defaultConnectAttempted=true;
     cancelSerialRetry();
-    if(attempt==SerialAttempt::Manual)m_connectionSettings->setChecked(true);
+    setDeviceConfigStatus({});
     tactile::SerialSettings s;s.port=m_port->currentText().trimmed();s.baud=m_baud->currentText().toInt();s.slave=m_slave->value();s.type=m_finger;
     s.timeoutMs=m_timeout->value();s.intervalMs=m_interval->value();s.verifyCrc=m_crc->isChecked();
-    if(!s.valid()){m_connectionSettings->setChecked(true);m_serialStatus->setText(tr("Invalid connection settings"));return;}
+    if(!s.valid()){m_serialStatus->setText(tr("Invalid connection settings"));return;}
     if(attempt!=SerialAttempt::Manual)m_serialRetryPort=s.port;
-    start();setPaused(false);m_hardwareType=m_finger;m_serialSample={};m_liveFrame={};m_heldTableFrame={};m_displayFilter.reset();clearHardwareDisplay();m_tareFrame={};
+    start();setSuspended(false);m_hardwareType=m_finger;m_serialSample={};m_liveFrame={};m_heldTableFrame={};m_displayFilter.reset();clearHardwareDisplay();m_tareFrame={};m_autoZeroResult={};
     m_connectedSettings=s;
     if(!m_observedSerialPorts.contains(s.port,Qt::CaseInsensitive))m_observedSerialPorts.append(s.port);
     m_missingPortScans=0;
     m_removedSerialPort.clear();
     m_verifyingAddress=m_pendingAddress==s.slave&&m_pendingBaud==s.baud&&m_pendingPort==s.port;
-    m_waitingForFirstHardwareFrame=m_serial.begin(s,attempt==SerialAttempt::Retry);
+    m_waitingForFirstHardwareFrame=m_serial.begin(s,attempt==SerialAttempt::Retry,true);
     // USB can enumerate before the sensor is ready to answer after power-up.
     if(m_waitingForFirstHardwareFrame)
-        m_initialResponseTimer.start(qMax(attempt==SerialAttempt::Hotplug?10000:1000,s.timeoutMs+500));
+        m_initialResponseTimer.start(qMax(attempt==SerialAttempt::Hotplug?10000:1000,4*s.timeoutMs+500));
     m_serialHistory.begin(m_serial.sessionId(),m_serial.generation());updateValues();
 }
 void TactileVisualizationWidget::disconnectSerial()
 {
     m_defaultConnectRequested=false;m_initialResponseTimer.stop();m_waitingForFirstHardwareFrame=false;
     if(auto *notice=findChild<QMessageBox *>("tactileSaveReminder"))notice->close();
-    m_connectionSettings->setChecked(true);
     m_configTimer.stop();m_configAwaitClose=false;
     if(m_serial.configBusy())setDeviceConfigStatus(tr("Configuration interrupted; device state may have changed. Reconnect and read parameters before another write."));
     m_verifyingAddress=false;
-    m_serial.stop();m_displayFilter.reset();m_liveFrame={};m_heldTableFrame={};clearHardwareDisplay();m_serialSample.portOpen=false;m_serialSample.accepted=false;m_serialHistory.clear();m_tareFrame={};updateValues();refreshSerialPorts();
+    m_serial.stop();m_displayFilter.reset();m_liveFrame={};m_heldTableFrame={};clearHardwareDisplay();m_serialSample.portOpen=false;m_serialSample.accepted=false;m_serialHistory.clear();m_tareFrame={};m_autoZeroResult={};updateValues();refreshSerialPorts();
     if(!m_serialRetryPort.isEmpty())m_serialRetryTimer.start();
 }
 void TactileVisualizationWidget::restoreSerialSettings()
@@ -1397,7 +1402,7 @@ void TactileVisualizationWidget::restoreSerialSettings()
 void TactileVisualizationWidget::connectDefaultSerial()
 {
     if(m_defaultConnectAttempted)return;
-    m_defaultConnectRequested=true;m_connectionSettings->setChecked(true);
+    m_defaultConnectRequested=true;
     if(!isVisible()||m_canvas->status()!=QQuickWidget::Ready)return;
     m_defaultConnectRequested=false;m_defaultConnectAttempted=true;
     m_observedSerialPorts=refreshSerialPorts();
@@ -1410,19 +1415,43 @@ void TactileVisualizationWidget::connectDefaultSerial()
 }
 void TactileVisualizationWidget::finishInitialSerialConnection(const tactile::SerialSample &sample)
 {
-    if(!m_waitingForFirstHardwareFrame||!sample.accepted||!sample.crcOk||!sample.rangeOk
-        ||!tactile::validateFrame(sample.frame)||sample.frame.sessionId!=m_serial.sessionId()
+    if(!m_waitingForFirstHardwareFrame||!sample.modelIdentified||sample.frame.sessionId!=m_serial.sessionId()
         ||sample.frame.generation!=m_serial.generation()||sample.frame.hardwareType!=m_hardwareType
         ||sample.settings.port!=m_connectedSettings.port||sample.settings.baud!=m_connectedSettings.baud
-        ||sample.settings.slave!=m_connectedSettings.slave||sample.settings.type!=m_hardwareType
-        ||m_trustedReceivedMs!=sample.receivedMs||m_displayFilter.last.sequence!=sample.frame.sequence)return;
+        ||sample.settings.slave!=m_connectedSettings.slave||sample.settings.type!=m_hardwareType)return;
+    m_autoZeroResult=sample.autoZero;
+    if(m_autoZeroResult.started) {
+        m_initialResponseTimer.stop();cancelSerialRetry();
+    }
+    if(m_autoZeroResult.phase==tactile::AutoZeroPhase::Collecting)return;
+    const bool complete=m_autoZeroResult.phase==tactile::AutoZeroPhase::Complete;
+    const auto &baseline=m_autoZeroResult.baseline;
+    if(complete&&(!baseline.crcOk||!baseline.rangeOk||!tactile::validateFrame(baseline)
+        ||baseline.sessionId!=sample.frame.sessionId||baseline.generation!=sample.frame.generation
+        ||baseline.hardwareType!=m_hardwareType))return;
+    if(!complete&&m_autoZeroResult.phase!=tactile::AutoZeroPhase::Failed)return;
     m_initialResponseTimer.stop();m_waitingForFirstHardwareFrame=false;cancelSerialRetry();
-    applyDisplayZero(sample.frame);
-    m_connectionSettings->setChecked(false);
+    if(complete)applyDisplayZero(baseline);
+    else {m_serialHistory.begin(m_serial.sessionId(),m_serial.generation());updateValues();}
     auto settings=tactilePreferences();settings.beginGroup("tactile/serial");
     settings.setValue("port",sample.settings.port);settings.setValue("baud",sample.settings.baud);
     settings.setValue("slave",sample.settings.slave);settings.setValue("type",sample.settings.type);settings.sync();
     m_defaultSerialPort=sample.settings.port;
+}
+void TactileVisualizationWidget::updateZeroStatus()
+{
+    QString text;
+    if(m_finger==m_hardwareType) {
+        if(m_waitingForFirstHardwareFrame)
+            text=m_autoZeroResult.started
+                ?tr("Auto zeroing... Keep the sensor unloaded."):tr("Waiting for sensor data...");
+        else if(hasDisplayBaseline()&&m_autoZeroResult.phase!=tactile::AutoZeroPhase::Complete)
+            text=tr("Delta zero set");
+    }
+    m_tareButton->setEnabled(!m_waitingForFirstHardwareFrame);
+    m_zeroStatus->setVisible(!text.isEmpty());m_zeroStatus->setToolTip(text);
+    m_zeroStatus->setFixedHeight(m_zeroStatus->fontMetrics().height()+4);
+    m_zeroStatus->setText(m_zeroStatus->fontMetrics().elidedText(text,Qt::ElideRight,m_zeroStatus->width()));
 }
 void TactileVisualizationWidget::setDeviceConfigStatus(const QString &text)
 {
@@ -1430,7 +1459,7 @@ void TactileVisualizationWidget::setDeviceConfigStatus(const QString &text)
 }
 void TactileVisualizationWidget::deviceSettingsEdited()
 {
-    if(m_waitingForFirstHardwareFrame&&!m_serialRetryPort.isEmpty()
+    if(m_waitingForFirstHardwareFrame
         &&(m_slave->value()!=m_connectedSettings.slave||m_baud->currentText().toInt()!=m_connectedSettings.baud)){
         disconnectSerial();return;
     }
@@ -1484,7 +1513,7 @@ void TactileVisualizationWidget::receiveDeviceConfig(const tactile::DeviceConfig
         const bool saved=result.saveAcknowledged&&result.writeAcknowledged
             &&(!result.requestedAddress||result.addressVerified)&&(!result.requestedBaud||result.baudVerified);
         setDeviceConfigStatus(saved
-            ?tr("Selected settings read back and save acknowledged: ID %1, baud %2. Power-cycle once, then click 'Connect selected module' using these new values.").arg(m_pendingAddress).arg(m_pendingBaud)
+            ?tr("Selected settings read back and save acknowledged: ID %1, baud %2. Power-cycle once, then click 'Connect sensor' using these new values.").arg(m_pendingAddress).arg(m_pendingBaud)
             :tr("Device state uncertain; one or both parameters may have changed. Persistence NOT verified. Do not repeat blindly. Power-cycle, then check ID %1 / baud %2; if unavailable, read using the previous settings. Details: %3").arg(m_pendingAddress).arg(m_pendingBaud).arg(result.error));
         if(!saved){
             auto *notice=new QMessageBox(QMessageBox::Warning,tr("Device configuration uncertain"),
@@ -1499,26 +1528,25 @@ void TactileVisualizationWidget::receiveDeviceConfig(const tactile::DeviceConfig
 }
 void TactileVisualizationWidget::selectFrame()
 {
-    m_frame=m_finger==m_hardwareType?m_liveFrame:m_mockFrame;
-    QString label="SIMULATED";
-    if(m_finger==m_hardwareType){label=m_frame.valid||visualFrame().valid?"HARDWARE":"HARDWARE / NO DATA";
+    m_frame=m_finger==m_hardwareType?m_liveFrame:tactile::Frame{};
+    QString label;
+    if(m_finger==m_hardwareType&&(m_frame.valid||visualFrame().valid)){label="HARDWARE";
         if(!m_crc->isChecked())label+=" / CRC OFF";
         if(m_frame.valid&&!m_frame.crcOk)label+=" / CRC ERROR";
         if(m_frame.valid&&!m_frame.rangeOk)label+=" / RANGE WARNING";
         if(visualFrame().valid&&!m_displayFilter.reason.isEmpty())label+=" / DISPLAY HELD";
-        if(m_userPaused||m_suspended)label+=" / PAUSED";
     }
     if(hasDisplayBaseline())label+=" / DELTA";
     m_adapter->setSourceLabel(label);
 }
 void TactileVisualizationWidget::updateSerialStatus()
 {
+    updateZeroStatus();
     const bool active=m_serial.isRunning();
-    m_pause->setEnabled(!active&&m_finger!=m_hardwareType&&m_source.state()!=tactile::SourceState::Stopped);
     const bool stopping=m_serial.stopping();
     const bool busy=m_serial.configBusy();
     const bool changed=m_slave->value()!=m_connectedSettings.slave||m_baud->currentText().toInt()!=m_connectedSettings.baud;
-    m_writeAddress->setEnabled(active&&!stopping&&!busy&&!m_configAwaitClose&&m_serialRetryPort.isEmpty()&&m_serialSample.portOpen
+    m_writeAddress->setEnabled(active&&!m_waitingForFirstHardwareFrame&&!stopping&&!busy&&!m_configAwaitClose&&m_serialRetryPort.isEmpty()&&m_serialSample.portOpen
         &&(m_connectedSettings.slave==0||m_slave->value()>0)&&changed);
     m_slave->setEnabled(!stopping&&!busy&&!m_configAwaitClose);m_baud->setEnabled(!stopping&&!busy&&!m_configAwaitClose);
     if(m_verifyingAddress&&m_serialSample.accepted&&m_serialSample.crcOk&&m_serialSample.settings.slave==m_pendingAddress
@@ -1528,11 +1556,11 @@ void TactileVisualizationWidget::updateSerialStatus()
     }
     for(QWidget *w:QVector<QWidget*>{m_port,m_timeout,m_scanPorts})w->setEnabled(!active);
     m_interval->setEnabled(!stopping&&!busy&&!m_configAwaitClose);
-    m_connect->setEnabled(!active);m_disconnect->setEnabled(!stopping&&(active||!m_serialRetryPort.isEmpty()));m_simulate->setEnabled(m_hardwareType>=0);
+    m_connect->setEnabled(!active);m_disconnect->setEnabled(!stopping&&(active||!m_serialRetryPort.isEmpty()));
     m_disconnect->setText(stopping?tr("Disconnecting..."):tr("Disconnect"));
     const auto sensor=QString("FGS").mid(m_finger,1);
-    QString text=m_finger==m_hardwareType?sensor:tr("%1: SIMULATED").arg(sensor);
-    if(m_finger==m_hardwareType&&!m_frame.valid&&!visualFrame().valid)
+    QString text=sensor;
+    if(!m_frame.valid&&!visualFrame().valid)
         text=tr("%1: %2").arg(sensor,tr("No current hardware data"));
     if(m_hardwareType>=0)text+=tr(" | %1 ID %2 | RX accepted %3/%4 | CRC errors %5 | Timeouts %6 | Protocol errors %7")
         .arg(m_connectedSettings.port).arg(m_connectedSettings.slave).arg(m_serialSample.acceptedCount).arg(m_serialSample.requests).arg(m_serialSample.crcErrors).arg(m_serialSample.timeouts).arg(m_serialSample.protocolErrors);

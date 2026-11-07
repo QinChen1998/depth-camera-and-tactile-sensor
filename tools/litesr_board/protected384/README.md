@@ -1,0 +1,3 @@
+# Rectangular LiteSR runtime
+
+Independent encrypted 384x256 residual-core runtime. Native H32/W48 D/I, work H64/W96; original weights, normalization, signed residual, valid/range rules and matched-frame identity retained. Build with a separately generated private Key.h and matching ARM libcrypto.so.1.1 through the [shared build entry](../README.md). No keys or plaintext models belong in payload. Camera capture is disabled in this runtime; its receipt reports video_transport=none and video_fps=0. The original 384 ciphertext is unchanged. Shared native parsing lives in `../common/`; retired model packages are outside this project.

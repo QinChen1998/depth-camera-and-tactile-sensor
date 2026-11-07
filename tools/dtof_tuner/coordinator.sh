@@ -11,7 +11,7 @@ same(){ [ -r "/proc/$1/stat" ] && [ "$(sed 's/.*) //' /proc/"$1"/stat | awk '{pr
 health(){ [ ! -e /run/r144_depth/fault ] && [ ! -e /run/dtof_candidates/fault ] && [ ! -e /run/rgbtof_calibration_v2/fault ] && [ ! -e "$state/fault" ] || fail 'Active fault retained; inspect device logs'; }
 quiescent(){
  [ ! -e "$owner" ] || fail 'Capture owner has not released resources'
- for name in live tmf8829_ext tmf8829_tuner rkipc litesr_gui litesr_near_gui native_hd_gui sensor_fusion_service capture_bridge rgbtof_bridge dtof48 next_pipeline; do
+ for name in live tmf8829_ext tmf8829_tuner rkipc litesr_gui litesr_near_gui native_hd_gui sensor_fusion_service capture_bridge rgbtof_bridge dtof48 next_pipeline tiny_nv12 tiny_nv12_camera; do
   ! pidof "$name" >/dev/null || fail "Capture process remains: $name"
  done
 }
@@ -96,7 +96,7 @@ stop_owner(){
 receivers_gone(){
  # Established server-side CAN8 / DTN1(PHC1) / RTSP / LSG ports.
  n=0
- while awk '$4=="01" && $2 ~ /:(227F|2280|2281|022A|2283|2288)$/ {found=1} END {exit !found}' /proc/net/tcp /proc/net/tcp6;do
+ while awk '$4=="01" && $2 ~ /:(227F|2280|2281|022A|2283|2288|228E)$/ {found=1} END {exit !found}' /proc/net/tcp /proc/net/tcp6;do
   n=$((n+1));[ "$n" -lt 30 ] || fail 'Another receiver is still connected';sleep .1
  done
 }

@@ -1,4 +1,5 @@
 #include "RvDeviceManagerDialog.h"
+#include "RvImportDiagnostics.h"
 #include "RvSessionController.h"
 #include "RvTunerController.h"
 #include "../RuntimeDiscovery.h"
@@ -67,6 +68,13 @@ RvDeviceManagerDialog::RvDeviceManagerDialog(RvSessionController *session,QWidge
     auto *toolbar = UiStyle::wrappingRow(tools, bodyLayout->spacing());
     bodyLayout->addWidget(tools);
     const auto button=[&](const QString &text,const char *name,auto callback){auto *b=new QPushButton(text,tools);b->setObjectName(name);toolbar->addWidget(b);m_actions.append(b);connect(b,&QPushButton::clicked,this,callback);return b;};
+    button(tr("Connect via USB"),"rvDeviceConnectUsb",[this]{
+        if (qEnvironmentVariable("RV_TEST_OFFLINE_ONLY") == "1") {
+            message(tr("USB connection is unavailable in offline mode."), true);
+            return;
+        }
+        emit usbConnectionRequested(this);
+    })->setAutoDefault(false);
     button(tr("Add device"),"rvDeviceAdd",[this]{RvDeviceProfile p;p.id=QUuid::createUuid().toString(QUuid::Id128);p.host="172.32.0.93";p.calibration="unconfigured";m_table->clearSelection();edit(p,true);});
     m_remove=button(tr("Remove"),"rvDeviceRemove",[this]{remove();});
     button(tr("Import..."),"rvDeviceImport",[this]{importDevices();});
@@ -87,6 +95,9 @@ RvDeviceManagerDialog::RvDeviceManagerDialog(RvSessionController *session,QWidge
     m_fingerprint=new QLabel(group);m_fingerprint->setObjectName("rvDeviceFingerprint");m_fingerprint->setTextInteractionFlags(Qt::TextSelectableByMouse);m_fingerprint->setWordWrap(true);form->addRow(tr("Fingerprint"),m_fingerprint);
     m_calibration=new QComboBox(group);m_calibration->setObjectName("rvDeviceCalibration");
     m_calibration->addItem(tr("Not configured"),"unconfigured");m_calibration->addItem(tr("2026-10-08 calibration / F=1"),"rv20261008-f1");m_calibration->addItem(tr("2026-10-08 calibration / F=2"),"rv20261008-f2");form->addRow(tr("Calibration"),m_calibration);
+    m_temporaryFov=new QCheckBox(tr("Use selected FOV calibration"),group);
+    m_temporaryFov->setObjectName("rvDeviceTemporaryFov");form->addRow(m_temporaryFov);
+    connect(m_temporaryFov,&QCheckBox::toggled,this,[this]{m_confirm->setChecked(false);});
     m_rotation=new QComboBox(group);m_rotation->setObjectName("rvDeviceRotation");m_rotation->addItem(tr("Not verified"),-1);m_rotation->addItem(tr("0 degrees"),0);m_rotation->addItem(tr("180 degrees"),180);form->addRow(tr("Host inference input orientation"),m_rotation);
     m_cameraMount=new QComboBox(group);m_cameraMount->setObjectName("rvDeviceCameraMount");
     m_cameraMount->addItem(tr("0 degrees"),0);m_cameraMount->addItem(tr("180 degrees"),180);
@@ -101,7 +112,7 @@ RvDeviceManagerDialog::RvDeviceManagerDialog(RvSessionController *session,QWidge
     auto *bottom = UiStyle::wrappingRow(actions, layout->spacing());
     layout->addWidget(actions);
     m_save=new QPushButton(tr("Save device"),actions);m_save->setObjectName("rvDeviceSave");m_verify=new QPushButton(tr("Verify connection"),actions);m_verify->setObjectName("rvDeviceVerify");m_forget=new QPushButton(tr("Clear saved login"),actions);m_forget->setObjectName("rvDeviceForget");
-    m_importLiteSr=new QPushButton(tr("Import on-board inference model..."),actions);m_importLiteSr->setObjectName("rvDeviceImportLiteSr");
+    m_importLiteSr=new QPushButton(tr("Install protected on-board inference..."),actions);m_importLiteSr->setObjectName("rvDeviceImportLiteSr");
     for(auto *b:{m_save,m_verify,m_importLiteSr,m_forget}){bottom->addWidget(b);m_actions.append(b);}
     auto *close=new QDialogButtonBox(QDialogButtonBox::Close,actions);
     auto *closeButton=close->button(QDialogButtonBox::Close);
@@ -126,7 +137,7 @@ RvDeviceManagerDialog::RvDeviceManagerDialog(RvSessionController *session,QWidge
     connect(m_worker,&QProcess::finished,this,[this](int code,QProcess::ExitStatus status){
         m_timeout->stop();busy(false);const auto output=m_worker->readAllStandardOutput();const auto error=m_worker->readAllStandardError().left(4096);
         if(m_operation.isEmpty())return;
-        if(code||status!=QProcess::NormalExit){operationFailed(!m_workerFailure.isEmpty()?m_workerFailure:QString::fromUtf8(error).isEmpty()?tr("Device operation failed."):QString::fromUtf8(error));return;}
+        if(code||status!=QProcess::NormalExit){operationFailed(!m_workerFailure.isEmpty()?m_workerFailure:QString::fromUtf8(error).isEmpty()?tr("Device operation failed."):QString::fromUtf8(error),code);return;}
         try {
             QJsonParseError parse;const auto doc=QJsonDocument::fromJson(output,&parse);if(parse.error!=QJsonParseError::NoError||!doc.isObject())throw std::runtime_error("Invalid device worker response");const auto result=doc.object();
             acceptWorkerResult(result);
@@ -153,8 +164,29 @@ void RvDeviceManagerDialog::cancelOperation(){
     if(m_worker->state()!=QProcess::NotRunning){m_worker->kill();m_worker->waitForFinished(1000);}
     busy(false);
 }
-void RvDeviceManagerDialog::reject(){cancelOperation();QDialog::reject();}
-void RvDeviceManagerDialog::closeEvent(QCloseEvent *event){cancelOperation();QDialog::closeEvent(event);}
+void RvDeviceManagerDialog::reject(){if(!m_usbEnrollmentPending){cancelOperation();QDialog::reject();}}
+void RvDeviceManagerDialog::closeEvent(QCloseEvent *event){
+    if (m_usbEnrollmentPending) { event->ignore(); return; }
+    cancelOperation();QDialog::closeEvent(event);
+}
+void RvDeviceManagerDialog::beginUsbEnrollment()
+{
+    m_usbEnrollmentPending = true;
+    setProperty("rvUsbRuntimeReplaced",QVariant());
+    busy(true);
+    message(tr("Connecting to RV1103 via USB..."));
+}
+void RvDeviceManagerDialog::finishUsbEnrollment(bool added)
+{
+    m_usbEnrollmentPending = false;
+    if (added) {
+        reload();
+        if (m_store) message(tr("The RV1103 was verified and selected for imaging."));
+    } else {
+        busy(false);
+        message(tr("USB connection setup ended."));
+    }
+}
 void RvDeviceManagerDialog::invalidateSerial(){
     if(!m_fresh)return;
     m_serial->clear();m_serial->setReadOnly(true);m_serialHelp->hide();
@@ -211,12 +243,12 @@ void RvDeviceManagerDialog::acceptWorkerResult(const QJsonObject &result){
         m_store->save(list,m_store->activeId());refresh(p.id);m_operation.clear();
         const auto model=result["litesr_model"].toString();
         const auto automaticTof=result["automatic_tof"].toString();
-        if(automaticTof=="missing")message(tr("Verified %1. Automatic dToF support is missing. Use Import on-board inference model to install it and check the model.").arg(p.name));
+        if(automaticTof=="missing")message(tr("Verified %1. Automatic dToF support is missing. Use Install protected on-board inference to install the required files.").arg(p.name));
         else if(automaticTof!="ready")message(tr("Verified %1. The board capture script is unavailable or unsupported.").arg(p.name),true);
-        else if(model=="missing")message(tr("Verified %1. On-board inference model missing. Use Import on-board inference model to copy it to the device.").arg(p.name));
+        else if(model=="missing")message(tr("Verified %1. Protected LiteSR is missing. Use Install protected on-board inference.").arg(p.name));
         else if(model=="mismatch")message(tr("Verified %1. The existing on-board inference model checksum differs.").arg(p.name),true);
         else if(model=="runtime_missing")message(tr("Verified %1. The on-board inference runtime is incomplete.").arg(p.name),true);
-        else if(model=="ready")message(tr("Verified %1. On-board inference model checksum matches.").arg(p.name));
+        else if(model=="ready")message(tr("Verified %1. Protected LiteSR and automatic dToF are ready.").arg(p.name));
         else message(tr("Verified %1. On-board inference model status is unavailable.").arg(p.name),true);
     }else if(m_operation=="--import-litesr-model"){
         const auto p=RvDeviceProfile::fromJson(result["trusted_device"].toObject());
@@ -225,31 +257,48 @@ void RvDeviceManagerDialog::acceptWorkerResult(const QJsonObject &result){
             throw std::runtime_error("LiteSR import response does not match the selected device");
         m_operation.clear();
         const auto model=result["litesr_model"].toString();
-        if(model=="missing"){
-            message(tr("Automatic dToF is ready. Select the on-board inference model file to enable board inference."));
-            const auto path=QFileDialog::getOpenFileName(this,tr("Select near-range on-board INT8 model"),{},tr("RKNN model (*.rknn)"));
-            if(!path.isEmpty())runWorker("--import-litesr-model",path);
-            else m_resumeImaging=false;
-        }else if(model=="ready"){
-            if (m_resumeImaging && m_session && m_session->userStopped() && !m_session->busy()
-                && m_session->deviceProfile().json()==p.json()) {
-                m_resumeImaging=false;
-                m_session->start();
-                accept();
-                return;
-            }
-            message(tr("Automatic dToF and the on-board inference model are ready on %1. Click Start in either imaging panel.").arg(p.name));
-        }else if(model=="mismatch"){
-            message(tr("Automatic dToF is ready. The existing on-board inference model checksum differs and the file was preserved."),true);
-        }else{
-            message(tr("Automatic dToF is ready. The on-board inference runtime is incomplete."),true);
+        if(model!="ready")throw std::runtime_error("Protected LiteSR installation was not verified");
+        if (m_resumeImaging && m_session && m_session->userStopped() && !m_session->busy()
+            && m_session->deviceProfile().json()==p.json()) {
+            m_resumeImaging=false;
+            m_session->start();
+            accept();
+            return;
         }
+        message(tr("Protected LiteSR and automatic dToF are ready on %1. Click Start in either imaging panel.").arg(p.name));
         if (m_operation.isEmpty()) m_resumeImaging=false;
     }else{m_operation.clear();message(tr("Saved login cleared."));}
 }
-void RvDeviceManagerDialog::operationFailed(const QString &reason){
+void RvDeviceManagerDialog::showBoardImportFailure(const QString &reason,const QString &phase,int code)
+{
+    const auto translated=QCoreApplication::translate("RvDeviceManagerDialog",reason.toUtf8().constData());
+    message(translated,true);
+    QJsonObject details{{"phase",phase},{"worker_exit_code",code},{"resume_imaging",m_resumeImaging}};
+    if (m_store) {
+        try {
+            const auto p=m_store->byId(m_id);
+            details["serial"]=p.serial;
+            details["host"]=p.host;
+            details["ssh_port"]=p.sshPort;
+            details["ssh_fingerprint"]=p.fingerprint();
+            details["fov"]=p.fov();
+            details["camera_mount_degrees"]=p.cameraMountRotation;
+            details["inference_input_degrees"]=RvSessionController::effectiveHostInputRotation(p);
+        } catch (const std::exception &) {}
+    }
+    RvImportDiagnostics::showFailure(this,"board_runtime_import",translated,details);
+}
+
+void RvDeviceManagerDialog::operationFailed(const QString &reason,int code){
     const bool serialRead=m_readingSerial||m_operation=="--read-device-serial";
-    m_readingSerial=false;m_operation.clear();m_resumeImaging=false;
+    const bool boardImport=m_operation=="--import-litesr-model";
+    m_readingSerial=false;m_operation.clear();
+    if (boardImport) {
+        showBoardImportFailure(reason,m_workerFailure.isEmpty() ? "board_import" : "worker_failure",code);
+        m_resumeImaging=false;
+        return;
+    }
+    m_resumeImaging=false;
     if(!serialRead){message(reason,true);return;}
     if(m_id!=m_probeId||m_host->text().trimmed()!=m_probeHost||m_port->value()!=m_probePort||m_username->text().trimmed()!=m_probeUsername){
         message(tr("Device details changed during reading; connect and read again"),true);return;
@@ -275,10 +324,10 @@ void RvDeviceManagerDialog::refresh(const QString &id){
     m_table->blockSignals(false);m_active->setText(m_store->activeId().isEmpty()?tr("No active device"):tr("Active device: %1").arg(m_session&& !m_session->userStopped()?m_session->deviceProfile().name:m_store->active().name));
     if(selected>=0)m_table->selectRow(selected);else if(m_table->rowCount())m_table->selectRow(0);else{RvDeviceProfile p;p.id=QUuid::createUuid().toString(QUuid::Id128);p.host="172.32.0.93";p.calibration="unconfigured";edit(p,true);}
 }
-void RvDeviceManagerDialog::edit(const RvDeviceProfile &p,bool fresh){m_fresh=false;m_readingSerial=false;m_operation.clear();m_serialHelp->hide();m_serial->setReadOnly(true);m_serial->setPlaceholderText(tr("Read automatically when connecting"));m_savedFingerprint=fresh?QString():p.fingerprint();m_id=p.id;m_name->setText(p.name);m_host->setText(p.host);m_port->setValue(p.sshPort);m_serial->setText(p.serial);m_username->setText(p.username);m_key->setText(p.publicKey.isEmpty()?QString():"ssh-ed25519 "+p.publicKey);m_calibration->setCurrentIndex(m_calibration->findData(p.calibration));m_rotation->setCurrentIndex(m_rotation->findData(RvSessionController::effectiveHostInputRotation(p)));m_cameraMount->setCurrentIndex(m_cameraMount->findData(p.cameraMountRotation));m_legacy->setChecked(p.legacyCoordinator);m_confirm->setChecked(false);m_fingerprint->setText(fresh?tr("Enter a complete Ed25519 public key"):p.fingerprint());m_verify->setEnabled(!fresh);m_forget->setEnabled(!fresh);m_use->setEnabled(!fresh);m_remove->setEnabled(!fresh);m_importLiteSr->setEnabled(!fresh);m_fresh=fresh;}
-RvDeviceProfile RvDeviceManagerDialog::draft() const {RvDeviceProfile p;p.id=m_id;p.name=m_name->text().trimmed();p.host=m_host->text().trimmed();p.sshPort=m_port->value();p.serial=m_serial->text().trimmed().toLower();p.username=m_username->text().trimmed();p.publicKey=m_key->text().trimmed();if(p.publicKey.startsWith("ssh-ed25519 "))p.publicKey=p.publicKey.mid(12).trimmed();p.calibration=m_calibration->currentData().toString();p.inputRotation=m_rotation->currentData().toInt();p.cameraMountRotation=m_cameraMount->currentData().toInt();p.legacyCoordinator=m_legacy->isChecked();p.validate();return p;}
+void RvDeviceManagerDialog::edit(const RvDeviceProfile &p,bool fresh){m_fresh=false;m_readingSerial=false;m_operation.clear();m_serialHelp->hide();m_serial->setReadOnly(true);m_serial->setPlaceholderText(tr("Read automatically when connecting"));m_savedFingerprint=fresh?QString():p.fingerprint();m_id=p.id;m_name->setText(p.name);m_host->setText(p.host);m_port->setValue(p.sshPort);m_serial->setText(p.serial);m_username->setText(p.username);m_key->setText(p.publicKey.isEmpty()?QString():"ssh-ed25519 "+p.publicKey);m_calibration->setCurrentIndex(m_calibration->findData(p.calibration));m_rotation->setCurrentIndex(m_rotation->findData(RvSessionController::effectiveHostInputRotation(p)));m_cameraMount->setCurrentIndex(m_cameraMount->findData(p.cameraMountRotation));m_legacy->setChecked(p.legacyCoordinator);m_temporaryFov->setChecked(p.temporaryFovCalibration);m_confirm->setChecked(false);m_fingerprint->setText(fresh?tr("Enter a complete Ed25519 public key"):p.fingerprint());m_verify->setEnabled(!fresh);m_forget->setEnabled(!fresh);m_use->setEnabled(!fresh);m_remove->setEnabled(!fresh);m_importLiteSr->setEnabled(!fresh);m_fresh=fresh;}
+RvDeviceProfile RvDeviceManagerDialog::draft() const {RvDeviceProfile p;p.id=m_id;p.name=m_name->text().trimmed();p.host=m_host->text().trimmed();p.sshPort=m_port->value();p.serial=m_serial->text().trimmed().toLower();p.username=m_username->text().trimmed();p.publicKey=m_key->text().trimmed();if(p.publicKey.startsWith("ssh-ed25519 "))p.publicKey=p.publicKey.mid(12).trimmed();p.calibration=m_calibration->currentData().toString();p.inputRotation=m_rotation->currentData().toInt();p.cameraMountRotation=m_cameraMount->currentData().toInt();p.legacyCoordinator=m_legacy->isChecked();p.temporaryFovCalibration=m_temporaryFov->isChecked();p.validate();return p;}
 void RvDeviceManagerDialog::save(){if(m_session&&m_session->tuner()->shutdownPending()){message(tr("Stop dToF tuning before changing trusted devices."),true);return;}if(m_serial->text().isEmpty()&&m_serial->isReadOnly()){readDeviceInformation();return;}try{auto p=draft();auto list=m_store->profiles();int index=-1;for(int i=0;i<list.size();++i)if(list[i].id==p.id)index=i;
-    bool trustChanged=index<0;if(index>=0){const auto &old=list[index];trustChanged=old.publicKey!=p.publicKey||old.serial!=p.serial||old.calibration!=p.calibration||old.inputRotation!=p.inputRotation||old.cameraMountRotation!=p.cameraMountRotation||old.legacyCoordinator!=p.legacyCoordinator;p.lastConnected=trustChanged?QString():old.lastConnected;}
+    bool trustChanged=index<0;if(index>=0){const auto &old=list[index];trustChanged=old.publicKey!=p.publicKey||old.serial!=p.serial||old.calibration!=p.calibration||old.inputRotation!=p.inputRotation||old.cameraMountRotation!=p.cameraMountRotation||old.legacyCoordinator!=p.legacyCoordinator||old.temporaryFovCalibration!=p.temporaryFovCalibration;p.lastConnected=trustChanged?QString():old.lastConnected;}
     if(trustChanged&&!m_confirm->isChecked())throw std::runtime_error("Verify the fingerprint, serial, calibration and orientation, then check the confirmation box");
     if(index<0)list.append(p);else list[index]=p;
     if(m_session)m_session->stop();
@@ -295,7 +344,7 @@ void RvDeviceManagerDialog::importDevices(){if(m_session&&m_session->tuner()->sh
 void RvDeviceManagerDialog::exportDevices(){const auto path=QFileDialog::getSaveFileName(this,tr("Export devices"),"rv1103-devices.json",tr("Device files (*.json)"));if(path.isEmpty())return;try{const auto bytes=RvDeviceStore::exportProfiles(m_store->profiles());QSaveFile f(path);if(!f.open(QIODevice::WriteOnly)||f.write(bytes)!=bytes.size()||!f.commit())throw std::runtime_error("Cannot save device export");message(tr("Device profiles exported without passwords."));}catch(const std::exception&e){message(QString::fromUtf8(e.what()),true);}}
 void RvDeviceManagerDialog::importBoardFilesForStart(const RvDeviceProfile &device)
 {
-    if (!m_store || m_worker->state()!=QProcess::NotRunning) return;
+    if (!m_store || m_usbEnrollmentPending || m_worker->state()!=QProcess::NotRunning) return;
     try {
         m_store->reload();
         if (m_store->byId(device.id).json()!=device.json())
@@ -303,7 +352,7 @@ void RvDeviceManagerDialog::importBoardFilesForStart(const RvDeviceProfile &devi
         refresh(device.id);
         importLiteSrModel(true);
     } catch (const std::exception &error) {
-        message(QString::fromUtf8(error.what()), true);
+        showBoardImportFailure(QString::fromUtf8(error.what()),"profile_check",-1);
     }
 }
 
@@ -318,14 +367,15 @@ void RvDeviceManagerDialog::importLiteSrModel(bool confirmed)
         message(tr("Stop imaging before importing board files."),true);
         return;
     }
-    const auto target=m_store->byId(m_id);
-    if (!confirmed && QMessageBox::question(this,tr("Import on-board inference model"),
-        tr("Install automatic dToF support on %1 (%2) and check the on-board inference model? If the model is missing, you can select a file to copy.")
-            .arg(target.name,target.serial),QMessageBox::Yes|QMessageBox::Cancel,QMessageBox::Cancel)!=QMessageBox::Yes) return;
     m_resumeImaging=confirmed;
     runWorker("--import-litesr-model");
 }
-void RvDeviceManagerDialog::runWorker(const QString &operation,const QString &modelPath){if(operation=="--forget-device-credentials"&&m_session&&m_session->tuner()->shutdownPending()){message(tr("Stop dToF tuning before changing trusted devices."),true);return;}try{const auto worker=RuntimeDiscovery::rvControlForLaunch();if(!worker.error.isEmpty())throw std::runtime_error(worker.error.toStdString());QStringList args{operation};
+void RvDeviceManagerDialog::runWorker(const QString &operation){if(operation=="--forget-device-credentials"&&m_session&&m_session->tuner()->shutdownPending()){message(tr("Stop dToF tuning before changing trusted devices."),true);return;}
+    if (operation=="--import-litesr-model") {
+        m_operation=operation;
+        m_workerFailure.clear();
+    }
+    try{const auto worker=RuntimeDiscovery::rvControlForLaunch();if(!worker.error.isEmpty())throw std::runtime_error(worker.error.toStdString());QStringList args{operation};
     if(operation=="--inspect-host"){
         m_probeId=m_id;m_probeHost=m_host->text().trimmed();m_probePort=m_port->value();m_probeUsername=m_username->text().trimmed();
         if(!RvDeviceStore::validHost(m_probeHost))throw std::runtime_error("Invalid device address");args<<m_probeHost<<QString::number(m_probePort);
@@ -345,6 +395,5 @@ void RvDeviceManagerDialog::runWorker(const QString &operation,const QString &mo
         }
         args<<"--device-store"<<m_store->path()<<"--device-revision"<<m_store->revision()<<"--device-id"<<p.id;
     }
-    if(operation=="--import-litesr-model"&&!modelPath.isEmpty())args<<modelPath;
-    m_operation=operation;m_workerFailure.clear();m_worker->setProcessEnvironment(RuntimeDiscovery::handPoseNativeEnvironment(worker.executable));m_worker->setProgram(worker.executable);m_worker->setArguments(args);busy(true);message(operation=="--read-device-serial"?tr("Log in with the usual device password to read its serial..."):tr("Working..."));m_worker->start();m_timeout->start(operation=="--read-device-serial"?180000:60000);
+    m_operation=operation;m_workerFailure.clear();m_worker->setProcessEnvironment(RuntimeDiscovery::nativeWorkerEnvironment(worker.executable));m_worker->setProgram(worker.executable);m_worker->setArguments(args);busy(true);message(operation=="--read-device-serial"?tr("Log in with the usual device password to read its serial..."):tr("Working..."));m_worker->start();m_timeout->start(operation=="--read-device-serial"?180000:60000);
 }catch(const std::exception&e){busy(false);operationFailed(QString::fromUtf8(e.what()));}}

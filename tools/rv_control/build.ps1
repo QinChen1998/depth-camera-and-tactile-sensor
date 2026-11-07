@@ -55,6 +55,37 @@ foreach($rvName in @('session.sh','tmf8829_tuner','bounded_log.awk','LICENSE-MIT
 }
 Copy-Item -LiteralPath (Join-Path $rvProject 'tools/dtof_tuner/coordinator.sh') -Destination (Join-Path $rvRuntime 'dtof_tuner/coordinator.sh') -Force
 $rvPayload['dtof_tuner/coordinator.sh']=(Get-FileHash (Join-Path $rvRuntime 'dtof_tuner/coordinator.sh') -Algorithm SHA256).Hash.ToLower()
+New-Item -ItemType Directory -Force -Path (Join-Path $rvRuntime 'litesr_board') | Out-Null
+foreach($rvName in @('litesr_gui.sh','dtof-switch.sh','dtof-switch-v1.sh','dtof-switch-v2.sh','dtof-switch-v3.sh')) {
+ $rvRelative="litesr_board/$rvName"
+ Copy-Item -LiteralPath (Join-Path $rvProject "tools/litesr_board/protected/payload/$rvName") -Destination (Join-Path $rvRuntime $rvRelative) -Force
+ $rvPayload[$rvRelative]=(Get-FileHash (Join-Path $rvRuntime $rvRelative) -Algorithm SHA256).Hash.ToLower()
+}
+foreach($rvName in @('model.dctsm','litesr-fov1.bin','litesr-fov2.bin')) {
+ $rvRelative="litesr_board/rect-$rvName"
+ Copy-Item -LiteralPath (Join-Path $rvProject "tools/litesr_board/protected384/payload/$rvName") -Destination (Join-Path $rvRuntime $rvRelative) -Force
+ $rvPayload[$rvRelative]=(Get-FileHash (Join-Path $rvRuntime $rvRelative) -Algorithm SHA256).Hash.ToLower()
+}
+
+foreach($rvName in @('native-fov1.bin','native-fov2.bin')) {
+ $rvRelative="litesr_board/$rvName"
+ Copy-Item -LiteralPath (Join-Path $rvProject "tools/litesr_board/native/payload/$rvName") -Destination (Join-Path $rvRuntime $rvRelative) -Force
+ $rvPayload[$rvRelative]=(Get-FileHash (Join-Path $rvRuntime $rvRelative) -Algorithm SHA256).Hash.ToLower()
+}
+$tinyFiles=@{'tiny-model.dctsm'='model.dctsm';'tiny-engine.bin'='tiny_nv12';'tiny-camera.bin'='tiny_nv12_camera';'tiny-camera-session.sh'='camera-session.sh'}
+foreach($rvName in $tinyFiles.Keys){
+ $rvRelative="litesr_board/$rvName"
+ Copy-Item -LiteralPath (Join-Path $rvProject ("tools/tiny_nv12_board/payload/"+$tinyFiles[$rvName])) -Destination (Join-Path $rvRuntime $rvRelative) -Force
+ $rvPayload[$rvRelative]=(Get-FileHash (Join-Path $rvRuntime $rvRelative) -Algorithm SHA256).Hash.ToLower()
+}
+$rvBootstrap=Join-Path $rvRuntime 'rv1103_bootstrap'
+New-Item -ItemType Directory -Force -Path $rvBootstrap | Out-Null
+foreach($rvName in @('install.sh','ensure-spi.sh','camera-takeover.sh','S99zdepth','M48_geometry.bin','bounded_log.awk',
+ 'camera_rtsp_config.awk','depth_status','librknnmrt.so','no_route_monitor.so','native_hd_gui','tof_driver',
+ 'depth-control.sh','candidate-control.sh','session.sh','service.sh')) {
+ Copy-Item -LiteralPath (Join-Path $PSScriptRoot "bootstrap/$rvName") -Destination $rvBootstrap -Force
+ $rvPayload["rv1103_bootstrap/$rvName"]=(Get-FileHash -LiteralPath (Join-Path $rvBootstrap $rvName) -Algorithm SHA256).Hash.ToLower()
+}
 foreach($rvName in @('known_hosts','licenses/libssh2.txt','licenses/OpenSSL.txt','licenses/upstream.lock.json')){$rvPayload[$rvName]=(Get-FileHash (Join-Path $rvRuntime $rvName) -Algorithm SHA256).Hash.ToLower()}
 [ordered]@{implementation='rv-control-cpp-v1';executable='RvControlWorker.exe';executable_sha256=(Get-FileHash $rvExecutable -Algorithm SHA256).Hash.ToLower();dependencies=$rvHashes;payload_files=$rvPayload;host_key_algorithm='ssh-ed25519';crypto_backend='OpenSSL';libssh2='1.11.1';transport_test_fixture=$TransportTests.IsPresent;python_required=$false;camera_opened=$false;board_connected=$false} | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $rvRuntime 'implementation.json') -Encoding UTF8
 Write-Output "Native RV $Configuration built/deployed: $rvRuntime"

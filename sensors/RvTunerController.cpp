@@ -29,7 +29,7 @@ void RvTunerController::launch(const QString &action,QJsonObject req){
         if(store.revision()!=m_revision||selected.host!=m_host)throw std::runtime_error("Trusted device registry changed; restore its identity before stopping. The experiment lease will expire safely.");
         auto *p=new QProcess(this);m_process=p;p->setObjectName("rvTunerControlProcess");
         p->setProgram(m_worker);p->setArguments({"--tuner",action,"--device-store",m_session->deviceStorePath(),"--device-revision",m_revision,"--device-id",m_deviceId});
-        p->setProcessEnvironment(RuntimeDiscovery::handPoseNativeEnvironment(m_worker));p->setWorkingDirectory(QFileInfo(m_worker).absolutePath());
+        p->setProcessEnvironment(RuntimeDiscovery::nativeWorkerEnvironment(m_worker));p->setWorkingDirectory(QFileInfo(m_worker).absolutePath());
         connect(p,&QProcess::started,this,[p,req]{p->write(QJsonDocument(req).toJson(QJsonDocument::Compact));p->closeWriteChannel();});
         connect(p,&QProcess::errorOccurred,this,[this,p,operation,action](QProcess::ProcessError error){if(error==QProcess::FailedToStart&&m_process==p){m_process=nullptr;p->deleteLater();completed(operation,action,{},p->errorString());}});
         connect(p,&QProcess::finished,this,[this,p,operation,action](int code,QProcess::ExitStatus exit){
@@ -107,8 +107,7 @@ void RvTunerController::completed(quint64 operation,const QString &action,const 
     if(action=="persist"){
         m_saved=r["settings"].toObject();m_info["snapshot"]=r["snapshot"];m_info["backup"]=r["backup"];
         const auto saved=RvTuner::Settings::fromJson(m_applied);const bool nativeCompatible=saved.nativeCompatible();
-        setState(Running,saved.fp16Native16Compatible()?tr("dToF settings saved. The separate RGB576 FP16 + 16×16 ToF option supports these settings. Other model requirements are unchanged."):
-            saved.size()==QSize(8,8)&&saved.depthorCompatible()?tr("dToF settings saved. DEPTHOR V3 supports these 8×8 settings; other shared imaging requires compatible 48×32 settings. Saved values will not be overridden."):
+        setState(Running,saved.fp16Native16Compatible()?tr("dToF settings saved. Host-assisted inference (640×480) supports these 16×16 ToF settings."):
             !nativeCompatible?tr("dToF settings saved. Shared imaging requires 48×32; use dToF tuning for this resolution. Saved values will not be overridden."):
             r["litesr_compatible"].toBool()?tr("dToF settings saved and read back for Native and LiteSR."):tr("dToF settings saved. LiteSR cannot start with this combination; saved values will not be overridden."));
     }else if(action=="start"||action=="switch"){

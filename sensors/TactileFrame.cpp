@@ -1,26 +1,12 @@
 #include "TactileFrame.h"
 #include <cmath>
 namespace tactile {
-const Layout &demoLayout()
-{
-    static const Layout layout = [] {
-        Layout l;
-        l.fingerIds = {"thumb", "index", "middle", "ring", "little"};
-        const QPointF centers[] = {{0.5,0.26},{0.26,0.68},{0.74,0.68}};
-        for (int m=0; m<3; ++m)
-            for (int p=0; p<4; ++p)
-                l.points.append({QString("M%1").arg(m+1), QString("P%1").arg(p+1),
-                    centers[m]+QPointF((p%2 ? 1 : -1)*0.085, (p/2 ? 1 : -1)*0.09)});
-        return l;
-    }();
-    return layout;
-}
 const Layout &sensorLayout(int type)
 {
     static const QVector<Layout> layouts = [] {
         QVector<Layout> result;
         for(int type=0;type<3;++type) {
-            Layout l; l.id="simulated-tactile-counts-v3";
+            Layout l;
             l.fingerIds={"fingertip","terminal","ultrathin"};
             const int rows=type==2?4:6;
             int id=0;
@@ -46,15 +32,14 @@ bool validateFrame(const Frame &f, QString *error)
 {
     const auto fail=[&](const char *s) { if(error) *error=QString::fromLatin1(s); return false; };
     const auto &l=sensorLayout();
-    const bool hardware=f.sourceMode=="Serial";
     if(!f.valid || f.schemaVersion!=1 || f.layoutVersion!=l.version
-       || (hardware?(f.layoutId!="hardware-tactile-counts-v1"||f.hardwareType<0||f.hardwareType>2||(f.crcVerified&&!f.crcOk)):(f.layoutId!=l.id||f.sourceMode!="Mock"||f.hardwareType!=-1))
+       || f.sourceMode!="Serial" || f.layoutId!=l.id || f.hardwareType<0 || f.hardwareType>2 || (f.crcVerified&&!f.crcOk)
        || f.sessionId.isNull() || !f.generation || !f.sequence || f.monotonicNs<0)
         return fail("Invalid frame header");
     if(f.fingers.size()!=l.fingerIds.size()) return fail("Invalid finger count");
     for(int i=0;i<f.fingers.size();++i) {
         const auto &finger=f.fingers[i];
-        if(hardware&&i!=f.hardwareType) {
+        if(i!=f.hardwareType) {
             if(finger.valid||finger.id!=l.fingerIds[i]||!finger.modules.isEmpty()||!sameForce(finger.resultant,{}))return fail("Unexpected hardware slot");
             continue;
         }
@@ -68,8 +53,8 @@ bool validateFrame(const Frame &f, QString *error)
                 const auto &point=module.points[p];
                 if(!point.valid || point.id!=sensorLayout(i).points[p].pointId || !finite(point.force) || point.force.z<0)
                     return fail("Invalid point identity/force/state");
-                if(hardware&&(point.force.x<-32768||point.force.x>32767||point.force.y<-32768||point.force.y>32767||point.force.z>65535
-                    || std::trunc(point.force.x)!=point.force.x||std::trunc(point.force.y)!=point.force.y||std::trunc(point.force.z)!=point.force.z))return fail("Invalid raw word domain");
+                if(point.force.x<-32768||point.force.x>32767||point.force.y<-32768||point.force.y>32767||point.force.z>65535
+                    || std::trunc(point.force.x)!=point.force.x||std::trunc(point.force.y)!=point.force.y||std::trunc(point.force.z)!=point.force.z)return fail("Invalid raw word domain");
                 points+=point.force;
             }
             if(!sameForce(points,module.resultant)) return fail("Invalid module resultant");

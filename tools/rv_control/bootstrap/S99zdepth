@@ -1,0 +1,21 @@
+#!/bin/sh
+set -eu
+root=/root/r144_depth
+state=/run/r144_depth
+serial=$(sed -n 's/^Serial[[:space:]]*:[[:space:]]*//p' /proc/cpuinfo)
+[ "$serial" = "$(cat "$root/spi_native16.enabled")" ] || exit 2
+case "${1:-start}" in
+ start)
+  mkdir -p "$state"
+  if [ ! -e "$state/service.json" ] && [ ! -e /run/r144_fusion_20260923 ] && [ ! -e "$state/fault" ]; then
+   printf '{"state":"stopped","model":"Native","generation":"0","rgb_width":576,"preview_format":"nv12","manager_pid":0,"exit_code":0}\n' > "$state/service.tmp"
+   mv "$state/service.tmp" "$state/service.json"
+  fi
+  [ -e "$state/telemetry.json" ] || printf 'null\n' > "$state/telemetry.json"
+  if ! pidof depth_status >/dev/null; then
+   nohup "$root/depth_status" </dev/null >/dev/null 2>&1 &
+  fi;;
+ stop) "$root/control.sh" stop;;
+ *) exit 2;;
+esac
+

@@ -1,0 +1,663 @@
+{
+  "status": "usable_for_extrinsic_capture_with_edge_limits",
+  "image_width": 2304,
+  "image_height": 1296,
+  "model": "OpenCV pinhole Brown-Conrady",
+  "camera_matrix": [
+    [
+      945.890921237912,
+      0.0,
+      1166.88256321531
+    ],
+    [
+      0.0,
+      945.6696583046452,
+      646.3400007420597
+    ],
+    [
+      0.0,
+      0.0,
+      1.0
+    ]
+  ],
+  "distortion_coefficients": [
+    -0.002512809684909401,
+    0.010310845002354517,
+    -0.00016369025389516897,
+    -0.0007483575885665486,
+    -0.0057505078889954105
+  ],
+  "rms_px": 0.38789867396385663,
+  "board": {
+    "inner_corners_columns": 8,
+    "inner_corners_rows": 11,
+    "square_size_mm": 40.0,
+    "squares_columns": 9,
+    "squares_rows": 12
+  },
+  "train_count": 30,
+  "per_view": [
+    {
+      "path": "E:\\WORK\\RV1103-1106\\captures\\calibration\\session_20261008_211332_c7847a78\\shot_20261008_211557_950792_4906a3",
+      "role": "train",
+      "detection_method": "SB",
+      "used_for_fit": true,
+      "corner_file": "corners_001.npy",
+      "initial_train_rms_px": 0.24987289309501648,
+      "rms_px": 0.2516970932483673
+    },
+    {
+      "path": "E:\\WORK\\RV1103-1106\\captures\\calibration\\session_20261008_211332_c7847a78\\shot_20261008_211641_587078_018530",
+      "role": "train",
+      "detection_method": "SB_board_roi",
+      "used_for_fit": true,
+      "corner_file": "corners_002.npy",
+      "initial_train_rms_px": 0.2860129177570343,
+      "rms_px": 0.28012725710868835
+    },
+    {
+      "path": "E:\\WORK\\RV1103-1106\\captures\\calibration\\session_20261008_211332_c7847a78\\shot_20261008_211706_785883_ac2f6b",
+      "role": "train",
+      "detection_method": "SB",
+      "used_for_fit": true,
+      "corner_file": "corners_003.npy",
+      "initial_train_rms_px": 0.35228002071380615,
+      "rms_px": 0.35328423976898193
+    },
+    {
+      "path": "E:\\WORK\\RV1103-1106\\captures\\calibration\\session_20261008_211332_c7847a78\\shot_20261008_211729_349311_6ffd7b",
+      "role": "train",
+      "detection_method": "SB_board_roi",
+      "used_for_fit": true,
+      "corner_file": "corners_004.npy",
+      "initial_train_rms_px": 0.4035116732120514,
+      "rms_px": 0.4101150929927826
+    },
+    {
+      "path": "E:\\WORK\\RV1103-1106\\captures\\calibration\\session_20261008_212612_ef9edf7b\\shot_20261008_212633_665704_67dac9",
+      "role": "train",
+      "detection_method": "SB_board_roi",
+      "used_for_fit": false,
+      "corner_file": "corners_005.npy",
+      "initial_train_rms_px": 1.209211826324463,
+      "rms_px": 1.2113758325576782
+    },
+    {
+      "path": "E:\\WORK\\RV1103-1106\\captures\\calibration\\session_20261008_212612_ef9edf7b\\shot_20261008_212646_980751_44829b",
+      "role": "train",
+      "detection_method": "classic",
+      "used_for_fit": false,
+      "corner_file": "corners_006.npy",
+      "initial_train_rms_px": 0.8759459853172302,
+      "rms_px": 0.9142271280288696
+    },
+    {
+      "path": "E:\\WORK\\RV1103-1106\\captures\\calibration\\session_20261008_212612_ef9edf7b\\shot_20261008_212657_231788_415f42",
+      "role": "train",
+      "detection_method": "SB_board_roi",
+      "used_for_fit": false,
+      "corner_file": "corners_007.npy",
+      "initial_train_rms_px": 0.7297468781471252,
+      "rms_px": 0.724104642868042
+    },
+    {
+      "path": "E:\\WORK\\RV1103-1106\\captures\\calibration\\session_20261008_212612_ef9edf7b\\shot_20261008_212708_856223_59edc8",
+      "role": "train",
+      "detection_method": "classic",
+      "used_for_fit": true,
+      "corner_file": "corners_008.npy",
+      "initial_train_rms_px": 0.655090868473053,
+      "rms_px": 0.6184725165367126
+    },
+    {
+      "path": "E:\\WORK\\RV1103-1106\\captures\\calibration\\session_20261008_212612_ef9edf7b\\shot_20261008_212719_127816_6629e4",
+      "role": "train",
+      "detection_method": "classic",
+      "used_for_fit": false,
+      "corner_file": "corners_009.npy",
+      "initial_train_rms_px": 1.2924964427947998,
+      "rms_px": 1.3959907293319702
+    },
+    {
+      "path": "E:\\WORK\\RV1103-1106\\captures\\calibration\\session_20261008_212612_ef9edf7b\\shot_20261008_212743_234672_f286f5",
+      "role": "train",
+      "detection_method": "SB",
+      "used_for_fit": true,
+      "corner_file": "corners_010.npy",
+      "initial_train_rms_px": 0.29656705260276794,
+      "rms_px": 0.2833312451839447
+    },
+    {
+      "path": "E:\\WORK\\RV1103-1106\\captures\\calibration\\session_20261008_212612_ef9edf7b\\shot_20261008_212753_786648_055cfb",
+      "role": "train",
+      "detection_method": "SB",
+      "used_for_fit": true,
+      "corner_file": "corners_011.npy",
+      "initial_train_rms_px": 0.29427582025527954,
+      "rms_px": 0.2772878110408783
+    },
+    {
+      "path": "E:\\WORK\\RV1103-1106\\captures\\calibration\\session_20261008_212612_ef9edf7b\\shot_20261008_212803_252569_78fdb9",
+      "role": "train",
+      "detection_method": "SB",
+      "used_for_fit": true,
+      "corner_file": "corners_012.npy",
+      "initial_train_rms_px": 0.3520129919052124,
+      "rms_px": 0.32234013080596924
+    },
+    {
+      "path": "E:\\WORK\\RV1103-1106\\captures\\calibration\\session_20261008_212612_ef9edf7b\\shot_20261008_212812_710295_6ce96c",
+      "role": "train",
+      "detection_method": "SB_board_roi",
+      "used_for_fit": true,
+      "corner_file": "corners_013.npy",
+      "initial_train_rms_px": 0.4300834834575653,
+      "rms_px": 0.4272584319114685
+    },
+    {
+      "path": "E:\\WORK\\RV1103-1106\\captures\\calibration\\session_20261008_212612_ef9edf7b\\shot_20261008_212822_052990_9a49d3",
+      "role": "train",
+      "detection_method": "SB_board_roi",
+      "used_for_fit": true,
+      "corner_file": "corners_014.npy",
+      "initial_train_rms_px": 0.4696144163608551,
+      "rms_px": 0.47572559118270874
+    },
+    {
+      "path": "E:\\WORK\\RV1103-1106\\captures\\calibration\\session_20261008_212612_ef9edf7b\\shot_20261008_212831_718021_084379",
+      "role": "train",
+      "detection_method": "SB_board_roi",
+      "used_for_fit": true,
+      "corner_file": "corners_015.npy",
+      "initial_train_rms_px": 0.5020963549613953,
+      "rms_px": 0.4938816428184509
+    },
+    {
+      "path": "E:\\WORK\\RV1103-1106\\captures\\calibration\\session_20261008_212612_ef9edf7b\\shot_20261008_212842_631624_04ded9",
+      "role": "train",
+      "detection_method": "SB",
+      "used_for_fit": true,
+      "corner_file": "corners_016.npy",
+      "initial_train_rms_px": 0.2806202471256256,
+      "rms_px": 0.28565967082977295
+    },
+    {
+      "path": "E:\\WORK\\RV1103-1106\\captures\\calibration\\session_20261008_212612_ef9edf7b\\shot_20261008_212852_233189_ff544e",
+      "role": "train",
+      "detection_method": "classic",
+      "used_for_fit": false,
+      "corner_file": "corners_017.npy",
+      "initial_train_rms_px": 1.2289854288101196,
+      "rms_px": 1.2115628719329834
+    },
+    {
+      "path": "E:\\WORK\\RV1103-1106\\captures\\calibration\\session_20261008_212612_ef9edf7b\\shot_20261008_212903_402771_bad402",
+      "role": "train",
+      "detection_method": "classic",
+      "used_for_fit": false,
+      "corner_file": "corners_018.npy",
+      "initial_train_rms_px": 1.1819918155670166,
+      "rms_px": 1.0688728094100952
+    },
+    {
+      "path": "E:\\WORK\\RV1103-1106\\captures\\calibration\\session_20261008_212612_ef9edf7b\\shot_20261008_212913_068219_5259a4",
+      "role": "train",
+      "detection_method": "classic",
+      "used_for_fit": false,
+      "corner_file": "corners_019.npy",
+      "initial_train_rms_px": 2.2863569259643555,
+      "rms_px": 2.3853113651275635
+    },
+    {
+      "path": "E:\\WORK\\RV1103-1106\\captures\\calibration\\session_20261008_212612_ef9edf7b\\shot_20261008_212922_681992_fbb9bb",
+      "role": "train",
+      "detection_method": "classic",
+      "used_for_fit": false,
+      "corner_file": "corners_020.npy",
+      "initial_train_rms_px": 1.250380039215088,
+      "rms_px": 1.387882947921753
+    },
+    {
+      "path": "E:\\WORK\\RV1103-1106\\captures\\calibration\\session_20261008_212612_ef9edf7b\\shot_20261008_212932_356340_3043ed",
+      "role": "train",
+      "detection_method": "classic",
+      "used_for_fit": true,
+      "corner_file": "corners_021.npy",
+      "initial_train_rms_px": 0.510560154914856,
+      "rms_px": 0.5298032164573669
+    },
+    {
+      "path": "E:\\WORK\\RV1103-1106\\captures\\calibration\\session_20261008_212612_ef9edf7b\\shot_20261008_212946_884669_a7b073",
+      "role": "train",
+      "detection_method": "SB",
+      "used_for_fit": true,
+      "corner_file": "corners_022.npy",
+      "initial_train_rms_px": 0.26889172196388245,
+      "rms_px": 0.2741725742816925
+    },
+    {
+      "path": "E:\\WORK\\RV1103-1106\\captures\\calibration\\session_20261008_212612_ef9edf7b\\shot_20261008_212956_343760_ed4f49",
+      "role": "train",
+      "detection_method": "SB_board_roi",
+      "used_for_fit": true,
+      "corner_file": "corners_023.npy",
+      "initial_train_rms_px": 0.34662944078445435,
+      "rms_px": 0.3383175730705261
+    },
+    {
+      "path": "E:\\WORK\\RV1103-1106\\captures\\calibration\\session_20261008_212612_ef9edf7b\\shot_20261008_213008_203693_19dfb5",
+      "role": "train",
+      "detection_method": "SB",
+      "used_for_fit": true,
+      "corner_file": "corners_024.npy",
+      "initial_train_rms_px": 0.2388830929994583,
+      "rms_px": 0.23779870569705963
+    },
+    {
+      "path": "E:\\WORK\\RV1103-1106\\captures\\calibration\\session_20261008_212612_ef9edf7b\\shot_20261008_213017_619671_b5b9c5",
+      "role": "train",
+      "detection_method": "SB_board_roi",
+      "used_for_fit": true,
+      "corner_file": "corners_025.npy",
+      "initial_train_rms_px": 0.25579413771629333,
+      "rms_px": 0.2465749979019165
+    },
+    {
+      "path": "E:\\WORK\\RV1103-1106\\captures\\calibration\\session_20261008_212612_ef9edf7b\\shot_20261008_213027_054977_8e94fa",
+      "role": "train",
+      "detection_method": "SB_board_roi",
+      "used_for_fit": false,
+      "corner_file": "corners_026.npy",
+      "initial_train_rms_px": 1.5961661338806152,
+      "rms_px": 1.4983677864074707
+    },
+    {
+      "path": "E:\\WORK\\RV1103-1106\\captures\\calibration\\session_20261008_212612_ef9edf7b\\shot_20261008_213036_534812_c03fd9",
+      "role": "train",
+      "detection_method": "classic",
+      "used_for_fit": true,
+      "corner_file": "corners_027.npy",
+      "initial_train_rms_px": 0.6331284046173096,
+      "rms_px": 0.600952684879303
+    },
+    {
+      "path": "E:\\WORK\\RV1103-1106\\captures\\calibration\\session_20261008_212612_ef9edf7b\\shot_20261008_213046_015310_36f42c",
+      "role": "train",
+      "detection_method": "SB_board_roi",
+      "used_for_fit": false,
+      "corner_file": "corners_028.npy",
+      "initial_train_rms_px": 2.0641119480133057,
+      "rms_px": 2.060271739959717
+    },
+    {
+      "path": "E:\\WORK\\RV1103-1106\\captures\\calibration\\session_20261008_212612_ef9edf7b\\shot_20261008_213055_516753_af6394",
+      "role": "train",
+      "detection_method": "classic",
+      "used_for_fit": false,
+      "corner_file": "corners_029.npy",
+      "initial_train_rms_px": 1.490228295326233,
+      "rms_px": 1.4884637594223022
+    },
+    {
+      "path": "E:\\WORK\\RV1103-1106\\captures\\calibration\\session_20261008_212612_ef9edf7b\\shot_20261008_213110_724494_bad316",
+      "role": "train",
+      "detection_method": "SB",
+      "used_for_fit": true,
+      "corner_file": "corners_030.npy",
+      "initial_train_rms_px": 0.3288220763206482,
+      "rms_px": 0.32693493366241455
+    },
+    {
+      "path": "E:\\WORK\\RV1103-1106\\captures\\calibration\\session_20261008_212612_ef9edf7b\\shot_20261008_213120_668571_107b61",
+      "role": "train",
+      "detection_method": "SB_board_roi",
+      "used_for_fit": true,
+      "corner_file": "corners_031.npy",
+      "initial_train_rms_px": 0.3038846552371979,
+      "rms_px": 0.2830548584461212
+    },
+    {
+      "path": "E:\\WORK\\RV1103-1106\\captures\\calibration\\session_20261008_212612_ef9edf7b\\shot_20261008_213131_958603_045814",
+      "role": "train",
+      "detection_method": "classic",
+      "used_for_fit": false,
+      "corner_file": "corners_032.npy",
+      "initial_train_rms_px": 1.7990466356277466,
+      "rms_px": 1.8251334428787231
+    },
+    {
+      "path": "E:\\WORK\\RV1103-1106\\captures\\calibration\\session_20261008_212612_ef9edf7b\\shot_20261008_213141_333958_e05c5f",
+      "role": "train",
+      "detection_method": "SB_board_roi",
+      "used_for_fit": false,
+      "corner_file": "corners_033.npy",
+      "initial_train_rms_px": 0.7608739733695984,
+      "rms_px": 0.8421018123626709
+    },
+    {
+      "path": "E:\\WORK\\RV1103-1106\\captures\\calibration\\session_20261008_212612_ef9edf7b\\shot_20261008_213150_767664_ca3c0b",
+      "role": "train",
+      "detection_method": "classic",
+      "used_for_fit": true,
+      "corner_file": "corners_034.npy",
+      "initial_train_rms_px": 0.35173216462135315,
+      "rms_px": 0.32982364296913147
+    },
+    {
+      "path": "E:\\WORK\\RV1103-1106\\captures\\calibration\\session_20261008_212612_ef9edf7b\\shot_20261008_213200_324874_3a5788",
+      "role": "train",
+      "detection_method": "classic",
+      "used_for_fit": true,
+      "corner_file": "corners_035.npy",
+      "initial_train_rms_px": 0.4060720205307007,
+      "rms_px": 0.3978893458843231
+    },
+    {
+      "path": "E:\\WORK\\RV1103-1106\\captures\\calibration\\session_20261008_212612_ef9edf7b\\shot_20261008_213210_430073_6f1ab0",
+      "role": "train",
+      "detection_method": "SB",
+      "used_for_fit": true,
+      "corner_file": "corners_036.npy",
+      "initial_train_rms_px": 0.30952906608581543,
+      "rms_px": 0.28892385959625244
+    },
+    {
+      "path": "E:\\WORK\\RV1103-1106\\captures\\calibration\\session_20261008_212612_ef9edf7b\\shot_20261008_213219_991358_20fd58",
+      "role": "train",
+      "detection_method": "classic",
+      "used_for_fit": false,
+      "corner_file": "corners_037.npy",
+      "initial_train_rms_px": 1.8244932889938354,
+      "rms_px": 2.1571919918060303
+    },
+    {
+      "path": "E:\\WORK\\RV1103-1106\\captures\\calibration\\session_20261008_212612_ef9edf7b\\shot_20261008_213228_720419_40245f",
+      "role": "train",
+      "detection_method": "classic",
+      "used_for_fit": false,
+      "corner_file": "corners_038.npy",
+      "initial_train_rms_px": 0.8243436217308044,
+      "rms_px": 0.8295941352844238
+    },
+    {
+      "path": "E:\\WORK\\RV1103-1106\\captures\\calibration\\session_20261008_212612_ef9edf7b\\shot_20261008_213238_075966_6b9342",
+      "role": "train",
+      "detection_method": "classic",
+      "used_for_fit": false,
+      "corner_file": "corners_039.npy",
+      "initial_train_rms_px": 1.3001941442489624,
+      "rms_px": 1.43253493309021
+    },
+    {
+      "path": "E:\\WORK\\RV1103-1106\\captures\\calibration\\session_20261008_212612_ef9edf7b\\shot_20261008_213247_534090_35076f",
+      "role": "train",
+      "detection_method": "classic",
+      "used_for_fit": false,
+      "corner_file": "corners_040.npy",
+      "initial_train_rms_px": 2.121264934539795,
+      "rms_px": 2.1242971420288086
+    },
+    {
+      "path": "E:\\WORK\\RV1103-1106\\captures\\calibration\\session_20261008_212612_ef9edf7b\\shot_20261008_214004_514014_6fd9a1",
+      "role": "train",
+      "detection_method": "classic",
+      "used_for_fit": false,
+      "corner_file": "corners_041.npy",
+      "initial_train_rms_px": 0.8763860464096069,
+      "rms_px": 0.8480123281478882
+    },
+    {
+      "path": "E:\\WORK\\RV1103-1106\\captures\\calibration\\session_20261008_212612_ef9edf7b\\shot_20261008_214016_480444_a6bc2b",
+      "role": "train",
+      "detection_method": "classic",
+      "used_for_fit": false,
+      "corner_file": "corners_042.npy",
+      "initial_train_rms_px": 0.9319639205932617,
+      "rms_px": 1.1251717805862427
+    },
+    {
+      "path": "E:\\WORK\\RV1103-1106\\captures\\calibration\\session_20261008_212612_ef9edf7b\\shot_20261008_214025_948580_cbceff",
+      "role": "train",
+      "detection_method": "classic",
+      "used_for_fit": true,
+      "corner_file": "corners_043.npy",
+      "initial_train_rms_px": 0.6845368146896362,
+      "rms_px": 0.6829307675361633
+    },
+    {
+      "path": "E:\\WORK\\RV1103-1106\\captures\\calibration\\session_20261008_212612_ef9edf7b\\shot_20261008_214035_486535_6f9972",
+      "role": "train",
+      "detection_method": "classic",
+      "used_for_fit": false,
+      "corner_file": "corners_044.npy",
+      "initial_train_rms_px": 1.332979679107666,
+      "rms_px": 1.3185824155807495
+    },
+    {
+      "path": "E:\\WORK\\RV1103-1106\\captures\\calibration\\session_20261008_212612_ef9edf7b\\shot_20261008_214045_140423_addac3",
+      "role": "train",
+      "detection_method": "classic",
+      "used_for_fit": false,
+      "corner_file": "corners_045.npy",
+      "initial_train_rms_px": 1.5776180028915405,
+      "rms_px": 1.6516164541244507
+    },
+    {
+      "path": "E:\\WORK\\RV1103-1106\\captures\\calibration\\session_20261008_212612_ef9edf7b\\shot_20261008_214054_636881_9cac32",
+      "role": "train",
+      "detection_method": "SB_board_roi",
+      "used_for_fit": false,
+      "corner_file": "corners_046.npy",
+      "initial_train_rms_px": 0.8722375631332397,
+      "rms_px": 0.8630515336990356
+    },
+    {
+      "path": "E:\\WORK\\RV1103-1106\\captures\\calibration\\session_20261008_212612_ef9edf7b\\shot_20261008_214113_974781_7f7a4d",
+      "role": "train",
+      "detection_method": "SB",
+      "used_for_fit": true,
+      "corner_file": "corners_047.npy",
+      "initial_train_rms_px": 0.29457545280456543,
+      "rms_px": 0.29081571102142334
+    },
+    {
+      "path": "E:\\WORK\\RV1103-1106\\captures\\calibration\\session_20261008_212612_ef9edf7b\\shot_20261008_214123_760940_bf4604",
+      "role": "train",
+      "detection_method": "SB",
+      "used_for_fit": true,
+      "corner_file": "corners_048.npy",
+      "initial_train_rms_px": 0.3625360429286957,
+      "rms_px": 0.3528977036476135
+    },
+    {
+      "path": "E:\\WORK\\RV1103-1106\\captures\\calibration\\session_20261008_212612_ef9edf7b\\shot_20261008_214154_845594_8b77ee",
+      "role": "train",
+      "detection_method": "SB",
+      "used_for_fit": true,
+      "corner_file": "corners_049.npy",
+      "initial_train_rms_px": 0.28602170944213867,
+      "rms_px": 0.2746616303920746
+    },
+    {
+      "path": "E:\\WORK\\RV1103-1106\\captures\\calibration\\session_20261008_212612_ef9edf7b\\shot_20261008_214204_456936_bb15f3",
+      "role": "train",
+      "detection_method": "SB",
+      "used_for_fit": true,
+      "corner_file": "corners_050.npy",
+      "initial_train_rms_px": 0.30704250931739807,
+      "rms_px": 0.29268157482147217
+    },
+    {
+      "path": "E:\\WORK\\RV1103-1106\\captures\\calibration\\session_20261008_212612_ef9edf7b\\shot_20261008_214213_913053_63a469",
+      "role": "train",
+      "detection_method": "classic",
+      "used_for_fit": true,
+      "corner_file": "corners_051.npy",
+      "initial_train_rms_px": 0.5667369365692139,
+      "rms_px": 0.5139568448066711
+    },
+    {
+      "path": "E:\\WORK\\RV1103-1106\\captures\\calibration\\session_20261008_212612_ef9edf7b\\shot_20261008_214223_458216_0f3772",
+      "role": "train",
+      "detection_method": "classic",
+      "used_for_fit": true,
+      "corner_file": "corners_052.npy",
+      "initial_train_rms_px": 0.3297659754753113,
+      "rms_px": 0.3376755714416504
+    },
+    {
+      "path": "E:\\WORK\\RV1103-1106\\captures\\calibration\\session_20261008_212612_ef9edf7b\\shot_20261008_214237_242236_436bd0",
+      "role": "validation",
+      "detection_method": "SB",
+      "used_for_fit": false,
+      "corner_file": "corners_053.npy",
+      "initial_train_rms_px": null,
+      "rms_px": 0.24465005099773407
+    },
+    {
+      "path": "E:\\WORK\\RV1103-1106\\captures\\calibration\\session_20261008_212612_ef9edf7b\\shot_20261008_214247_679097_493358",
+      "role": "validation",
+      "detection_method": "SB_board_roi",
+      "used_for_fit": false,
+      "corner_file": "corners_054.npy",
+      "initial_train_rms_px": null,
+      "rms_px": 0.3229367136955261
+    },
+    {
+      "path": "E:\\WORK\\RV1103-1106\\captures\\calibration\\session_20261008_212612_ef9edf7b\\shot_20261008_214257_180712_502641",
+      "role": "validation",
+      "detection_method": "SB_board_roi",
+      "used_for_fit": false,
+      "corner_file": "corners_055.npy",
+      "initial_train_rms_px": null,
+      "rms_px": 0.3662166893482208
+    },
+    {
+      "path": "E:\\WORK\\RV1103-1106\\captures\\calibration\\session_20261008_212612_ef9edf7b\\shot_20261008_214306_660075_0e730e",
+      "role": "validation",
+      "detection_method": "SB",
+      "used_for_fit": false,
+      "corner_file": "corners_056.npy",
+      "initial_train_rms_px": null,
+      "rms_px": 0.29507118463516235
+    }
+  ],
+  "rejected": [],
+  "input_train_count": 52,
+  "initial_all_train_rms_px": 0.9666212739993356,
+  "train_view_cutoff_px": 0.7,
+  "excluded_training_views": [
+    {
+      "path": "E:\\WORK\\RV1103-1106\\captures\\calibration\\session_20261008_212612_ef9edf7b\\shot_20261008_212633_665704_67dac9",
+      "initial_rms_px": 1.209211826324463
+    },
+    {
+      "path": "E:\\WORK\\RV1103-1106\\captures\\calibration\\session_20261008_212612_ef9edf7b\\shot_20261008_212646_980751_44829b",
+      "initial_rms_px": 0.8759459853172302
+    },
+    {
+      "path": "E:\\WORK\\RV1103-1106\\captures\\calibration\\session_20261008_212612_ef9edf7b\\shot_20261008_212657_231788_415f42",
+      "initial_rms_px": 0.7297468781471252
+    },
+    {
+      "path": "E:\\WORK\\RV1103-1106\\captures\\calibration\\session_20261008_212612_ef9edf7b\\shot_20261008_212719_127816_6629e4",
+      "initial_rms_px": 1.2924964427947998
+    },
+    {
+      "path": "E:\\WORK\\RV1103-1106\\captures\\calibration\\session_20261008_212612_ef9edf7b\\shot_20261008_212852_233189_ff544e",
+      "initial_rms_px": 1.2289854288101196
+    },
+    {
+      "path": "E:\\WORK\\RV1103-1106\\captures\\calibration\\session_20261008_212612_ef9edf7b\\shot_20261008_212903_402771_bad402",
+      "initial_rms_px": 1.1819918155670166
+    },
+    {
+      "path": "E:\\WORK\\RV1103-1106\\captures\\calibration\\session_20261008_212612_ef9edf7b\\shot_20261008_212913_068219_5259a4",
+      "initial_rms_px": 2.2863569259643555
+    },
+    {
+      "path": "E:\\WORK\\RV1103-1106\\captures\\calibration\\session_20261008_212612_ef9edf7b\\shot_20261008_212922_681992_fbb9bb",
+      "initial_rms_px": 1.250380039215088
+    },
+    {
+      "path": "E:\\WORK\\RV1103-1106\\captures\\calibration\\session_20261008_212612_ef9edf7b\\shot_20261008_213027_054977_8e94fa",
+      "initial_rms_px": 1.5961661338806152
+    },
+    {
+      "path": "E:\\WORK\\RV1103-1106\\captures\\calibration\\session_20261008_212612_ef9edf7b\\shot_20261008_213046_015310_36f42c",
+      "initial_rms_px": 2.0641119480133057
+    },
+    {
+      "path": "E:\\WORK\\RV1103-1106\\captures\\calibration\\session_20261008_212612_ef9edf7b\\shot_20261008_213055_516753_af6394",
+      "initial_rms_px": 1.490228295326233
+    },
+    {
+      "path": "E:\\WORK\\RV1103-1106\\captures\\calibration\\session_20261008_212612_ef9edf7b\\shot_20261008_213131_958603_045814",
+      "initial_rms_px": 1.7990466356277466
+    },
+    {
+      "path": "E:\\WORK\\RV1103-1106\\captures\\calibration\\session_20261008_212612_ef9edf7b\\shot_20261008_213141_333958_e05c5f",
+      "initial_rms_px": 0.7608739733695984
+    },
+    {
+      "path": "E:\\WORK\\RV1103-1106\\captures\\calibration\\session_20261008_212612_ef9edf7b\\shot_20261008_213219_991358_20fd58",
+      "initial_rms_px": 1.8244932889938354
+    },
+    {
+      "path": "E:\\WORK\\RV1103-1106\\captures\\calibration\\session_20261008_212612_ef9edf7b\\shot_20261008_213228_720419_40245f",
+      "initial_rms_px": 0.8243436217308044
+    },
+    {
+      "path": "E:\\WORK\\RV1103-1106\\captures\\calibration\\session_20261008_212612_ef9edf7b\\shot_20261008_213238_075966_6b9342",
+      "initial_rms_px": 1.3001941442489624
+    },
+    {
+      "path": "E:\\WORK\\RV1103-1106\\captures\\calibration\\session_20261008_212612_ef9edf7b\\shot_20261008_213247_534090_35076f",
+      "initial_rms_px": 2.121264934539795
+    },
+    {
+      "path": "E:\\WORK\\RV1103-1106\\captures\\calibration\\session_20261008_212612_ef9edf7b\\shot_20261008_214004_514014_6fd9a1",
+      "initial_rms_px": 0.8763860464096069
+    },
+    {
+      "path": "E:\\WORK\\RV1103-1106\\captures\\calibration\\session_20261008_212612_ef9edf7b\\shot_20261008_214016_480444_a6bc2b",
+      "initial_rms_px": 0.9319639205932617
+    },
+    {
+      "path": "E:\\WORK\\RV1103-1106\\captures\\calibration\\session_20261008_212612_ef9edf7b\\shot_20261008_214035_486535_6f9972",
+      "initial_rms_px": 1.332979679107666
+    },
+    {
+      "path": "E:\\WORK\\RV1103-1106\\captures\\calibration\\session_20261008_212612_ef9edf7b\\shot_20261008_214045_140423_addac3",
+      "initial_rms_px": 1.5776180028915405
+    },
+    {
+      "path": "E:\\WORK\\RV1103-1106\\captures\\calibration\\session_20261008_212612_ef9edf7b\\shot_20261008_214054_636881_9cac32",
+      "initial_rms_px": 0.8722375631332397
+    }
+  ],
+  "validation_count": 4,
+  "validation_rms_px": 0.3103721298960449,
+  "source_session": "E:\\WORK\\RV1103-1106\\captures\\calibration\\session_20261008_212612_ef9edf7b",
+  "source_sessions": [
+    "E:\\WORK\\RV1103-1106\\captures\\calibration\\session_20261008_212612_ef9edf7b",
+    "E:\\WORK\\RV1103-1106\\captures\\calibration\\session_20261008_211332_c7847a78"
+  ],
+  "acquisition": {
+    "preset": 12,
+    "iterations_k": 1200,
+    "period_ms": 66,
+    "rows": 32,
+    "cols": 48,
+    "range_max_m": 1.4,
+    "warning_policy": "strict",
+    "pair_limit_ms": 100
+  },
+  "source_result": "E:\\WORK\\RV1103-1106\\captures\\calibration\\session_20261008_212612_ef9edf7b\\result_intrinsics_20261008_215154_801cf8\\calibration.json",
+  "limitations": [
+    "Training-view screening used 0.7 px cutoff, only on training images; all four validation views remain held out.",
+    "Rightmost 12.5 percent of displayed image lacks retained training corner coverage. Do not claim full-field precision.",
+    "This is camera intrinsic calibration only; new RGB-ToF extrinsics and matching production rectification assets are not yet generated."
+  ],
+  "validation_scope": "Four independent views with fixed K/D and independently estimated board poses; not depth accuracy."
+}
