@@ -1,4 +1,6 @@
 #include "RvAssistDepth.h"
+#include "RvInferenceRuntime.h"
+#include "RvInferenceSettings.h"
 #include "RvDepthDiagnostic.h"
 #include "RvAssistFusion.h"
 #include "RvCameraView.h"
@@ -206,6 +208,16 @@ struct RvAssistWorkerPaths {
 #endif
 };
 
+std::shared_ptr<void> RvAssistDepth::prepareProbeWorker(QString &program,QString &runtime){
+    auto paths=std::make_shared<RvAssistWorkerPaths>();
+#ifdef DCTS_TENSORRT_RTX
+    if(!paths->prepare(QCoreApplication::applicationDirPath(),RuntimeDiscovery::rvAssistRoot(),false))return {};
+#else
+    paths->program=QCoreApplication::applicationFilePath();paths->runtime=RuntimeDiscovery::rvAssistRoot();
+#endif
+    program=paths->program;runtime=paths->runtime;return paths;
+}
+
 namespace {
 constexpr int Pixels=576*324, RgbBytes=3*Pixels, DepthBytes=4*Pixels;
 // Three bounded native-ID lists can exceed 16 KiB at dense valid returns.
@@ -380,6 +392,8 @@ bool protectedModelContract(const QJsonObject &manifest)
 class NativeModel {
 public:
     QJsonObject modelInfo,storageInfo;
+    QString backend=qEnvironmentVariable("RV_INFERENCE_BACKEND","tensorrt");
+    QJsonObject executionIdentity() const {return RvInferenceRuntime::identity(backend);}
     bool wide=false;
     QString hostModel;
     const RvCameraView::Profile &view() const {return RvCameraView::profile(hostModel);}
@@ -396,6 +410,7 @@ public:
         if(directory)RemoveDllDirectory(directory);
     }
     void initialize(const QString &root,const QString &selectedHostModel=QString()) {
+        if(!RvInferenceRuntime::validBackend(backend))throw std::runtime_error("Unsupported inference backend");
         if(!RvAssistDepth::supportsHostModel(selectedHostModel))
             throw std::runtime_error("Unsupported host model");
         QElapsedTimer initializationClock;initializationClock.start();
@@ -435,6 +450,7 @@ public:
                 ||modelInfo["weights_sha256"]!=QLatin1String(view().weightsSha)||modelInfo["onnx_sha256"]!=QLatin1String(view().graphSha)
                 ||(!protectedModel&&hashFile(dir.filePath(QLatin1String(view().graphFile)))!=view().graphSha)
                 ||modelInfo["rectify_sha256"]!=QLatin1String(view().mapSha)
+                ||modelInfo["physical_intrinsics_sha256"]!=QLatin1String(RvCalibration::IntrinsicsSha)
                 ||modelInfo["rectified_intrinsics_integer_centres"].toArray()!=RvCameraView::intrinsics(view())
                 ||(view().resolutionLevel<0?!modelInfo["resolution_level"].isNull():modelInfo["resolution_level"].toInt(-1)!=view().resolutionLevel)
                 ||modelInfo["backend"]!=(RvCameraView::isUniDepthVga(hostModel)?HostRuntimeBackend:"onnxruntime-cuda")
@@ -455,15 +471,23 @@ public:
                 ||modelInfo["source_onnx_sha256"]!=QLatin1String(view().sourceSha))
                 throw std::runtime_error("Unsupported UniDepth precision contract");
         }
-        QFile geometry(":/camera/dtof_m48_geometry.bin");QString error;
+        QFile geometry(RvCalibration::GeometryResource);QString error;
         if(!geometry.open(QIODevice::ReadOnly)||!RvAssistFusion::loadCalibration(geometry.readAll(),calibration,error))
             throw std::runtime_error(("Missing or incompatible dToF calibration: "+error).toStdString());
+        if(RvInferenceRuntime::isOpenVino(backend)){
+            openvino=std::make_unique<RvOpenVinoModel>();
+            storageInfo=openvino->initialize(backend,root,manifest);
+            return;
+        }
+        const bool compatibility=backend!="tensorrt";
+        if(compatibility)RvInferenceRuntime::verifyCompatibleRuntime();
+        const auto libraryRoot=compatibility?RuntimeDiscovery::rvCompatibleRoot()+"/directml":dir.filePath("bin");
         // Restricted DLL search in this disposable native process only.
         if(!SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_DEFAULT_DIRS))throw std::runtime_error("Cannot restrict native DLL search");
-        directory=AddDllDirectory(reinterpret_cast<const wchar_t *>(dir.filePath("bin").utf16()));
+        directory=AddDllDirectory(reinterpret_cast<const wchar_t *>(libraryRoot.utf16()));
         if(!directory)throw std::runtime_error("Cannot register native auxiliary DLL directory");
 #ifdef DCTS_TENSORRT_RTX
-        checkTensorRtCudaDevice();
+        if(!compatibility)checkTensorRtCudaDevice();
 #endif
 #ifdef DCTS_INSTALLER_BUILD
         // RTX v0.5 falls back to memory when its engine staging directory is unavailable.
@@ -475,17 +499,28 @@ public:
            ||!SetEnvironmentVariableW(L"CUDA_CACHE_DISABLE",L"1"))
             throw std::runtime_error("Cannot set memory-only engine staging policy");
 #endif
-        library.setFileName(dir.filePath("bin/onnxruntime.dll"));
+        library.setFileName(libraryRoot+"/onnxruntime.dll");
         if(!library.load())throw std::runtime_error(library.errorString().toStdString());
         using GetApi=const OrtApiBase *(ORT_API_CALL *)();
         const auto getApi=reinterpret_cast<GetApi>(library.resolve("OrtGetApiBase"));
-        if(!getApi||QString::fromLatin1(getApi()->GetVersionString())!=HostOrtVersion)throw std::runtime_error("ONNX Runtime version mismatch");
+        const auto version=compatibility?QStringLiteral("1.24.4"):QString::fromLatin1(HostOrtVersion);
+        if(!getApi||QString::fromLatin1(getApi()->GetVersionString())!=version)throw std::runtime_error("ONNX Runtime version mismatch");
         api=getApi()->GetApi(ORT_API_VERSION);if(!api)throw std::runtime_error("ONNX Runtime API unavailable");
         check(api->CreateEnv(ORT_LOGGING_LEVEL_ERROR,"rv-assist",&env));
         OrtSessionOptions *options=nullptr;check(api->CreateSessionOptions(&options));
         const auto release=qScopeGuard([&]{api->ReleaseSessionOptions(options);});
-        check(api->SetIntraOpNumThreads(options,4));check(api->SetSessionGraphOptimizationLevel(options,ORT_ENABLE_ALL));
+        check(api->SetIntraOpNumThreads(options,compatibility?std::min(8u,std::max(1u,std::thread::hardware_concurrency()/2)):4));
+        check(api->SetSessionGraphOptimizationLevel(options,ORT_ENABLE_ALL));
+        if(backend.startsWith("directml:")){
+            using AppendDml=OrtStatus *(ORT_API_CALL *)(OrtSessionOptions *,int);
+            const auto append=reinterpret_cast<AppendDml>(library.resolve("OrtSessionOptionsAppendExecutionProvider_DML"));
+            if(!append)throw std::runtime_error("DirectML provider API missing");
+            check(api->DisableMemPattern(options));check(api->SetSessionExecutionMode(options,ORT_SEQUENTIAL));
+            check(append(options,backend.mid(9).toInt()));
+            check(api->AddSessionConfigEntry(options,"session.disable_cpu_ep_fallback","1"));
+        }
 #ifdef DCTS_TENSORRT_RTX
+        if(!compatibility){
         const auto epPath=dir.filePath(HostProviderFile);
         check(api->RegisterExecutionProviderLibrary(env,TensorRtProviderName,
               reinterpret_cast<const wchar_t *>(epPath.utf16())));
@@ -501,6 +536,7 @@ public:
         const char *values[]={"1","0"};
         check(api->SessionOptionsAppendExecutionProvider_V2(options,env,&device,1,keys,values,2));
         check(api->AddSessionConfigEntry(options,"ep.context_enable","0"));
+        }
 #else
         OrtCUDAProviderOptions cuda;cuda.device_id=0;cuda.cudnn_conv_algo_search=OrtCudnnConvAlgoSearchHeuristic;
         check(api->SessionOptionsAppendExecutionProvider_CUDA(options,&cuda));
@@ -526,12 +562,14 @@ public:
         }
         check(api->CreateCpuMemoryInfo(OrtArenaAllocator,OrtMemTypeDefault,&memory));
 #ifdef DCTS_TENSORRT_RTX
-        storageInfo["provider"]=TensorRtProviderName;
-        storageInfo["ort_version"]=HostOrtVersion;
+        storageInfo["provider"]=RvInferenceRuntime::provider(backend);
+        storageInfo["ort_version"]=version;
 #endif
+        storageInfo["device"]=backend;
         storageInfo["initialization_ms"]=initializationClock.nsecsElapsed()/1e6;
     }
     std::vector<float> infer(const QByteArray &rgb) {
+        if(openvino)return openvino->infer(rgb);
         const auto &geometry=view();
         if(rgb.size()!=geometry.rgbBytes())throw std::runtime_error("Invalid auxiliary RGB input");
         OrtValue *input=nullptr,*output=nullptr;
@@ -555,6 +593,7 @@ public:
     }
 
 private:
+    std::unique_ptr<RvOpenVinoModel> openvino;
     void check(OrtStatus *status) {if(status) {const std::string reason=api->GetErrorMessage(status);api->ReleaseStatus(status);throw std::runtime_error(reason);}}
     QLibrary library,protectedLibrary;
     DLL_DIRECTORY_COOKIE directory=nullptr;
@@ -585,6 +624,13 @@ AssistReader stdioAssistReader(){
 }
 
 RvAssistDepth::RvAssistDepth(QObject *parent):QObject(parent),m_root(RuntimeDiscovery::rvAssistRoot()) {
+    m_backend=RvInferenceSettings::instance()->selected();
+    connect(RvInferenceSettings::instance(),&RvInferenceSettings::selectionChanged,this,[this]{
+        const auto selected=RvInferenceSettings::instance()->selected();
+        if(selected==m_backend)return;
+        m_backend=selected;m_failed=false;m_resultAgeLimitMs=1000;m_inferenceTimeoutMs=1500;
+        cancel(tr("Inference device changed; waiting for a new paired frame"));
+    });
     if(!validExperiment(m_experiment))m_experiment=QStringLiteral("H");
     m_timeout.setSingleShot(true);
     connect(&m_timeout,&QTimer::timeout,this,&RvAssistDepth::handleTimeout);
@@ -697,6 +743,9 @@ void RvAssistDepth::cancel(const QString &reason) {
 void RvAssistDepth::fail(const QString &reason)
 {
     if(m_failed)return;
+    const bool integrity=reason.contains("fingerprint",Qt::CaseInsensitive)||reason.contains("protected",Qt::CaseInsensitive)
+        ||reason.contains("AES-GCM",Qt::CaseInsensitive)||reason.contains("identity",Qt::CaseInsensitive);
+    if(!integrity&&RvInferenceSettings::instance()->fallback(m_backend,reason))return;
     m_failed=true;
     const QPointer<RvAssistDepth> alive(this);
     cancel(reason);
@@ -706,7 +755,10 @@ void RvAssistDepth::fail(const QString &reason)
 QString RvAssistDepth::preflightError(const QString &model)
 {
 #ifdef DCTS_TENSORRT_RTX
-    if(!hasNvidiaAdapter())return tr("No NVIDIA GPU was detected. This version requires a supported NVIDIA RTX GPU.");
+    const auto *settings=RvInferenceSettings::instance();
+    if(settings->started()&&settings->selected().isEmpty())
+        return settings->scanning()?tr("Detecting available inference devices..."):tr("No usable inference device was found. Open Inference Device in Settings to retry.");
+    if(settings->selected()=="tensorrt"&&!hasNvidiaAdapter())return tr("No NVIDIA GPU was detected. Open Inference Device in Settings to select a CPU or compatible GPU.");
 #ifdef DCTS_INSTALLER_BUILD
     if(!hostModelAvailable(model))return tr("The required inference runtime or encrypted model files are missing or invalid.");
 #else
@@ -780,12 +832,14 @@ void RvAssistDepth::submitHd(const QImage &camera,const QJsonObject &source,quin
 }
 
 void RvAssistDepth::startWorker(bool forceStaging) {
-    if(m_destroying||!m_enabled||m_failed||m_pending.camera.isNull()||m_process.state()!=QProcess::NotRunning)return;
+    if(m_destroying||!m_enabled||m_failed||m_backend.isEmpty()||m_pending.camera.isNull()||m_process.state()!=QProcess::NotRunning)return;
     m_root=modelRoot(m_hostModel);
     if(!hostModelAvailable(m_hostModel)) {fail(tr("Selected host model runtime is missing; prepare the optional runtime first"));return;}
     m_ready=false;m_busy=false;m_stopping=false;m_buffer.clear();m_stderr.clear();m_token=QUuid::createUuid().toString(QUuid::WithoutBraces);
 
     auto environment=QProcessEnvironment::systemEnvironment();
+    environment.insert("RV_INFERENCE_BACKEND",m_backend);
+    environment.insert("RV_ASSIST_COMPAT_ROOT",RuntimeDiscovery::rvCompatibleRoot());
     for(const auto &key:environment.keys())if(key.startsWith("PYTHON")||key.startsWith("CONDA"))environment.remove(key);
     m_workerPaths.reset();
     auto paths=std::make_unique<RvAssistWorkerPaths>();
@@ -810,8 +864,8 @@ void RvAssistDepth::startWorker(bool forceStaging) {
     m_process.setArguments({"--rv-assist-worker",paths->runtime,m_token});
     m_workerPaths=std::move(paths);
     if(RvCameraView::isUniDepthNative16(m_hostModel))m_process.setArguments(m_process.arguments()<<m_hostModel);
-    m_process.start();m_timeout.start(HostWorkerLoadTimeoutMs);
-    emit statusChanged(tr("Loading the host-assisted inference model on the GPU..."));
+    m_process.start();m_timeout.start(m_backend=="tensorrt"?HostWorkerLoadTimeoutMs:180000);
+    emit statusChanged(tr("Loading the host-assisted inference model..."));
     emit loadingStateChanged(1);
 }
 bool RvAssistDepth::takePending() {
@@ -854,7 +908,7 @@ void RvAssistDepth::sendLatest() {
     m_current.serializeMs=serialize.nsecsElapsed()/1e6;
     m_busy=true;
     if(m_process.write(bytes)!=bytes.size()) {fail(tr("Cannot send paired frame to host depth process"));return;}
-    m_timeout.start(1500);
+    m_timeout.start(m_inferenceTimeoutMs);
 }
 void RvAssistDepth::handleTimeout() {
 
@@ -898,14 +952,16 @@ bool RvAssistDepth::acceptResponse(const QJsonObject &response,const QByteArray 
         {fail(tr("Invalid host depth packet size"));return false;}
     if(response["protocol"].toInt()!=1||response["token"]!=m_token) {fail(tr("Host depth protocol identity mismatch"));return false;}
     if(response["type"]=="fatal") {fail(response["error"].toString());return false;}
+    const auto expectedIdentity=RvInferenceRuntime::identity(m_backend);
     const bool identityMatches=supportsHostModel(m_hostModel)
-        &&response["weights_sha256"]==QLatin1String(view.weightsSha)&&response["graph_sha256"]==QLatin1String(view.graphSha)
-        &&response["precision"]==QLatin1String(view.precision)&&response["source_graph_sha256"]==QLatin1String(view.sourceSha)&&response["conversion"]==QLatin1String(view.conversion)
+        &&response["weights_sha256"]==QLatin1String(view.weightsSha)&&response["graph_sha256"]==expectedIdentity["graph_sha256"]
+        &&response["precision"]==expectedIdentity["precision"]&&response["source_graph_sha256"]==expectedIdentity["source_graph_sha256"]&&response["conversion"]==expectedIdentity["conversion"]
         &&(m_hostModel=="unidepth"||response["host_model"]==m_hostModel);
     if(response["type"]=="ready"&&!m_ready&&!m_busy&&body==0&&aux==0&&identityMatches) {
 #ifdef DCTS_TENSORRT_RTX
         const auto loading=response["model_loading"].toObject();
-        if(loading["provider"]!=TensorRtProviderName||loading["ort_version"]!=HostOrtVersion
+        if(loading["provider"]!=RvInferenceRuntime::provider(m_backend)||loading["device"]!=m_backend
+            ||(m_backend=="tensorrt"&&loading["ort_version"]!=HostOrtVersion)
 #ifdef DCTS_INSTALLER_BUILD
             ||loading["plaintext_sha256_verified"]!=true||loading["plaintext_file_used"]!=false
 #endif
@@ -913,6 +969,14 @@ bool RvAssistDepth::acceptResponse(const QJsonObject &response,const QByteArray 
             fail(tr("Host inference worker identity mismatch"));return false;
         }
 #endif
+        // Processing latency does not relax RGB/ToF capture-time pairing.
+        // Keep the original 1 s freshness rule for RTX. Compatibility workers
+        // get a bounded budget derived from a completed local model probe.
+        if(m_backend!="tensorrt"){
+            const auto measured=RvInferenceSettings::instance()->latencyMs(m_backend);
+            m_inferenceTimeoutMs=std::clamp(int(measured*6+2000),10000,120000);
+            m_resultAgeLimitMs=std::clamp(int(measured*4+1000),5000,120000);
+        }
         m_timeout.stop();m_ready=true;emit loadingStateChanged(2);
         emit statusChanged(tr("Host model ready; waiting for input"));
         if(!alive||!m_enabled||m_stopping)return false;
@@ -948,8 +1012,9 @@ bool RvAssistDepth::acceptResponse(const QJsonObject &response,const QByteArray 
             "rgb_timestamp_ns","tof_sequence","tof_timestamp_ns","pair_delta_ms","pair_clock_uncertainty_ms","pair_clock_source","tof_reused"})
             if(metadata.value(key)!=current.tof.metadata.value(key)){fail(tr("Host depth result belongs to another H.265 frame"));return false;}
     }
-    if(body&&supportsHostModel(m_hostModel)&&(metadata["assist_graph_sha256"]!=QLatin1String(view.graphSha)||metadata["assist_precision"]!=QLatin1String(view.precision)
-        ||metadata["assist_source_graph_sha256"]!=QLatin1String(view.sourceSha)||metadata["assist_conversion"]!=QLatin1String(view.conversion)
+    if(body&&supportsHostModel(m_hostModel)&&(metadata["assist_graph_sha256"]!=expectedIdentity["graph_sha256"]||metadata["assist_precision"]!=expectedIdentity["precision"]
+        ||metadata["assist_source_graph_sha256"]!=expectedIdentity["source_graph_sha256"]||metadata["assist_conversion"]!=expectedIdentity["conversion"]
+        ||metadata["assist_execution_device"]!=m_backend||metadata["assist_backend"]!=RvInferenceRuntime::backendName(m_backend)
         ||(RvCameraView::isWide(m_hostModel)&&(metadata["assist_camera_profile"]!="wide"||metadata["rectify_map_sha256"]!=QLatin1String(view.mapSha)
             ||metadata["depth_K"].toArray()!=RvCameraView::intrinsics(view)
             ||metadata["width"]!=view.outputWidth||metadata["height"]!=view.outputHeight))))
@@ -965,7 +1030,7 @@ bool RvAssistDepth::acceptResponse(const QJsonObject &response,const QByteArray 
             {fail(tr("Invalid dToF output support contract"));return false;}
         if(geometric){
             const auto fov=current.tof.metadata.value("assist_tof_fov_correction");
-            if(!RvCameraView::isWide(m_hostModel)||!fov.isDouble()||(fov!=1&&fov!=2)||metadata.value("assist_tof_fov_correction")!=fov)
+            if(!RvCameraView::isWide(m_hostModel)||!fov.isDouble()||(fov!=1&&fov!=2&&fov!=6)||metadata.value("assist_tof_fov_correction")!=fov)
                 {fail(tr("Invalid dToF output support contract"));return false;}
         }
         if(body){
@@ -991,7 +1056,8 @@ bool RvAssistDepth::acceptResponse(const QJsonObject &response,const QByteArray 
     const double measurementAge=current.tof.metadata["measurement_age_at_pair_ms"].toDouble()+monotonicMs()-current.tof.metadata["host_pair_enqueued_ms"].toDouble(monotonicMs());
     const bool checkMeasurementAge=tofDriven()||(reusesNativeMeasurements()&&!current.tof.samples.isEmpty());
     if(checkMeasurementAge){metadata["assist_measurement_age_ms"]=measurementAge;metadata["assist_drop_reasons"]=m_dropReasons;}
-    if(age>1000||(checkMeasurementAge&&measurementAge>1000)){m_dropReasons["result_expired"]=m_dropReasons["result_expired"].toInt()+1;emit cleared(tr("Host assisted depth result expired"));}
+    metadata["assist_processing_budget_ms"]=m_resultAgeLimitMs;
+    if(age>m_resultAgeLimitMs||(checkMeasurementAge&&measurementAge>m_resultAgeLimitMs)){m_dropReasons["result_expired"]=m_dropReasons["result_expired"].toInt()+1;emit cleared(tr("Host assisted depth result expired"));}
     else if(body!=expectedDepth||!response["error"].toString().isEmpty()){
         const auto source=response["error"].toString(tr("Invalid host assisted depth result")).toUtf8();
         const auto reason=QCoreApplication::translate("RvAssistFusion",source.constData());
@@ -1037,10 +1103,13 @@ int runAssistEngine(const QString &root,const QString &token,const AssistReader 
         writeResponse({{"protocol",1},{"type","fatal"},{"token",token},{"error",QString::fromUtf8(e.what())}});return 2;
     }
     const auto &view=model.view();
+    const auto executionIdentity=model.executionIdentity();
     const QString hostModel=model.hostModel;
     const bool vga=RvCameraView::isUniDepthVga(hostModel);
-    if(!writeResponse({{"protocol",1},{"type","ready"},{"token",token},{"weights_sha256",view.weightsSha},{"graph_sha256",view.graphSha},
-        {"precision",view.precision},{"source_graph_sha256",view.sourceSha},{"conversion",view.conversion},{"host_model",hostModel},{"model_loading",model.storageInfo}}))return 3;
+    QJsonObject ready=executionIdentity;
+    ready["protocol"]=1;ready["type"]="ready";ready["token"]=token;ready["weights_sha256"]=view.weightsSha;
+    ready["host_model"]=hostModel;ready["model_loading"]=model.storageInfo;
+    if(!writeResponse(ready))return 3;
     QByteArray rgb,tofBytes;QJsonObject request;
     RvAssistFusion::ScaleContinuity continuity;
     int previousInputRotation=-1;
@@ -1064,7 +1133,7 @@ int runAssistEngine(const QString &root,const QString &token,const AssistReader 
             if(metadata["source_protocol"]=="HDA1"&&!hd)throw std::runtime_error("Invalid H.265 clock pairing");
             const bool paired=hd?metadata["dtof_present"].toBool():true;
             if(RvCameraView::isUniDepthNative16(hostModel)&&!hd)throw std::runtime_error("Native16 requires managed H.265 capture");
-            if(!RvAssistDepth::validExperiment(experiment)||(experiment=="B"&&(!hd||!paired))||(reuse&&!hd))
+            if(!RvAssistDepth::validExperiment(experiment)||(reuse&&!hd))
                 throw std::runtime_error("Invalid ToF experiment request");
             const bool supported=metadata.value("assist_output_policy")==QLatin1String(RvAssistFusion::SupportPolicy);
             const bool geometric=metadata.value("assist_output_policy")==QLatin1String(RvAssistFusion::FieldOfViewPolicy);
@@ -1073,7 +1142,7 @@ int runAssistEngine(const QString &root,const QString &token,const AssistReader 
             int geometricFov=0;
             if(geometric){
                 const auto value=metadata.value("assist_tof_fov_correction");
-                if(!model.wide||!value.isDouble()||(value!=1&&value!=2))throw std::runtime_error("Invalid dToF output support contract");
+                if(!model.wide||!value.isDouble()||(value!=1&&value!=2&&value!=6))throw std::runtime_error("Invalid dToF output support contract");
                 geometricFov=value.toInt();
                 const auto nativeFov=metadata.contains("dtof_fov_correction")?metadata.value("dtof_fov_correction"):metadata.value("tof_fov_correction");
                 if(paired&&nativeFov!=value)throw std::runtime_error("Invalid dToF output support contract");
@@ -1163,11 +1232,12 @@ int runAssistEngine(const QString &root,const QString &token,const AssistReader 
             metadata["depth_bytes"]=view.depthBytes();metadata["depth_source"]=monocular?"host_unidepthv2_monocular":(held?"host_unidepthv2_held_scale":"host_unidepthv2_dtof");
             metadata["assist_network_width"]=view.networkWidth;metadata["assist_network_height"]=view.networkHeight;
             if(view.networkProfile)metadata["assist_network_profile"]=view.networkProfile;
-            metadata["assist_weights_sha256"]=view.weightsSha;metadata["assist_graph_sha256"]=view.graphSha;
+            metadata["assist_weights_sha256"]=view.weightsSha;
             metadata["assist_camera_profile"]=view.name;metadata["assist_host_model"]=hostModel;
-            metadata["assist_precision"]=view.precision;metadata["assist_conversion"]=view.conversion;metadata["assist_source_graph_sha256"]=view.sourceSha;
+            for(auto it=executionIdentity.begin();it!=executionIdentity.end();++it)metadata["assist_"+it.key()]=it.value();
             if(view.provisional){metadata["assist_provisional_model"]=true;metadata["assist_candidate_parity_mean_limit"]=view.parityMeanLimit;}
-            metadata["assist_backend"]=HostResultBackend;
+            metadata["assist_backend"]=RvInferenceRuntime::backendName(model.backend);
+            metadata["assist_execution_device"]=model.backend;
             metadata["assist_calibration_status"]=monocular?"monocular_not_dtof_corrected":(held?"historical_dtof_scale_only":"usable_initial_fusion_with_limits");
         }catch(const std::exception &e) {continuity.reset();output.clear();coverage.clear();response["error"]=QString::fromUtf8(e.what());}
         response["metadata"]=metadata;if(!writeResponse(response,output,coverage))return 3;
@@ -1182,11 +1252,41 @@ int runRvAssistWorker(const QString &root,const QString &token,const QString &ho
     return runAssistEngine(root,token,stdioAssistReader(),[](const auto &json,const auto &bytes,const auto &aux){return writePacket(json,bytes,aux);},hostModel);
 }
 
+int runRvInferenceProbe(const QString &backend,const QString &reportPath) {
+    QJsonObject report{{"schema",1},{"backend",backend},{"pass",false},{"hardware_capture_started",false}};
+    qputenv("RV_INFERENCE_BACKEND",backend.toUtf8());
+    try {
+        NativeModel model;model.initialize(RuntimeDiscovery::rvAssistRoot(),QLatin1String(RvCameraView::UniDepthVgaNative16));
+        QByteArray rgb(672*504*3,Qt::Uninitialized);
+        for(int i=0;i<rgb.size();++i)rgb[i]=char((i*13+i/672)%256);
+        const auto first=model.infer(rgb);rgb[0]^=127;
+        for(int i=0;i<672*504;++i)rgb[i]=char(255-quint8(rgb[i]));
+        const auto second=model.infer(rgb);
+        bool changed=first!=second;double total=0,maximum=0;QJsonArray timings;
+        for(int i=0;i<3;++i){QElapsedTimer clock;clock.start();const auto depth=model.infer(rgb);
+            const double ms=clock.nsecsElapsed()/1e6;timings.append(ms);total+=ms;maximum=std::max(maximum,ms);
+            if(depth.size()!=640*480)throw std::runtime_error("Invalid inference probe output");}
+        if(!changed)throw std::runtime_error("Inference probe did not respond to changed RGB");
+        report["pass"]=true;report["checks"]=5;report["mean_ms"]=total/3;report["maximum_ms"]=maximum;
+        report["fps"]=3000/total;report["timings_ms"]=timings;report["loading"]=model.storageInfo;
+        report["model_identity"]=model.executionIdentity();report["output_shape"]=QJsonArray{1,1,480,640};
+    }catch(const std::exception &error){report["error"]=QString::fromUtf8(error.what());}
+    QFile output(reportPath);if(!output.open(QIODevice::WriteOnly))return 3;
+    output.write(QJsonDocument(report).toJson());return report["pass"].toBool()?0:1;
+}
+
 int runRvAssistDepthTests(const QString &reportPath) {
     RvAssistDepth assist;
     const auto &profile=RvCameraView::Rgb672VgaFp16;
     QEventLoop loop;
     QJsonObject report;
+    QJsonArray statuses,cleared;
+    QObject::connect(&assist,&RvAssistDepth::statusChanged,&loop,[&](const QString &message){
+        if(statuses.size()<24)statuses.append(message);
+    });
+    QObject::connect(&assist,&RvAssistDepth::cleared,&loop,[&](const QString &message){
+        if(cleared.size()<24)cleared.append(message);
+    });
     QObject::connect(&assist,&RvAssistDepth::inferenceUnavailable,&loop,[&](const QString &,const QString &detail){
         report["error"]=detail;
         loop.quit();
@@ -1207,12 +1307,22 @@ int runRvAssistDepthTests(const QString &reportPath) {
         {"rectify_map_sha256",QLatin1String(RvCameraView::Rgb672VgaFp16.mapSha)},{"assist_camera_profile","wide"},
         {"frame_id",1},{"generation",1},{"host_decoded_monotonic_ns",double(monotonicMs())*1000000.},
         {"boot_id","01234567-89ab-cdef-0123-456789abcdef"}};
-    // Load first, then submit the RGB fixture with a fresh timestamp once ready.
-    QObject::connect(&assist,&RvAssistDepth::loadingStateChanged,&loop,[&](int state){
-        if(state!=2)return;
+    // A real video stream supplies fresh frames while the first GPU request
+    // warms up. Keep the production freshness gate, and exercise that stream
+    // instead of relying on one cold-start frame surviving the GPU's 1 s gate.
+    QTimer frames;
+    frames.setInterval(100);
+    qint64 frameId=0;
+    const auto submit=[&]{
         auto frame=source;
+        frame["frame_id"]=++frameId;
         frame["host_decoded_monotonic_ns"]=double(monotonicMs())*1000000.;
         assist.submitHd(image,frame,1);
+    };
+    QObject::connect(&frames,&QTimer::timeout,&loop,submit);
+    QObject::connect(&assist,&RvAssistDepth::loadingStateChanged,&loop,[&](int state){
+        if(state!=2)return;
+        frames.start();submit();
     });
     assist.m_pending.camera=image;
     const bool forceStaging=qEnvironmentVariable("DCTS_TEST_FORCE_WORKER_STAGING")=="1";
@@ -1226,9 +1336,11 @@ int runRvAssistDepthTests(const QString &reportPath) {
     report["program"]=assist.m_process.program();
     report["working_directory"]=assist.m_process.workingDirectory();
     if(!report.contains("error"))loop.exec();
+    frames.stop();
+    report["statuses"]=statuses;report["cleared"]=cleared;report["submitted_frames"]=frameId;
     const bool passed=report["depth_bytes"].toInt()==profile.depthBytes()
         &&report["width"]==profile.outputWidth&&report["height"]==profile.outputHeight
-        &&report["backend"]==HostResultBackend;
+        &&report["backend"]==RvInferenceRuntime::backendName(assist.m_backend);
     report["pass"]=passed;
     QFile file(reportPath);
     if(!file.open(QIODevice::WriteOnly))return 3;

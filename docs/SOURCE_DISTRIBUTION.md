@@ -1,6 +1,6 @@
 # 公开源码备份范围
 
-公开仓库为 [QinChen1998/depth-camera-and-tactile-sensor](https://github.com/QinChen1998/depth-camera-and-tactile-sensor)。2026-11-07 当前源码更新至 `main`，包含 USB 完整检查与替换导入、已有设备重复连接、临时 FOV 校验及配套测试。本次仅更新源码，不制作或发布新的 Release。
+公开仓库为 [QinChen1998/depth-camera-and-tactile-sensor](https://github.com/QinChen1998/depth-camera-and-tactile-sensor)。2026-11-09 按用户本次明确要求，当前脱敏源码更新到 `main`；对应 v1.1.7 发布包含 UniDepth 多后端选择、混合 INT8、当前 F6 标定与原生 ToF 两档、USB 接入修复和旧板端模型退役。安装与验证见 [v1.1.7 记录](INSTALLER_1_1_7.md)。
 
 历史 v1.1.6 源码保留在 `backup/release-v1.1.6-20261106`；已有安装包位于 [v1.1.6 Release](https://github.com/QinChen1998/depth-camera-and-tactile-sensor/releases/tag/v1.1.6)，不包含本次后续源码改动。
 
@@ -13,4 +13,4 @@
 - 新增板端私有 runtime/common 实现及其原始 CAD、历史实验和构建资料。
 - 本机解包的 VLC 运行目录、安装版许可副本、依赖与 SDK 压缩包。源码内原有 LICENSE、第三方许可和来源声明继续保留。
 
-公开版本中的真实设备序列号、公钥和预登记 known_hosts 经过脱敏；本地源码和实际运行资源保留原值。公开备份没有完整的授权模型、板端运行材料和开发机工具链，构建时需另行提供这些本地依赖。安装器包含三项成像方案所需的受保护运行资源，源文件排除规则不会删改安装载荷。
+公开版本中的真实设备序列号、公钥和预登记 known_hosts 经过脱敏；本地源码和实际运行资源保留原值。公开安装程序从脱敏源码重新构建，并扫描交付载荷中的已知设备身份。公开备份没有完整的授权模型、板端运行材料和开发机工具链，构建时需另行提供这些本地依赖。2026-11-08 本地开发版已彻底移除 Tiny；当前安装构建仅收集主机 H 及原生采集支持，原生 ToF 两档不需要推理模型。历史 v1.1.6 安装包保留当时的三模型资源。验证历史及私有构建资料仍只在本地保留，不上传。源文件排除规则不会删改安装载荷。

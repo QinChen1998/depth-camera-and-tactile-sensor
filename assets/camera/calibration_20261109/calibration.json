@@ -1,0 +1,163 @@
+{
+  "schema": 1,
+  "release_id": "RV1103_SC3336_TMF8829_20261109",
+  "publication_date": "2026-11-09",
+  "authority": "User designated these parameters as the authoritative release.",
+  "camera": {
+    "sensor": "SC3336",
+    "size_wh": [
+      2304,
+      1296
+    ],
+    "format": "NV12",
+    "range": "full",
+    "pixel_coordinates": "Zero-based integer coordinates at pixel centers; u right, v down.",
+    "raw_rotation": 0,
+    "raw_mirror": false,
+    "isp_ldch": false,
+    "isp_cac": false,
+    "K": [
+      [
+        940.4397897153825,
+        0.0,
+        1231.8699416170778
+      ],
+      [
+        0.0,
+        940.2612793186894,
+        644.2999614876071
+      ],
+      [
+        0.0,
+        0.0,
+        1.0
+      ]
+    ],
+    "D": [
+      -0.007446775040131036,
+      0.0159979635747368,
+      -0.000779273224955335,
+      -0.0003941313124255491,
+      -0.010015534878057505
+    ],
+    "D_order": [
+      "k1",
+      "k2",
+      "p1",
+      "p2",
+      "k3"
+    ],
+    "distortion_model": "OpenCV Brown pinhole, normalized coordinates"
+  },
+  "tof": {
+    "sensor": "TMF8829",
+    "fov_correction": 6,
+    "native_order": true,
+    "range_unit_m": 0.00025,
+    "range_definition": "Native radial range along each normalized ray",
+    "snr": 6,
+    "display_range_max_m": 2.5,
+    "signal_present": true,
+    "modes": {
+      "48x32": {
+        "rows": 32,
+        "cols": 48,
+        "mode": 11,
+        "period_ms": 66,
+        "iterations_k": 600,
+        "nominal_K_integer_index": [
+          [
+            36.0,
+            0,
+            23.95
+          ],
+          [
+            0,
+            32.0,
+            15.1
+          ],
+          [
+            0,
+            0,
+            1.0
+          ]
+        ]
+      },
+      "16x16": {
+        "rows": 16,
+        "cols": 16,
+        "mode": 5,
+        "period_ms": 33,
+        "iterations_k": 600,
+        "nominal_K_integer_index": [
+          [
+            12.0,
+            0,
+            7.65
+          ],
+          [
+            0,
+            16.0,
+            7.3
+          ],
+          [
+            0,
+            0,
+            1.0
+          ]
+        ]
+      }
+    },
+    "ray_formula": "x=(col+0.5-cols/2)/(0.75*cols)-((F&3)-1.5)/40; y=(row+0.5-rows/2)/rows-(((F>>2)&3)-1.5)/40; q=normalize([x,y,1])",
+    "distance_correction": "identity; no affine plane-Z correction applied to radial samples"
+  },
+  "extrinsics": {
+    "M": [
+      [
+        0.0,
+        -1.0,
+        0.0
+      ],
+      [
+        -1.0,
+        0.0,
+        0.0
+      ],
+      [
+        0.0,
+        0.0,
+        1.0
+      ]
+    ],
+    "R": [
+      [
+        -0.9999396446036406,
+        8.040110862748254e-05,
+        -0.010986386376199872
+      ],
+      [
+        -0.00044835974469064016,
+        -0.9994388220656817,
+        0.0334938788661903
+      ],
+      [
+        -0.010977528113594589,
+        0.03349678318324678,
+        0.999378536588059
+      ]
+    ],
+    "t_m": [
+      -0.0032695857703695865,
+      0.004480164067377467,
+      -0.00391875908798699
+    ],
+    "definition": "P_camera_m = R @ M @ q_native * (range_uq2*0.00025) + t_m",
+    "output_depth": "camera-Z meters",
+    "R_frame": "corrected ToF frame to raw camera frame",
+    "M_role": "Native indexing reflection applied once; det(M)=-1"
+  },
+  "sources": {
+    "intrinsics_sha256": "fe4e3d87bc7e44320d7b34c9a940075475997634bb73502fff195ff111d0edb5",
+    "extrinsics_sha256": "972f1030f38a2860ec26009c070f4631b6a97a992ebee1accdd971604e557565"
+  }
+}

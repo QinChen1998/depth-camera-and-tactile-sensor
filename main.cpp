@@ -4,6 +4,8 @@
 #include "RuntimeDiscovery.h"
 #include "UiStyle.h"
 #include "sensors/RvAssistDepth.h"
+#include "sensors/RvInferenceSettings.h"
+#include "sensors/RvInferenceRuntime.h"
 #include "sensors/RvDepthDiagnostic.h"
 #include "sensors/RvDeviceStore.h"
 #include "sensors/RvUsbEnrollment.h"
@@ -14,6 +16,7 @@
 #include <QSettings>
 #include <QStandardPaths>
 #include <QTemporaryDir>
+#include <QTimer>
 #include <cstring>
 #include <memory>
 
@@ -25,10 +28,8 @@ int runTactileVisualizationTests(const QString &);
 int runRvAssistRecoveryTests(const QString &);
 int runRvTunerTests(const QString &);
 int runLiveValidation(SensorMainWindow &,const QString &,int);
-int runTinyNv12SwitchValidation(SensorMainWindow&,const QString&);
-int runLiteSr384LiveValidation(SensorMainWindow &,const QString &);
+int runImagingSwitchValidation(SensorMainWindow&,const QString&);
 int runHostAssistLiveValidation(SensorMainWindow &,const QString &);
-int runBoardThermalLiveValidation(SensorMainWindow &,const QString &);
 int runHostThermalLiveValidation(SensorMainWindow &,const QString &);
 int runUsbEnrollmentLiveValidation(SensorMainWindow &,const QString &);
 
@@ -83,6 +84,18 @@ void configureSettings(const QString &directory,bool seedDefaults,bool importOri
 int main(int argc,char **argv)
 {
     qputenv("RV_UNIDEPTH_EXPERIMENT","H");
+    if(argc>1&&(std::strcmp(argv[1],"--inference-probe")==0||std::strcmp(argv[1],"--inference-enumerate")==0
+               ||std::strcmp(argv[1],"--inference-discovery-test")==0)){
+        QCoreApplication app(argc,argv);const auto args=app.arguments();
+        if(qEnvironmentVariable("RV_TEST_OFFLINE_ONLY")!="1")return 3;
+        if(args[1]=="--inference-enumerate"&&args.size()==3)return RvInferenceRuntime::writeEnumeration(args[2]);
+        if(args[1]=="--inference-probe"&&args.size()==4)return runRvInferenceProbe(args[2],args[3]);
+        if(args[1]=="--inference-discovery-test"&&args.size()==3){
+            QTemporaryDir settings;if(!settings.isValid())return 3;configureSettings(settings.path(),false);
+            return runRvInferenceDiscoveryTest(args[2]);
+        }
+        return 3;
+    }
     if(argc>1&&std::strcmp(argv[1],"--rv-assist-path-test")==0){
         QCoreApplication app(argc,argv);
         const auto args=app.arguments();
@@ -108,14 +121,12 @@ int main(int argc,char **argv)
     app.setWindowIcon(QIcon(QStringLiteral(":/branding/cx.ico")));
     const auto arguments=app.arguments();const QString flag=arguments.value(1),report=arguments.value(2);
     const bool hostAssistLive=flag=="--host-assist-live-validation";
-    const bool boardThermalLive=flag=="--board-thermal-live-validation";
     const bool hostThermalLive=flag=="--host-thermal-live-validation";
     const bool usbEnrollmentLive=flag=="--usb-enrollment-live-validation";
-    const bool tinySwitchLive=flag=="--tiny-nv12-switch-validation";
-    const bool rectLive=tinySwitchLive||flag=="--litesr384-live-validation";
-    const bool live=usbEnrollmentLive||hostAssistLive||boardThermalLive||hostThermalLive||rectLive||flag=="--live-validation";
+    const bool imagingSwitchLive=flag=="--imaging-switch-validation";
+    const bool live=usbEnrollmentLive||hostAssistLive||hostThermalLive||imagingSwitchLive||flag=="--live-validation";
     if(live&&(qEnvironmentVariable("DCTS_LIVE_ENABLE")!="1"||qEnvironmentVariable("DCTS_LIVE_SERIAL").isEmpty()
-        ||(!usbEnrollmentLive&&!hostAssistLive&&!boardThermalLive&&!hostThermalLive&&!rectLive&&qEnvironmentVariable("DCTS_ALLOW_SAVED_TOF_SWITCH")!="1")||qEnvironmentVariable("RV_TEST_OFFLINE_ONLY")=="1"))return 3;
+        ||(!usbEnrollmentLive&&!hostAssistLive&&!hostThermalLive&&qEnvironmentVariable("DCTS_ALLOW_SAVED_TOF_SWITCH")!="1")||qEnvironmentVariable("RV_TEST_OFFLINE_ONLY")=="1"))return 3;
     const bool testing=!flag.isEmpty();std::unique_ptr<QTemporaryDir> temporary;
     if(testing){
 #ifdef DCTS_INSTALLER_BUILD
@@ -128,7 +139,9 @@ int main(int argc,char **argv)
         if(!temporary->isValid())return 3;
     }
     if(live){
-        const auto source=configurationDirectory();
+        // Explicitly gated live tests may read an existing development profile
+        // while keeping installed user settings and credentials untouched.
+        const auto source=qEnvironmentVariable("DCTS_LIVE_CONFIG_SOURCE",configurationDirectory());
         const auto preferences="/preferences/DepthCameraAndTactileSensor/DepthCameraAndTactileSensor.ini";
         QDir().mkpath(temporary->path()+"/preferences/DepthCameraAndTactileSensor");
         if(!QFile::copy(source+"/devices.json",temporary->path()+"/devices.json")
@@ -140,7 +153,10 @@ int main(int argc,char **argv)
         }
     }
     configureSettings(testing?temporary->path():configurationDirectory(),
-        !testing||flag=="--port-ui-smoke-test");
+        !testing||flag=="--port-ui-smoke-test"||flag=="--inference-ui-test");
+    // USB validation observes H; normal launches retain the user's selected
+    // native/H scheme. This setting exists only in the temporary test store.
+    if(usbEnrollmentLive)QSettings().setValue("depth/imagingScheme","host_unidepth_rgb672_vga_fp16_tof16");
     LanguageManager language;
     if(flag=="--tactile-3d-test")return runTactile3DTests(report);
     if(flag=="--tactile-render-test")return runTactileRenderSmoke(report);
@@ -160,14 +176,14 @@ int main(int argc,char **argv)
         }
         return passed?0:1;
     }
-    if(testing&&flag!="--port-ui-smoke-test"&&!live)return 3;
+    if(flag=="--inference-ui-test"&&qEnvironmentVariable("RV_TEST_OFFLINE_ONLY")!="1")return 3;
+    if(testing&&flag!="--port-ui-smoke-test"&&flag!="--inference-ui-test"&&!live)return 3;
     SensorMainWindow window(&language);window.show();
+    if(flag=="--inference-ui-test")return runRvInferenceUiTest(&window,report);
     if(usbEnrollmentLive)return runUsbEnrollmentLiveValidation(window,report);
     if(hostAssistLive)return runHostAssistLiveValidation(window,report);
-    if(boardThermalLive)return runBoardThermalLiveValidation(window,report);
     if(hostThermalLive)return runHostThermalLiveValidation(window,report);
-    if(tinySwitchLive)return runTinyNv12SwitchValidation(window,report);
-    if(rectLive)return runLiteSr384LiveValidation(window,report);
+    if(imagingSwitchLive)return runImagingSwitchValidation(window,report);
     if(live)return runLiveValidation(window,report,300);
     if(flag=="--port-ui-smoke-test"){
         const int result=runPortSmokeTests(window,language,report);
@@ -185,7 +201,10 @@ int main(int argc,char **argv)
         return result?result:(preserved?0:1);
     }
     if(qEnvironmentVariable("RV_TEST_OFFLINE_ONLY")!="1")window.tactile()->display()->connectDefaultSerial();
-    watchRvUsbDevices(window.session(), &window);
-    window.monitorCameraConnection();
+    // Device discovery uses only local synthetic inputs. Delay automatic RV
+    // startup until the usable inference choices are known.
+    auto *inference=RvInferenceSettings::instance();
+    QObject::connect(inference,&RvInferenceSettings::finished,&window,[&window]{watchRvUsbDevices(window.session(),&window);},Qt::SingleShotConnection);
+    QTimer::singleShot(0,inference,&RvInferenceSettings::refresh);
     app.setQuitOnLastWindowClosed(true);return app.exec();
 }

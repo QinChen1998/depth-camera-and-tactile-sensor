@@ -27,7 +27,7 @@ def sloc(path):
 def category(relative):
     if relative.startswith('tests/'):
         return 'tests'
-    if relative.startswith('tools/litesr_board/') and ('/runtime/' in relative or '/common/' in relative):
+    if relative.startswith('tools/rv_capture/') and ('/runtime/' in relative or '/common/' in relative):
         return 'board_runtime'
     if relative.startswith('tools/') and Path(relative).suffix not in {'.cpp', '.h', '.inc'}:
         return 'scripts'

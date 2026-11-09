@@ -1,6 +1,7 @@
 #include "RvDepthCoverage.h"
 #include "RvAssistFusion.h"
 #include "RvCameraView.h"
+#include "RvInferenceRuntime.h"
 #include <QtCore/QtEndian>
 #include <algorithm>
 #include <cmath>
@@ -22,12 +23,12 @@ DepthField depthField(const QByteArray &depth,const QJsonObject &metadata){
     // guess geometry when a paired measurement's FOV is missing.
     const auto fov=hasNativeFov?(metadata.contains("dtof_fov_correction")?metadata["dtof_fov_correction"]:metadata["tof_fov_correction"])
         :metadata["assist_tof_fov_correction"];
-    if((fov!=1&&fov!=2)||(!hasNativeFov&&metadata["dtof_present"]!=false)
+    if((fov!=1&&fov!=2&&fov!=6)||(!hasNativeFov&&metadata["dtof_present"]!=false)
        ||(metadata.contains("assist_tof_fov_correction")&&metadata["assist_tof_fov_correction"]!=fov)
        ||(metadata.contains("dtof_fov_correction")&&metadata.contains("tof_fov_correction")
        &&metadata["dtof_fov_correction"]!=metadata["tof_fov_correction"])
        ||metadata["rectify_map_sha256"]!=QLatin1String(profile.mapSha)
-       ||metadata["assist_graph_sha256"]!=QLatin1String(profile.graphSha)
+       ||!RvInferenceRuntime::validGraphMetadata(metadata)
        ||metadata["depth_K"].toArray()!=RvCameraView::intrinsics(profile))return result;
     const auto fit=metadata["assist_fusion"].toObject();
     if(fit["output_policy"]!=QLatin1String(RvAssistFusion::FieldOfViewPolicy)||fit["fov_geometry_only"]!=true)return result;

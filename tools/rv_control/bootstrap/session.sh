@@ -5,7 +5,7 @@ ulimit -c 0
 export TMF8829_I2C_DEV=/dev/i2c-3 TMF8829_SPI_DEV=/dev/spidev0.0 TMF8829_SPI_HZ=5000000
 export TMF8829_ENABLE_GPIO=54 TMF8829_CS_GPIO=54
 export TMF_HOST_READBACK=/run/dtof_candidates/sensor_readback.json
-case "${1:-}" in 14|16|18) ;; *) exit 2;; esac
+case "${1:-}" in 14|24|25) ;; *) exit 2;; esac
 root=/root/dtof_candidates_20261009
 state=/run/dtof_candidates
 owner=/run/r144_fusion_20260923
@@ -56,18 +56,18 @@ owned=1
 mkdir -p /run/extrinsic_capture
 cd /root/r144_depth
 case "$1" in
- 14|16|18) available=$(awk '/MemAvailable:/ {print $2}' /proc/meminfo)
-  [ "$available" -ge 8192 ] || { echo 'LiteSR startup needs at least 8192 KiB before capture' >&2;exit 2; }
-  signal=-g; rate=4; distance=11;engine="$root/litesr_gui.sh";;
+ 14|24|25) available=$(awk '/MemAvailable:/ {print $2}' /proc/meminfo)
+  [ "$available" -ge 8192 ] || { echo 'Native capture startup needs at least 8192 KiB before capture' >&2;exit 2; }
+  engine="$root/native_gui.sh";;
  *) echo 'Retired board candidate' >&2;exit 2;;
 esac
-if [ "$1" = 14 ]; then
- # One camera owner: only rkipc opens VI/AIQ; LiteSR emits depth/native data.
+if [ "$1" = 14 ] || [ "$1" = 24 ] || [ "$1" = 25 ]; then
+ # One camera owner: only rkipc opens VI/AIQ; the capture server emits native measurements.
  hd_runtime="$state/hd_$2"
  umask 077
  mkdir "$hd_runtime" "$hd_runtime/storage"
  awk -v runtime="$hd_runtime" -f /root/r144_depth/camera_rtsp_config.awk /userdata/rkipc.ini > "$hd_runtime/camera.ini"
- # A half-frame line buffer gives the encoder DDR scheduling headroom while NPU runs.
+ # A half-frame line buffer gives the encoder DDR scheduling headroom during native capture.
  # Change only this generation's private video.source section, never the OEM ini.
  awk '/^\[/ {source=($0=="[video.source]")} source && /^buffer_line = / {$0="buffer_line = 648";count++} {print} END {if(count!=1)exit 2}' "$hd_runtime/camera.ini" > "$hd_runtime/camera.hd.ini"
  mv "$hd_runtime/camera.hd.ini" "$hd_runtime/camera.ini"
@@ -79,19 +79,19 @@ if [ "$1" = 14 ]; then
  echo "$encoder" > "$hd_runtime/encoder.pid";echo "$encoder_born" > "$hd_runtime/encoder.start"
 fi
 sensor_output="$state/sensor.log"
-case "$1" in 14|16|18)
+case "$1" in 14|24|25)
  [ -p "$state/sensor.pipe" ] || mkfifo "$state/sensor.pipe"
  awk -v base="$state/sensor.log" -f /root/r144_depth/bounded_log.awk < "$state/sensor.pipe" &
  sensor_logger=$!;sensor_logger_born=$(sed 's/.*) //' /proc/$sensor_logger/stat | awk '{print $20}')
  sensor_output="$state/sensor.pipe";;
 esac
-# Preserve prompt FIFO reads while encoding and NPU work overlap. This is CFS
+# Preserve prompt FIFO reads while encoding and native transport overlap. This is CFS
 # nice, not a realtime policy; only the shared HD capture and its threads inherit it.
 launch_tof(){
  mode=$1;shift
  # Saved settings may contain a literal -g after parameter tuning. Apply the
  # mode policy here so a later save cannot re-enable Signal for host inference.
- if [ "$mode" = 14 ];then
+ if [ "$mode" = 14 ] || [ "$mode" = 24 ] || [ "$mode" = 25 ];then
   remaining=$#
   while [ "$remaining" -gt 0 ];do
    argument=$1;shift
@@ -99,7 +99,7 @@ launch_tof(){
    remaining=$((remaining-1))
   done
  fi
- if [ "$mode" = 14 ] || [ "$mode" = 16 ] || [ "$mode" = 18 ];then exec nice -n -5 "$@";fi
+ if [ "$mode" = 14 ] || [ "$mode" = 24 ] || [ "$mode" = 25 ];then exec nice -n -5 "$@";fi
  exec "$@"
 }
 CANONICAL_RUN_ID="dtof_$2" CANONICAL_WARNING_POLICY=observe-0x08 launch_tof "$1" ./tmf8829_ext -m -s 100 -g -b 1 -d 11 -p 66 -t 0 -o 1 -r 6 -i 600 --socket /run/extrinsic_capture/tof.sock --quiet --poll-us 1000 > "$sensor_output" 2>&1 &

@@ -149,11 +149,8 @@ void RtspCameraPage::setSessionController(RvSessionController *session)
         connect(session,&RvSessionController::assistStateChanged,this,&RtspCameraPage::updateSessionUi);
         connect(session,&RvSessionController::deviceChanged,this,&RtspCameraPage::updateSessionUi);
         connect(session, &RvSessionController::cameraFrameReady, this, [this](const QImage &image) {
-            if(m_session&&m_session->depthOnlyMode()){m_video->clear();return;}
             const bool sizeChanged = m_video->image().size() != image.size();
-            const bool tiny=m_session&&RvDtofCandidates::isTinyNv12(m_session->dtofCandidateMode())
-                &&image.size()==QSize(TinyNv12Contract::Width,TinyNv12Contract::Height);
-            m_video->setImage(image,tiny?QSizeF(TinyNv12Contract::PresentationWidth,TinyNv12Contract::PresentationHeight):QSizeF(image.size()));
+            m_video->setImage(image,QSizeF(image.size()));
             if (sizeChanged) updateSessionUi();
         });
         connect(session, &RvSessionController::streamCleared, this, [this] {
@@ -175,7 +172,6 @@ void RtspCameraPage::setDisplayRotationDegrees(int degrees) { m_imageSettings->s
 void RtspCameraPage::updateSessionUi()
 {
     const bool available = !m_session.isNull();
-    if(available&&m_session->depthOnlyMode())m_video->clear();
     const bool busy = available && m_session->busy();
     const bool stopped = !available || m_session->userStopped();
     m_startButton->setEnabled(available && !busy && stopped);

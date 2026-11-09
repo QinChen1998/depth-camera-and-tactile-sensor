@@ -16,6 +16,7 @@
 #include <QtWidgets/QDialog>
 #include <QtWidgets/QDialogButtonBox>
 #include <QtWidgets/QDoubleSpinBox>
+#include <QtWidgets/QInputDialog>
 #include <QtWidgets/QFormLayout>
 #include <QtWidgets/QMessageBox>
 #include <QtWidgets/QPushButton>
@@ -82,18 +83,24 @@ DepthMapWidget::DepthMapWidget(QWidget *parent)
     m_rvModelCaption->setObjectName("rvDepthModelLabel");
     m_rvModel = new QComboBox(m_rvControls);
     m_rvModel->setObjectName("rvDepthModel");
-    for (const char *model : {"board_litesr_near_384x256_host_contour_hd"})
-        m_rvModel->addItem(QString::fromLatin1(model), QString::fromLatin1(model));
     if(RvAssistDepth::supportsHostModel(QLatin1String(RvCameraView::UniDepthVgaNative16))){
         const auto scheme=QStringLiteral("host_")+QLatin1String(RvCameraView::UniDepthVgaNative16);
         m_rvModel->addItem(scheme,scheme);
     }
-    m_rvModel->addItem(QStringLiteral("Tiny NV12 128x80"),QString::fromLatin1(TinyNv12Contract::Scheme));
+    m_rvModel->addItem(QString(),"board_native_tof48");
+    m_rvModel->addItem(QString(),"board_native_tof48_high_accuracy");
     m_rvModel->setMinimumWidth(0);
     m_rvModel->setSizeAdjustPolicy(QComboBox::AdjustToContents);
     m_rvModel->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Preferred);
     rvLayout->addWidget(m_rvModelCaption);
     rvLayout->addWidget(m_rvModel);
+    bool angleValid=false;
+    const auto savedAngle=QSettings().value("depth/nativeTofRotationDegrees",90).toInt(&angleValid);
+    m_nativeTofRotation=angleValid&&savedAngle>=0&&savedAngle<360?savedAngle:90;
+    QSettings().setValue("depth/nativeTofRotationDegrees",m_nativeTofRotation);
+    m_nativeTofAngle=new QPushButton(m_rvControls);m_nativeTofAngle->setObjectName("rvNativeTofAngle");
+    connect(m_nativeTofAngle,&QPushButton::clicked,this,&DepthMapWidget::editNativeTofRotation);
+    rvLayout->addWidget(m_nativeTofAngle);
     m_rvStart = new QPushButton(m_rvControls); m_rvStart->setObjectName("rvDepthStart");
     m_rvStop = new QPushButton(m_rvControls); m_rvStop->setObjectName("rvDepthStop");
     m_rvReconnect = new QPushButton(m_rvControls); m_rvReconnect->setObjectName("rvDepthReconnect");
@@ -109,13 +116,11 @@ DepthMapWidget::DepthMapWidget(QWidget *parent)
     // the viewport height alongside the wrapped controls.
     m_depthTabs=new DepthViewTabs(this);m_depthTabs->setObjectName("rvDepthTabs");
     m_depthTabs->setStyleSheet(QStringLiteral("QTabWidget::pane { border: 0; margin: 0; padding: 0; }"));
-    m_rvCanvas=new RvDepthView(m_depthTabs);
+    m_rvCanvas=new RvDepthView(m_depthTabs);m_rvCanvas->setObjectName("rvNativeDepthCanvas");m_rvCanvas->setRadialMode(false);m_rvCanvas->setNativeGridSize(QSize(48,32));
+    m_rvCanvas->setNativeDisplayMirrored(true);
+    syncNativeTofRotation();
     m_assistCanvas=new RvDepthView(m_depthTabs);m_assistCanvas->setObjectName("rvAssistDepthCanvas");
     m_depthTabs->addTab(m_rvCanvas,QString());m_depthTabs->addTab(m_assistCanvas,QString());
-    m_candidateCanvas=new RvDepthView(m_depthTabs);
-    m_candidateCanvas->setObjectName("rvDtofFastDepthCanvas");m_candidateCanvas->setRadialMode();m_candidateCanvas->setNativeGridSize(QSize(48,32));
-    m_depthTabs->addTab(m_candidateCanvas,QString());
-    setProperty("dtofComputeLocation","rv1103");
     m_depthTabs->tabBar()->hide();layout->addWidget(m_depthTabs,1);
     m_switchOverlay=new QWidget(m_depthTabs);m_switchOverlay->setObjectName("rvImagingSwitchOverlay");
     m_switchOverlay->setAutoFillBackground(true);
@@ -148,11 +153,9 @@ DepthMapWidget::DepthMapWidget(QWidget *parent)
     auto *saveControls = UiStyle::wrappingRow(statusRow, ImagePresentation::Spacing);
     m_rvCanvas->setDisplayRotationDegrees(displayRotationDegrees());
     m_assistCanvas->setDisplayRotationDegrees(displayRotationDegrees());
-    m_candidateCanvas->setDisplayRotationDegrees(displayRotationDegrees());
     connect(m_imageSettings.data(), &ImageDisplaySettings::rotationChanged, this, [this](int degrees) {
         m_rvCanvas->setDisplayRotationDegrees(degrees);
         m_assistCanvas->setDisplayRotationDegrees(degrees);
-        m_candidateCanvas->setDisplayRotationDegrees(degrees);
     });
     m_saveButton = new QPushButton(this);m_saveButton->setObjectName("depthMapSave");
     m_saveCamera = new QCheckBox(this);m_saveCamera->setObjectName("depthMapSaveCamera");
@@ -168,8 +171,8 @@ DepthMapWidget::DepthMapWidget(QWidget *parent)
     m_blackOutsideRange->setObjectName("depthBlackOutsideRange");
     m_blackOutsideRange->setChecked(m_imageSettings->blackOutsideRange());
     saveControls->addWidget(m_blackOutsideRange);
-    connect(m_blackOutsideRange, &QCheckBox::toggled, m_imageSettings.data(), &ImageDisplaySettings::setBlackOutsideRange);
-    connect(m_imageSettings.data(), &ImageDisplaySettings::blackOutsideRangeChanged, m_blackOutsideRange, &QCheckBox::setChecked);
+    connect(m_blackOutsideRange, &QCheckBox::toggled, this, [this](bool enabled){m_imageSettings->setBlackOutsideRange(enabled);});
+    connect(m_imageSettings.data(), &ImageDisplaySettings::blackOutsideRangeChanged, this, [this](bool enabled){const QSignalBlocker block(m_blackOutsideRange);m_blackOutsideRange->setChecked(enabled);});
 
     auto *minimum = new ColorRangeInput(statusRow);
     auto *maximum = new ColorRangeInput(statusRow);
@@ -213,24 +216,19 @@ DepthMapWidget::DepthMapWidget(QWidget *parent)
         connect(field->findChild<QLineEdit *>(), &QLineEdit::textChanged, this, updateApply);
     }
     connect(m_applyColorRange, &QPushButton::clicked, this, [this, minimum, maximum, validRange] {
-        if (validRange()) m_imageSettings->setColorRange(minimum->value(), maximum->value());
+        if(validRange()){
+            m_imageSettings->setColorRange(minimum->value(),maximum->value());
+        }
     });
     updateApply();
     auto *fpsRefresh=new QTimer(this);fpsRefresh->setInterval(250);
     connect(fpsRefresh,&QTimer::timeout,this,[this,fpsLabel]{
         double fps=0;
-        for(auto *view:{m_rvCanvas,m_assistCanvas,m_candidateCanvas})
+        for(auto *view:{m_rvCanvas,m_assistCanvas})
             if(view->isVisible())fps=view->displayedFps();
         fpsLabel->setText(QStringLiteral("FPS: %1").arg(fps,0,'f',1));
     });
     fpsRefresh->start();
-    m_liteSrRepairButton=new QPushButton(m_rvControls);m_liteSrRepairButton->setObjectName("rvLiteSrRepairSettings");rvLayout->addWidget(m_liteSrRepairButton);
-    m_boardLiteSrHostContour=new QCheckBox(m_rvControls);m_boardLiteSrHostContour->setObjectName("rvBoardLiteSrHostContour");rvLayout->addWidget(m_boardLiteSrHostContour);
-    connect(m_boardLiteSrHostContour,&QCheckBox::toggled,this,[this](bool enabled){
-        if(m_session)m_session->setBoardLiteSrHostContour(enabled,m_session->boardLiteSrHostRepairSettings());
-        syncSessionControls();updateRvPresentation();
-    });
-    connect(m_liteSrRepairButton,&QPushButton::clicked,this,&DepthMapWidget::editLiteSrRepairSettings);
     connect(m_rvStart, &QPushButton::clicked, this, [this]{if (m_session) m_session->start();});
     connect(m_rvStop, &QPushButton::clicked, this, [this]{if (m_session) m_session->stop();});
     connect(m_rvReconnect, &QPushButton::clicked, this, [this]{if (m_session) m_session->reconnectNow();});
@@ -244,14 +242,14 @@ DepthMapWidget::DepthMapWidget(QWidget *parent)
 
 int DepthMapWidget::selectedWidth() const
 {
-    if(m_depthTabs->currentIndex()==2)return RvDtofCandidates::outputWidth(m_session?m_session->dtofCandidateMode():RvDtofCandidates::LiteSrRectFullHd);
+    if(m_session&&RvDtofCandidates::isNativeDepth(m_session->dtofCandidateMode()))return 48;
     if(m_depthTabs->currentIndex()==1&&m_session)return RvCameraView::profile(m_session->assistHostModel()).outputWidth;
     return m_session ? m_session->depthWidth() : m_snapshot.metadata["width"].toInt(144);
 }
 
 int DepthMapWidget::selectedHeight() const
 {
-    if(m_depthTabs->currentIndex()==2)return RvDtofCandidates::outputHeight(m_session?m_session->dtofCandidateMode():RvDtofCandidates::LiteSrRectFullHd);
+    if(m_session&&RvDtofCandidates::isNativeDepth(m_session->dtofCandidateMode()))return 32;
     if(m_depthTabs->currentIndex()==1&&m_session)return RvCameraView::profile(m_session->assistHostModel()).outputHeight;
     if (!m_session) return m_snapshot.metadata["height"].toInt(81);
     switch (m_session->depthWidth()) {
@@ -272,6 +270,24 @@ void DepthMapWidget::setDisplayRotationDegrees(int degrees)
     m_imageSettings->setRotationDegrees(degrees);
 }
 
+void DepthMapWidget::syncNativeTofRotation()
+{
+    m_nativeTofAngle->setText(tr("Input angle (%1°)").arg(m_nativeTofRotation));
+    m_nativeTofAngle->setToolTip(tr("Rotate both native ToF displays clockwise. UniDepth, raw measurements and saved images keep their orientation."));
+    m_rvCanvas->setNativeDisplayRotationDegrees(m_nativeTofRotation);
+}
+
+void DepthMapWidget::editNativeTofRotation()
+{
+    QInputDialog dialog(this);dialog.setObjectName("rvNativeTofAngleDialog");
+    dialog.setWindowTitle(tr("Native ToF angle"));dialog.setInputMode(QInputDialog::IntInput);
+    dialog.setLabelText(tr("Clockwise angle (0–359°):"));dialog.setIntRange(0,359);dialog.setIntValue(m_nativeTofRotation);
+    dialog.setOkButtonText(tr("Apply"));dialog.setCancelButtonText(tr("Cancel"));
+    if(dialog.exec()!=QDialog::Accepted)return;
+    m_nativeTofRotation=dialog.intValue();QSettings().setValue("depth/nativeTofRotationDegrees",m_nativeTofRotation);
+    syncNativeTofRotation();
+}
+
 void DepthMapWidget::changeEvent(QEvent *event)
 {
     QWidget::changeEvent(event);
@@ -281,6 +297,7 @@ void DepthMapWidget::changeEvent(QEvent *event)
 
 void DepthMapWidget::retranslateUi()
 {
+    syncNativeTofRotation();
     m_sessionControlsKey.clear();
     m_blackOutsideRange->setText(tr("Black outside range"));
     m_colorMinimumLabel->setText(tr("Minimum (m)"));
@@ -296,16 +313,11 @@ void DepthMapWidget::retranslateUi()
         button->setToolTip(tr("Start, Stop and Reconnect apply to the shared camera + depth stream."));
     auto label=[this](const char* id,const QString& text){m_rvModel->setItemText(m_rvModel->findData(id),text);};
     label("host_unidepth_rgb672_vga_fp16_tof16",tr("Host-assisted inference (640×480)"));
+    label("board_native_tof48",tr("Board inference"));
+    label("board_native_tof48_high_accuracy",tr("Board inference high accuracy"));
     m_depthTabs->setTabText(0,tr("Board depth"));m_depthTabs->setTabText(1,tr("Host assisted depth"));
-    m_depthTabs->setTabText(2,tr("Board depth"));
-    label("board_litesr_near_384x256_host_contour_hd",tr("On-board inference (384x256)"));
-    label(TinyNv12Contract::Scheme,tr("Tiny NV12 128x80 (on-board)"));
-    m_liteSrRepairButton->setText(tr("Repair settings..."));
-    m_boardLiteSrHostContour->setText(tr("Host contour optimization"));
-    m_boardLiteSrHostContour->setToolTip(tr("RV1103 runs the full on-board INT8 model. The PC refines its depth with matched native input; no host neural network is started. The separate board contour option keeps all processing on RV1103."));
-    m_rvModel->setItemData(m_rvModel->findData("board_litesr_near_384x256_host_contour_hd"),tr("48x32 depth and photon input; 384x256 output. Same sensor field of view. Experimental weight reuse; physical accuracy is unverified."),Qt::ToolTipRole);
     m_rvModel->setAccessibleName(tr("Imaging scheme:"));
-    m_rvModel->setToolTip(tr("Select host-assisted or on-board depth inference."));
+    m_rvModel->setToolTip(tr("Host-assisted depth inference (640×480)."));
     if (m_session) m_session->retranslateState();
     m_sessionControlsKey.clear();syncSessionControls();
 }
@@ -323,8 +335,8 @@ void DepthMapWidget::beginImagingSwitchUi(const QString &scheme,int estimatedMs)
     m_switchUiActive=true;m_switchUiFinishing=false;m_switchUiScheme=scheme;
     m_switchEstimatedMs=std::max(1,estimatedMs);m_switchUiClock.restart();m_switchFinishClock.invalidate();
     m_switchProgress->setValue(0);
-    m_snapshot={};m_assistSnapshot={};m_candidateSnapshot={};
-    for(auto *view:{m_rvCanvas,m_assistCanvas,m_candidateCanvas}){
+    m_snapshot={};m_assistSnapshot={};
+    for(auto *view:{m_rvCanvas,m_assistCanvas}){
         view->setLoadingState(0);view->clear(tr("Switching imaging scheme..."));
     }
     m_switchOverlay->setGeometry(m_depthTabs->rect());m_switchOverlay->show();m_switchOverlay->raise();
@@ -385,7 +397,7 @@ void DepthMapWidget::setSessionController(RvSessionController *controller)
     }
     // A recovery window belongs to one source. Rebinding never carries the
     // previous source's displayed pixels into the new session.
-    m_rvCanvas->clear();m_assistCanvas->clear();m_candidateCanvas->clear();
+    m_rvCanvas->clear();m_assistCanvas->clear();
     m_session = controller;
     clearRvDepth(tr("RV session changed"));
     clearAssistDepth(tr("RV session changed"));
@@ -398,10 +410,7 @@ void DepthMapWidget::setSessionController(RvSessionController *controller)
                 this, &DepthMapWidget::acceptRvSnapshot);
         connect(m_session, &RvSessionController::depthStreamCleared,
                 this, &DepthMapWidget::clearRvDepth);
-        connect(m_session,&RvSessionController::dtofCandidateReady,this,&DepthMapWidget::acceptCandidate);
         connect(m_session,&RvSessionController::dtofCandidateSelectionChanged,this,&DepthMapWidget::syncSessionControls);
-        connect(m_session,&RvSessionController::dtofCandidateCleared,this,&DepthMapWidget::clearCandidate);
-        connect(m_session,&RvSessionController::dtofCandidateExpired,this,&DepthMapWidget::holdCandidate);
         connect(m_session,&RvSessionController::assistStateChanged,this,&DepthMapWidget::syncSessionControls);
         connect(m_session,&RvSessionController::imagingSwitchStarted,this,&DepthMapWidget::beginImagingSwitchUi);
         connect(m_session,&RvSessionController::imagingSwitchFinished,this,[this]{finishImagingSwitchUi();});
@@ -411,7 +420,6 @@ void DepthMapWidget::setSessionController(RvSessionController *controller)
         connect(m_session,&RvSessionController::recoveryDisplayExpired,this,[this] {
             if(m_rvCanvas->frameHeld())clearRvDepth(tr("No fresh dToF data"));
             if(m_assistCanvas->frameHeld())clearAssistDepth(tr("No fresh dToF data"));
-            if(m_candidateCanvas->frameHeld())clearCandidate(tr("No fresh dToF data"));
         });
         connect(m_session, &QObject::destroyed, this, [this] {
             m_session = nullptr;
@@ -431,6 +439,7 @@ RvSessionController *DepthMapWidget::sessionController() const
 
 void DepthMapWidget::syncSessionControls()
 {
+    m_nativeTofAngle->setVisible(m_session&&RvDtofCandidates::isNativeDepth(m_session->dtofCandidateMode()));
     const bool available = !m_session.isNull();
     const bool busy = available && m_session->busy();
     const bool stopped = !available || m_session->userStopped();
@@ -438,20 +447,9 @@ void DepthMapWidget::syncSessionControls()
     m_rvStop->setEnabled(available && !stopped);
     m_rvReconnect->setEnabled(available && !busy);
     if(m_switchUiActive&&(!m_session||m_session->userStopped()))cancelImagingSwitchUi();
-    if(!m_session||m_session->userStopped()||m_session->busy())clearCandidate(tr("No fresh dToF data"));
     const bool assisting=m_session&&(m_session->cameraWidth()==576||m_session->hostHdAssist())&&m_session->assistDepthEnabled();
-    const bool candidate=m_session&&m_session->dtofCandidateMode()>=0&&!RvDtofCandidates::isCaptureOnly(m_session->dtofCandidateMode());
-    const int boardMode=m_session?m_session->dtofCandidateMode():-1;
-    const bool boardFull=RvDtofCandidates::isLiteSrFull(boardMode)&&!RvDtofCandidates::isCaptureOnly(boardMode);
-    setProperty("dtofComputeLocation",boardFull&&m_session->boardLiteSrHostContourEnabled()?"rv1103+host_cpu":"rv1103");
-    m_boardLiteSrHostContour->setVisible(boardFull);
-    {const QSignalBlocker blocker(m_boardLiteSrHostContour);m_boardLiteSrHostContour->setChecked(m_session&&m_session->boardLiteSrHostContourEnabled());}
-    m_boardLiteSrHostContour->setEnabled(!LiteSrBoardContract::isDepthOnly(boardMode)&&m_session&&!m_session->busy()&&!RvDtofCandidates::isLiteSrHd(boardMode)&&!LiteSrBoardContract::isHighResolution(boardMode));
-    m_liteSrRepairButton->setVisible(boardMode==RvDtofCandidates::LiteSrContour||(boardFull&&m_session->boardLiteSrHostContourEnabled()));
-    m_liteSrRepairButton->setEnabled(m_session&&!m_session->busy());
-    m_liteSrRepairButton->setText(boardFull&&m_session->boardLiteSrHostContourEnabled()?tr("Contour settings..."):tr("Repair settings..."));
     const QStringList key{QString::number(available), QString::number(assisting),
-        QString::number(boardMode), QString::number(busy), QString::number(m_switchUiActive),
+        QString::number(m_session?m_session->dtofCandidateMode():-1), QString::number(busy), QString::number(m_switchUiActive),
         QString::number(m_session&&m_session->controlledSource()),
         QString::number(m_session?m_session->assistLoadingState():0),
         m_session?m_session->assistHostModel():QString()};
@@ -460,8 +458,9 @@ void DepthMapWidget::syncSessionControls()
     if(key!=m_sessionControlsKey){
     m_sessionControlsKey=key;
     const QSignalBlocker modelBlocker(m_rvModel);
-    const bool offerAssist=m_session&&(m_session->cameraWidth()==576||m_session->hostHdAssist()||RvDtofCandidates::isLiteSrHd(m_session->dtofCandidateMode()));
-    m_depthTabs->setCurrentIndex(candidate?2:assisting?1:0);
+    const bool offerAssist=m_session&&m_session->controlledSource();
+    m_depthTabs->setCurrentIndex(assisting?1:0);
+    setProperty("dtofComputeLocation",assisting?"host":"native_sensor");
     const int loading=assisting&&!m_switchUiActive?m_session->assistLoadingState():0;
     m_assistCanvas->setLoadingState(loading==2&&m_assistCanvas->hasFrame()?0:loading);
     const bool configurable = m_session && !m_session->busy()&&!m_switchUiActive
@@ -470,9 +469,8 @@ void DepthMapWidget::syncSessionControls()
     if(auto* items=qobject_cast<QStandardItemModel*>(m_rvModel->model())){
         for(int i=0;i<m_rvModel->count();++i){
             const auto id=m_rvModel->itemData(i).toString();
-            if(id==TinyNv12Contract::Scheme){items->item(i)->setEnabled(configurable&&m_session->tinyNv12Available());items->item(i)->setToolTip(m_session&&m_session->tinyNv12Available()?tr("NV12-guided on-board depth, 80x128 pixels."):tr("Tiny NV12 requires the calibrated F1 device and its saved camera orientation."));}
-            else if(id.startsWith("board_litesr_"))items->item(i)->setEnabled(configurable);
-            else {
+            if(id.startsWith("board_native_")){items->item(i)->setEnabled(true);items->item(i)->setToolTip(tr("Native 48×32 ToF radial depth; no neural inference."));}
+            else{
                 const QString model=id=="host_assisted"?QStringLiteral("unidepth"):id.mid(5);
                 const bool available=RvAssistDepth::hostModelAvailable(model);
                 items->item(i)->setEnabled(offerAssist&&available);
@@ -486,12 +484,16 @@ void DepthMapWidget::syncSessionControls()
 }
 void DepthMapWidget::syncDisplayColors()
 {
-    for(auto *view:{m_rvCanvas,m_assistCanvas,m_candidateCanvas}){
+    for(auto *view:{m_rvCanvas,m_assistCanvas}){
         view->setDisplayRange(m_imageSettings->colorMinimum(),m_imageSettings->colorMaximum());
         view->setBlackOutsideRange(m_imageSettings->blackOutsideRange());
     }
+    if(auto *field=findChild<QDoubleSpinBox*>("rvColorMinimum"))field->setValue(m_imageSettings->colorMinimum());
+    if(auto *field=findChild<QDoubleSpinBox*>("rvColorMaximum"))field->setValue(m_imageSettings->colorMaximum());
+    if(m_blackOutsideRange){const QSignalBlocker block(m_blackOutsideRange);m_blackOutsideRange->setChecked(m_imageSettings->blackOutsideRange());}
+    if(m_colorMinimumLabel)m_colorMinimumLabel->setText(tr("Minimum (m)"));
+    if(m_colorMaximumLabel)m_colorMaximumLabel->setText(tr("Maximum (m)"));
     // Expired pixels cannot be recolored after their metric samples are revoked.
-    if(m_candidateCanvas->frameHeld())clearCandidate(tr("No fresh dToF data"));
 }
 void DepthMapWidget::acceptRvDepth(const QByteArray& depth,const QJsonObject& m)
 {
@@ -501,7 +503,6 @@ void DepthMapWidget::acceptRvDepth(const QByteArray& depth,const QJsonObject& m)
 }
 void DepthMapWidget::clearRvDepth(const QString& reason)
 {
-    clearCandidate(reason);
     m_snapshot={};
     const bool holding=m_session&&m_session->retainingRecoveryDisplay();
     if(holding)m_rvCanvas->holdFrame();else m_rvCanvas->clear(UiStyle::depthErrorText(reason));
@@ -524,12 +525,10 @@ void DepthMapWidget::clearAssistDepth(const QString &reason)
 
 void DepthMapWidget::updateRvPresentation()
 {
-    const bool candidate=m_depthTabs->currentIndex()==2;
     if(!m_saveButton)return;
 
-    m_saveCamera->setEnabled(!candidate);
-    const auto &snapshot = candidate ? m_candidateSnapshot
-        : m_depthTabs->currentIndex()==1 ? m_assistSnapshot : m_snapshot;
+    m_saveCamera->setEnabled(!m_session||!RvDtofCandidates::isNativeDepth(m_session->dtofCandidateMode()));
+    const auto &snapshot = m_depthTabs->currentIndex()==1 ? m_assistSnapshot : m_snapshot;
     m_saveButton->setEnabled(!m_switchUiActive
         && !(m_session && m_session->retainingRecoveryDisplay()) && !snapshot.metresFloat32LE.isEmpty());
 }
@@ -542,22 +541,17 @@ void DepthMapWidget::acceptRvSnapshot(const QByteArray &depth,const QJsonObject 
 
 DepthSnapshot DepthMapWidget::snapshot() const
 {
-    if(m_depthTabs->currentIndex()==2){
-        auto result=m_candidateSnapshot;
-        if(!result.metresFloat32LE.isEmpty()){
-            result.depthImage=m_candidateCanvas->snapshotImage();
-            result.metadata["display_minimum_m"]=m_imageSettings->colorMinimum();
-            result.metadata["display_maximum_m"]=m_imageSettings->colorMaximum();
-            result.metadata["display_out_of_range_black"]=m_imageSettings->blackOutsideRange();
-        }
-        return result;
-    }
     auto result=m_depthTabs->currentIndex()==1?m_assistSnapshot:m_snapshot;
     if(result.metresFloat32LE.isEmpty())return {};
     result.depthImage=m_depthTabs->currentIndex()==1?m_assistCanvas->snapshotImage():m_rvCanvas->snapshotImage();
     result.metadata["display_minimum_m"]=m_rvCanvas->displayMinimum();
     result.metadata["display_maximum_m"]=m_rvCanvas->displayMaximum();
     result.metadata["display_out_of_range_black"]=m_rvCanvas->blackOutsideRange();
+    if(m_depthTabs->currentIndex()==0){
+        result.metadata["native_tof_display_rotation_degrees"]=m_nativeTofRotation;
+        result.metadata["native_tof_display_mirror_horizontal"]=true;
+        result.metadata["display_rotation_degrees"]=(displayRotationDegrees()+m_nativeTofRotation)%360;
+    }
     return result;
 }
 
@@ -577,66 +571,8 @@ void DepthMapWidget::saveCurrentFrame()
     QMessageBox::information(this,tr("Save depth map"),tr("Saved to %1").arg(QDir::toNativeSeparators(result)));
 }
 
-void DepthMapWidget::clearCandidate(const QString& reason){
-    m_candidateSnapshot={};if(m_candidateCanvas){
-        if(m_session&&m_session->retainingRecoveryDisplay())m_candidateCanvas->holdFrame();else m_candidateCanvas->clear(UiStyle::depthErrorText(reason));
-    }
-    if(m_saveButton)updateRvPresentation();
-}
-
-void DepthMapWidget::holdCandidate(){
-    m_candidateSnapshot={};m_candidateCanvas->holdFrame();updateRvPresentation();
-}
-
 DepthMapWidget::~DepthMapWidget(){
     if(m_session){
         disconnect(m_session,nullptr,this,nullptr);
     }
 }
-void DepthMapWidget::acceptCandidate(const RvDtofCandidates::Result& result){
-    if(!m_session||m_session->userStopped()||m_session->busy()
-        ||m_session->dtofCandidateMode()<0||m_depthTabs->currentIndex()!=2
-        ||result.metadata["candidate_mode"].toInt(-1)!=m_session->dtofCandidateMode())return;
-    if(!result.fresh){if(result.error.isEmpty())holdCandidate();else clearCandidate(result.error);return;}
-    if(RvDtofCandidates::identity(result.metadata)!=RvDtofCandidates::identity(m_session->metadata()))return;
-    if(RvDtofCandidates::isLiteSrFull(m_session->dtofCandidateMode())&&result.metadata["host_contour_enabled"].toBool()!=m_session->boardLiteSrHostContourEnabled())return;
-    m_candidateCanvas->setBoardCameraZ(RvDtofCandidates::isTinyNv12(m_session->dtofCandidateMode()));
-    m_candidateCanvas->setNativeGridSize(LiteSrBoardContract::isNative16Depth(m_session->dtofCandidateMode())?QSize(16,16):QSize(48,32));
-    if(m_candidateCanvas->setDepth(result.depth,result.metadata)&&m_candidateCanvas->setCoverage(result.coverage))
-        m_candidateSnapshot={result.depth,{},{},result.metadata,QDateTime::currentDateTimeUtc()};
-    else clearCandidate(tr("No fresh dToF data"));
-    updateRvPresentation();
-}
-
-void DepthMapWidget::editLiteSrRepairSettings(){
-    QPointer<RvSessionController> board=m_session;
-    const bool onBoard=board&&board->dtofCandidateMode()==RvDtofCandidates::LiteSrContour;
-    const bool hybrid=board&&RvDtofCandidates::isLiteSrFull(board->dtofCandidateMode())&&board->boardLiteSrHostContourEnabled();
-    if(!onBoard&&!hybrid)return;
-    const auto settings=board?board->dtofCandidateSettings():RvDtofCandidates::Settings{};
-    const auto current=hybrid?board->boardLiteSrHostRepairSettings():RvLiteSrContour::RepairSettings{settings.liteSrHoles,settings.liteSrOutliers};
-    QDialog dialog(this);dialog.setObjectName("rvLiteSrRepairDialog");dialog.setWindowTitle(tr("Board depth repair settings"));
-    if(hybrid)dialog.setWindowTitle(tr("Host contour refinement settings"));
-    auto *form=new QFormLayout(&dialog);
-    auto *holes=new QComboBox(&dialog);holes->setObjectName("rvLiteSrHoleMode");
-    holes->addItem(tr("Off"),0);holes->addItem(tr("Small regions (up to 4 native cells)"),1);
-    holes->addItem(tr("Larger regions (up to 64 native cells)"),2);holes->setCurrentIndex(current.holeMode);
-    form->addRow(tr("Fill invalid regions:"),holes);
-    auto *outliers=new QCheckBox(tr("Repair isolated outliers (1-2 native cells)"),&dialog);
-    outliers->setObjectName("rvLiteSrRemoveOutliers");outliers->setChecked(current.removeOutliers);form->addRow(outliers);
-    auto *description=new QLabel(tr("Region sizes use the original 48 x 32 ToF grid. Fill from this frame's surrounding board depth with linear interpolation. Mixed foreground/background and unsupported regions stay invalid. Isolated small real objects may also be smoothed by outlier repair."),&dialog);
-    description->setWordWrap(true);description->setMaximumWidth(460);form->addRow(description);
-    if(hybrid){auto* stages=new QLabel(tr("Runs on the PC: 7 x 7 edge-preserving smoothing, four tangent passes and contour antialiasing. Smoothing adjusts depth by at most 12 mm after repairs. Positive valid depths below 10 cm remain supported."),&dialog);stages->setWordWrap(true);stages->setMaximumWidth(460);form->addRow(stages);}
-    auto *buttons=new QDialogButtonBox(QDialogButtonBox::Ok|QDialogButtonBox::Cancel,&dialog);
-    buttons->button(QDialogButtonBox::Ok)->setText(tr("Apply"));buttons->button(QDialogButtonBox::Cancel)->setText(tr("Cancel"));
-    form->addRow(buttons);connect(buttons,&QDialogButtonBox::accepted,&dialog,&QDialog::accept);connect(buttons,&QDialogButtonBox::rejected,&dialog,&QDialog::reject);
-    if(dialog.exec()==QDialog::Accepted){
-        if(hybrid&&board&&board==m_session&&RvDtofCandidates::isLiteSrFull(board->dtofCandidateMode())&&board->boardLiteSrHostContourEnabled()){
-            board->setBoardLiteSrHostContour(true,{holes->currentData().toInt(),outliers->isChecked()});
-        }else if(onBoard&&board&&board==m_session&&board->dtofCandidateMode()==RvDtofCandidates::LiteSrContour&&!board->busy()){
-            auto updated=board->dtofCandidateSettings();updated.liteSrHoles=holes->currentData().toInt();updated.liteSrOutliers=outliers->isChecked();
-            board->setDtofCandidate(RvDtofCandidates::LiteSrContour,updated);
-        }
-    }
-}
-

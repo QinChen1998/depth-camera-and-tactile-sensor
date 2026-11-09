@@ -77,7 +77,7 @@ while :; do
    case "$value" in *armclk*|*clk_core*|*npu*|*rknpu*|*clk_ddr*) printf 'V\t/sys/kernel/debug/clk/clk_summary\t%s\n' "$value";; esac
   done < "$root/sys/kernel/debug/clk/clk_summary"
  fi
- if [ -z "$root" ] && [ $((index % 5)) -eq 0 ]; then processes=$(pidof litesr_near_gui tmf8829_ext tiny_nv12 tiny_nv12_camera native_hd_gui 2>/dev/null || true); fi
+ if [ -z "$root" ] && [ $((index % 5)) -eq 0 ]; then processes=$(pidof tmf8829_ext native_hd_gui 2>/dev/null || true); fi
  for pid in $processes; do emit "/proc/$pid/stat";emit "/proc/$pid/comm"; done
  emit "/proc/$$/stat"
  emit /run/dtof_candidates/sensor_readback.json

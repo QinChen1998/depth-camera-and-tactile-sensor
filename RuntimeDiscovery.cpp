@@ -49,6 +49,10 @@ QString applicationRoot() {
     return QCoreApplication::applicationDirPath();
 }
 QString rvAssistRoot(){return rvAssistModelRoot(QLatin1String(RvCameraView::UniDepthVgaNative16));}
+QString rvCompatibleRoot(){
+    const auto path=overrideValue("RV_ASSIST_COMPAT_ROOT");
+    return path.isEmpty()?QDir(applicationRoot()).filePath("UniDepthRuntimeCompatible"):path;
+}
 QString rvAssistModelRoot(const QString &model){
 #if defined(DCTS_TENSORRT_RTX)
     if(RvCameraView::isUniDepthVga(model)){

@@ -19,12 +19,12 @@
     <TargetName Condition="'$(PackModelCopy)' == 'true'">PackModelCopy</TargetName>
   </PropertyGroup>
   <ItemDefinitionGroup>
-    <ClCompile><LanguageStandard>stdcpp17</LanguageStandard><WarningLevel>Level4</WarningLevel><ExceptionHandling>Sync</ExceptionHandling><RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary><PreprocessorDefinitions>WIN32;_WINDOWS;NOMINMAX;%(PreprocessorDefinitions)</PreprocessorDefinitions><AdditionalOptions>/utf-8 /Zc:__cplusplus %(AdditionalOptions)</AdditionalOptions><AdditionalIncludeDirectories>$(DctsPrivateBuildDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories></ClCompile>
-    <Link><AdditionalDependencies>bcrypt.lib;%(AdditionalDependencies)</AdditionalDependencies><GenerateDebugInformation>true</GenerateDebugInformation></Link>
+    <ClCompile><LanguageStandard>stdcpp17</LanguageStandard><WarningLevel>Level4</WarningLevel><ExceptionHandling>Sync</ExceptionHandling><RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary><PreprocessorDefinitions>WIN32;_WINDOWS;NOMINMAX;%(PreprocessorDefinitions)</PreprocessorDefinitions><AdditionalOptions>/utf-8 /Zc:__cplusplus %(AdditionalOptions)</AdditionalOptions><AdditionalIncludeDirectories>$(DctsPrivateBuildDir);$(MSBuildProjectDirectory)\..\..\dependency_sources\openvino\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories></ClCompile>
+    <Link><AdditionalDependencies>bcrypt.lib;%(AdditionalDependencies)</AdditionalDependencies><GenerateDebugInformation>true</GenerateDebugInformation><AdditionalOptions>/PDBALTPATH:%_PDB% %(AdditionalOptions)</AdditionalOptions></Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)' == 'Release'"><ClCompile><Optimization>MaxSpeed</Optimization><PreprocessorDefinitions>NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions></ClCompile><Link><OptimizeReferences>true</OptimizeReferences><EnableCOMDATFolding>true</EnableCOMDATFolding></Link></ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)' == 'Debug'"><ClCompile><Optimization>Disabled</Optimization><DebugInformationFormat>ProgramDatabase</DebugInformationFormat></ClCompile></ItemDefinitionGroup>
-  <ItemGroup><ClCompile Include="ProtectedModel.cpp" Condition="'$(PackModelCopy)' != 'true'"/><ClCompile Include="PackModelCopy.cpp" Condition="'$(PackModelCopy)' == 'true'"/><ClInclude Include="ProtectionCommon.h"/><ClInclude Include="ModelProtectionApi.h"/></ItemGroup>
+  <ItemGroup><ClCompile Include="ProtectedModel.cpp" Condition="'$(PackModelCopy)' != 'true'"/><ClCompile Include="PackModelCopy.cpp" Condition="'$(PackModelCopy)' == 'true'"/><ClInclude Include="ProtectionCommon.h"/><ClInclude Include="ModelProtectionApi.h"/><ClInclude Include="OpenVinoApi.h"/></ItemGroup>
   <Target Name="RequirePrivateBuildDirectory" BeforeTargets="PrepareForBuild">
     <Error Condition="'$(DctsPrivateBuildDir)' == ''" Text="Set DctsPrivateBuildDir to an isolated private build directory."/>
   </Target>

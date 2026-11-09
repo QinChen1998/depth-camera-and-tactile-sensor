@@ -2,6 +2,7 @@
 #include <QMainWindow>
 #include <QPointer>
 #include <QVector>
+#include <QJsonObject>
 
 class LanguageManager;
 class TactileDockWidget;
@@ -12,7 +13,6 @@ class RvDeviceManagerDialog;
 class QMenu;
 class QAction;
 class QMessageBox;
-class QTcpSocket;
 struct RvDeviceProfile;
 
 class SensorMainWindow final : public QMainWindow {
@@ -24,7 +24,7 @@ public:
     DepthMapWidget *depth() const { return m_depth; }
     TactileDockWidget *tactile() const { return m_tactile; }
     void resetLayout();
-    void monitorCameraConnection();
+    void offerUsbSetup(bool existingDevice, bool networkSetup = false, const QJsonObject &identity = {});
 signals:
     void usbDeviceConnectionRequested(RvDeviceManagerDialog *dialog);
 protected:
@@ -37,7 +37,6 @@ private:
     void saveLayout();
     void refreshPresets();
     void savePreset();
-    void probeCameraConnection();
     RvDeviceManagerDialog *showDeviceManager(bool modal = false);
     void offerBoardImport(const RvDeviceProfile &device);
     LanguageManager *m_language;
@@ -48,10 +47,9 @@ private:
     QDockWidget *m_depthDock, *m_cameraDock;
     void updateCameraVisibility();
     QPointer<RvDeviceManagerDialog> m_devices;
-    QPointer<QTcpSocket> m_cameraProbe;
     QVector<QDockWidget *> m_docks;
     QMenu *m_file, *m_view, *m_settings, *m_languages, *m_rendering, *m_presets;
-    QAction *m_exit, *m_reset, *m_savePreset, *m_deletePreset, *m_deviceAction;
+    QAction *m_exit, *m_reset, *m_savePreset, *m_deletePreset, *m_deviceAction, *m_inferenceAction;
     QAction *m_english, *m_chinese, *m_standard, *m_smooth, *m_about;
     QPointer<QMessageBox> m_inferenceWarning;
     bool m_closing=false, m_tunerCloseReady=false;

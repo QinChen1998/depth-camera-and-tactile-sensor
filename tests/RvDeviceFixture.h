@@ -9,7 +9,7 @@ inline RvDeviceProfile offlineRvDevice()
     fixture.name = "Offline RV1103";
     fixture.host = "172.32.0.93";
     fixture.publicKey = "AAAAC3NzaC1lZDI1NTE5AAAAIAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB";
-    fixture.calibration = "rv20261008-f1";
+    fixture.calibration = QLatin1String(RvCalibration::Id);
     fixture.inputRotation = 180;
     return fixture;
 }

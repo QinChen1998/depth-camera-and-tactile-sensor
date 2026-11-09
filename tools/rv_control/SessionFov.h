@@ -8,7 +8,7 @@ static inline int dcts_processing_fov(unsigned sensor, const char *requested)
 {
     if (sensor > 15) return -1;
     if (!requested || !*requested) return (int)sensor;
-    return (requested[0]=='1' || requested[0]=='2') && requested[1]==0 ? requested[0]-'0' : -1;
+    return requested[0]=='6' && requested[1]==0 ? 6 : -1;
 }
 static inline int dcts_valid_run_id(const char *value)
 {

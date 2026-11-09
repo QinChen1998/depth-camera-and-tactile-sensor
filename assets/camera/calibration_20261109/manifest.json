@@ -1,0 +1,33 @@
+{
+  "schema": 1,
+  "release_id": "RV1103_SC3336_TMF8829_20261109",
+  "calibration_sha256": "c7836f67c2d4645389634b03e7e93518b13c6ecda3292c8d90319d24136d3dfa",
+  "tof_fov_correction": 6,
+  "raw_rgb_size_wh": [
+    2304,
+    1296
+  ],
+  "files": {
+    "calibration.json": {
+      "sha256": "c7836f67c2d4645389634b03e7e93518b13c6ecda3292c8d90319d24136d3dfa",
+      "bytes": 3482
+    },
+    "intrinsics.json": {
+      "sha256": "c2fcf1daf51d0f66a97726cbbc5cb6daaf5239c5dbeb283ed28e40cc1a487888",
+      "bytes": 514
+    },
+    "extrinsics.json": {
+      "sha256": "8b7eaacf42c8b0f21498b388519731b049f14a692b5289efcaac0675bdfa6cf6",
+      "bytes": 698
+    },
+    "projection.bin": {
+      "sha256": "7964f14e5635d1e6a613c8d8bab39a07b7138dbe13cce4b4c3a793953b8c1596",
+      "bytes": 364
+    },
+    "M48_geometry.bin": {
+      "sha256": "4ca13f0d66987cfd84453a2aacf7ae086b7a730025fe3c90cdf3c6bc88782cc7",
+      "bytes": 281932
+    }
+  },
+  "generator_sha256": "575a8735c71771a694bce3d903ce08759bc7cbb2df0398ed1f25616e92acf7a6"
+}

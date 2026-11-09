@@ -21,16 +21,9 @@
 #include <QtCore/QSettings>
 #include <QtCore/QTimer>
 #include <QtWidgets/QApplication>
-#include <QtWidgets/QComboBox>
-#include <QtWidgets/QDialog>
-#include <QtWidgets/QDialogButtonBox>
-#include <QtWidgets/QFormLayout>
-#include <QtWidgets/QLabel>
 #include <QtWidgets/QMainWindow>
 #include <QtWidgets/QMessageBox>
-#include <QtWidgets/QPushButton>
 #include <QtWidgets/QStatusBar>
-#include <QtWidgets/QVBoxLayout>
 #include <functional>
 #include <stdexcept>
 #include <utility>
@@ -52,7 +45,16 @@ elif [ ! -e /root/r144_depth ] && [ ! -L /root/r144_depth ] &&
 else
     echo missing
 fi
-addresses=$(ip -4 addr show dev usb0)
+# ADB appears before S99usb0config has changed the firmware's temporary
+# 172.32.0.70 address to its final address. Give that service time to settle.
+attempt=0
+while :; do
+    addresses=$(ip -4 addr show dev usb0)
+    if printf '%s\n' "$addresses" | grep -q 'inet 172\.32\.0\.93/16 '; then break; fi
+    attempt=$((attempt + 1))
+    [ "$attempt" -lt 10 ] || break
+    sleep .5
+done
 printf '%s\n' "$addresses" | awk '$1=="inet"{print $2}'
 )SH";
 
@@ -66,7 +68,8 @@ function Get-Target {
         $_.Status -eq 'Up' -and $_.PnPDeviceID -like 'USB\VID_2207&PID_0019&MI_*' -and
         (Get-PnpDeviceProperty -InstanceId $_.PnPDeviceID -KeyName DEVPKEY_Device_Parent).Data -eq $usbParent
     })
-    if ($result.Count -ne 1) { throw 'The RV1103 USB network adapter is missing or ambiguous.' }
+    if ($result.Count -eq 0) { return $null }
+    if ($result.Count -ne 1) { throw 'The RV1103 USB network adapter is ambiguous.' }
     $result[0]
 }
 function Test-BoardRoute($index) {
@@ -74,6 +77,12 @@ function Test-BoardRoute($index) {
     return ($route.Count -gt 0 -and @($route | Where-Object InterfaceIndex -ne $index).Count -eq 0)
 }
 $target = Get-Target
+for ($attempt = 0; $null -eq $target -and $waitForAdapter -and $attempt -lt 8; $attempt++) {
+    Start-Sleep -Milliseconds 500
+    $target = Get-Target
+}
+if ($null -eq $target) { exit 11 }
+if ($presenceOnly) { exit 0 }
 $index = $target.ifIndex
 $addresses = @(Get-NetIPAddress -InterfaceIndex $index -AddressFamily IPv4 -ErrorAction SilentlyContinue)
 $existing = @($addresses | Where-Object {
@@ -163,7 +172,10 @@ Probe parseIdentity(const QString &serial, const QByteArray &output)
     Probe probe{serial, fields[1].trimmed(), fields[2].simplified().section(' ', 1, 1),
                 fields[3].simplified().section(' ', 0, 0), fields[4].trimmed() == "ready", fields[4].trimmed() == "bootstrap", {}};
     RvDeviceStore::keyFingerprint(probe.key);
-    for (qsizetype i = 5; i < fields.size(); ++i) probe.addresses.append(fields[i].trimmed());
+    for (qsizetype i = 5; i < fields.size(); ++i) {
+        const auto address=fields[i].trimmed();
+        if (!address.isEmpty()) probe.addresses.append(address);
+    }
     return probe;
 }
 
@@ -175,39 +187,47 @@ Board enrollmentBoard(const Probe &probe, const QVector<RvDeviceProfile> &profil
     profile.id = profile.serial = probe.serial;
     profile.name = "RV1103 - " + probe.serial;
     profile.host = host;
-    profile.calibration = "rv20261008-f1";
-    if (probe.geometry != profile.geometrySha()) profile.calibration = "rv20261008-f2";
+    profile.calibration = QLatin1String(RvCalibration::Id);
     profile.inputRotation = 0;
-    profile.cameraMountRotation = 180;
+    profile.cameraMountRotation = 0;
     // Use the existing conservative coordinator contract for an enrolled board.
     profile.publicKey = probe.key;
-    if (probe.geometry != profile.geometrySha()) profile.calibration = "rv20261008-f1";
     for (const auto &saved : profiles) {
         if (saved.serial != probe.serial && saved.publicKey != probe.key) continue;
         if (saved.serial != probe.serial || saved.publicKey != probe.key)
             throw std::runtime_error("The RV1103 serial and SSH key conflict with a saved device identity.");
         profile = saved;
+        profile.calibration=QLatin1String(RvCalibration::Id);profile.temporaryFovCalibration=false;
         profile.host = host;
         profile.sshPort = 22;
         result.existing = true;
-        RvDeviceProfile f1, f2; f1.calibration="rv20261008-f1";f2.calibration="rv20261008-f2";
-        if ((probe.geometry==f1.geometrySha() || probe.geometry==f2.geometrySha()) && probe.geometry!=profile.geometrySha())
-            throw std::runtime_error("The RV1103 calibration differs from its saved device profile.");
+
     }
+    if(profile.inputRotation<0) { profile.inputRotation=0;profile.cameraMountRotation=0; }
     profile.validate();
     result.boot = probe.boot;
-    if (!probe.addresses.isEmpty() && probe.addresses != QStringList{"172.32.0.93/16"})
-        throw std::runtime_error("RV1103 usb0 has a different IPv4 configuration.");
-    result.address = probe.addresses.value(0);
+    result.address = probe.addresses.join(',');
     return result;
 }
 
-bool knownIdentity(const QVector<RvDeviceProfile> &profiles, const Probe &probe)
+bool boardAddressReady(const Board &board)
 {
-    for (const auto &profile : profiles) {
-        if (profile.serial == probe.serial || profile.publicKey == probe.key) return true;
-    }
-    return false;
+    return board.address.split(',').contains("172.32.0.93/16");
+}
+
+enum class RuntimeInspection { Ready, Update, Invalid };
+
+RuntimeInspection inspectReceipt(const QJsonObject &receipt,const Board &board)
+{
+    if(receipt["verified"]!=true || receipt["serial"]!=board.profile.serial
+        || receipt["boot_id"]!=board.boot || !receipt["runtime_matches"].isBool())return RuntimeInspection::Invalid;
+    return receipt["runtime_matches"].toBool()?RuntimeInspection::Ready:RuntimeInspection::Update;
+}
+
+bool confirmedIdentityMatches(const QJsonObject &expected,const Probe &identity,const QString &transport)
+{
+    return expected.isEmpty() || (expected["serial"]==identity.serial && expected["boot_id"]==identity.boot
+        && expected["public_key"]==identity.key && expected["transport"]==transport);
 }
 
 bool stripShellReceipt(QByteArray &output)
@@ -222,8 +242,8 @@ bool stripShellReceipt(QByteArray &output)
     return true;
 }
 
-// Only an unaddressed board gets the managed startup script. It leaves any
-// IPv4 configured by the image or by an administrator alone.
+// Manual USB setup can add the managed address to an older image. Preserve
+// other addresses; never flush usb0 or change another board/network interface.
 QString configureBoardCommand(const Board &board)
 {
     return QString::fromLatin1(R"SH(
@@ -231,8 +251,6 @@ set -e
 test "$(sed -n 's/^Serial[[:space:]]*:[[:space:]]*//p' /proc/cpuinfo)" = '%1'
 test "$(cat /proc/sys/kernel/random/boot_id)" = '%2'
 test "$(awk 'NR==1{print $2}' /etc/ssh/ssh_host_ed25519_key.pub)" = '%3'
-addresses=$(ip -4 addr show dev usb0)
-if printf '%s\n' "$addresses" | grep -q 'inet '; then exit 1; fi
 file=/etc/init.d/S99zzDepthCameraUsb
 umask 022
 tmp=$(mktemp /etc/init.d/.DepthCameraUsb.XXXXXX)
@@ -241,12 +259,20 @@ cat >"$tmp" <<'RV_USB_INIT'
 #!/bin/sh
 [ "$1" = start ] || exit 0
 addresses=$(ip -4 addr show dev usb0) || exit 1
-if printf '%s\n' "$addresses" | grep -q 'inet '; then exit 0; fi
-ip addr add 172.32.0.93/16 dev usb0 || exit 1
+if printf '%s\n' "$addresses" | grep -q 'inet 172\.32\.0\.93/16 '; then exit 0; fi
+previous=$(printf '%s\n' "$addresses" | awk '$1=="inet" && $2 ~ /^172\.32\.0\.93\//{print $2}')
+for address in $previous; do ip addr del "$address" dev usb0 || exit 1; done
+if ! ip addr add 172.32.0.93/16 dev usb0; then
+    for address in $previous; do ip addr add "$address" dev usb0 || true; done
+    exit 1
+fi
 ip link set dev usb0 up
 RV_USB_INIT
 chmod 755 "$tmp"
-if [ -e "$file" ]; then cmp -s "$tmp" "$file"; else ln "$tmp" "$file"; fi
+if [ -e "$file" ] && ! cmp -s "$tmp" "$file"; then
+    [ -e "$file.previous" ] || cp -p "$file" "$file.previous"
+fi
+mv -f "$tmp" "$file"
 sh "$file" start
 ip -4 addr show dev usb0 | grep -q 'inet 172\.32\.0\.93/16 '
 )SH").arg(board.profile.serial, board.boot, board.profile.publicKey);
@@ -299,6 +325,11 @@ private:
     {
         return canOffer() && m_session->userStopped() && !m_session->busy();
     }
+    bool operationAllowed() const
+    {
+        return idle() && m_session->stopRevision()==m_stopRevision
+            && (!m_automatic || m_session->automaticStartAllowed(m_board.profile.id));
+    }
     bool canOfferAutomatically() const
     {
         const auto *dialog = m_window->findChild<RvDeviceManagerDialog *>();
@@ -324,6 +355,8 @@ private:
             return;
         }
         m_requester = dialog;
+        m_expectedIdentity=dialog->property("rvUsbExpectedIdentity").toJsonObject();
+        m_automatic = false;
         m_added = false;
         dialog->beginUsbEnrollment();
         scan(true);
@@ -345,7 +378,9 @@ private:
         QJsonObject event{{"phase",m_phase},{"exit_code",code},
             {"process_status",m_processStatus.isEmpty() ? (code<0 ? "abnormal_exit" : "exited") : m_processStatus}};
         if (code!=0 && m_phase.startsWith("windows_rndis")) {
+            if(code==11)event["network_error"]="The matching RV1103 USB network adapter is not connected.";
             for (const auto *known : {"The RV1103 USB adapter already has a different IPv4 configuration.",
+                                      "The RV1103 USB network adapter is ambiguous.",
                                       "Another Windows interface is already using the RV1103 subnet.",
                                       "The USB adapter changed.",
                                       "The RV1103 USB network address or route did not become usable."})
@@ -363,12 +398,14 @@ private:
     {
         if (!manual && (m_requester || m_adb.isEmpty() || m_prompting || m_result || !canOfferAutomatically())) return;
         m_started = QDateTime::currentDateTimeUtc();
+        m_automatic = !manual;
         m_added = false;
         m_history = QJsonArray();
         m_receipt = QJsonObject();
         m_board = Board();
         m_serial.clear();
         m_transport.clear();
+        m_discoveryStopRevision=m_session->stopRevision();
         m_phase = "adb_device_discovery";
         run(m_adb, {"devices", "-l"}, 6000, [this, manual](int code, const QByteArray &output) {
             if (code != 0) {
@@ -395,11 +432,10 @@ private:
                 }
                 try {
                     const auto identity = parseIdentity(m_serial, probe);
+                    m_history.append(QJsonObject{{"phase",m_phase},{"usb_ipv4",QJsonArray::fromStringList(identity.addresses)}});
+                    if(manual && !confirmedIdentityMatches(m_expectedIdentity,identity,m_transport))
+                        throw std::runtime_error("The confirmed USB device changed; reconnect it and try again.");
                     RvDeviceStore store(m_session->deviceStorePath());
-                    if (knownIdentity(store.profiles(), identity) && !manual) {
-                        m_seen = attachment;
-                        return;
-                    }
                     m_board = enrollmentBoard(identity,store.profiles());
                 } catch (const std::exception &error) {
                     if (manual) {
@@ -416,10 +452,27 @@ private:
                     }
                     return;
                 }
-                m_seen = attachment;
-                if (m_board.existing && m_board.profile.ready())
-                    prepare(m_board.profile.cameraMountRotation,m_board.profile.inputRotation);
-                else offer();
+                // ADB may briefly retain a detached transport, and RNDIS can
+                // enumerate later. A saved profile/ADB response is not proof
+                // that this physical USB network adapter is connected now.
+                m_phase = "windows_rndis_presence";
+                runNetwork(true,false,[this,attachment,manual](int code,const QByteArray &) {
+                    if (code != 0) {
+                        m_seen.clear();
+                        if (manual) fail(tr("Could not configure the RV1103 USB network adapter."));
+                        return; // No prompt or failed-import dialog while absent.
+                    }
+                    if(manual ? !canOffer() : !canOfferAutomatically())return;
+                    m_seen = attachment;
+                    if(m_session->stopRevision()!=m_discoveryStopRevision)return;
+                    if(manual)prepare(false);
+                    else if(!m_board.existing)offerSetup(false);
+                    else {
+                        // A Stop during this attachment is never undone.
+                        m_session->deviceUnreachable(m_board.profile.id);
+                        if(m_session->automaticStartAllowed(m_board.profile.id))prepare(true);
+                    }
+                });
             });
         });
     }
@@ -433,86 +486,49 @@ private:
                 result(code, output);
             });
     }
-    void offer()
+    void offerSetup(bool existingDevice,bool networkSetup=false)
     {
         m_prompting = true;
-        QDialog confirm(promptParent());
-        confirm.setObjectName("rvUsbEnrollmentPrompt");
-        confirm.setWindowTitle(tr("New RV1103 detected"));
-        auto *layout = new QVBoxLayout(&confirm);
-        auto *summary = new QLabel(
-            tr("Add USB device %1 and start imaging?\n\nSSH fingerprint: %2\n"
-               "This uses the factory login and F=%3 calibration. Verify the two angles below. "
-               "Any current imaging session will stop. "
-               "Windows may ask for permission to configure the USB network adapter.")
-                .arg(m_serial, m_board.profile.fingerprint()).arg(m_board.profile.fov()), &confirm);
-        summary->setText(summary->text()+"\n\n"+tr("Required board files will be checked and replaced when missing or different. "
-            "Continue only if the camera and ToF assembly match the selected calibration."));
-        summary->setWordWrap(true);
-        summary->setTextInteractionFlags(Qt::TextSelectableByMouse);
-        layout->addWidget(summary);
-        auto *angles = new QFormLayout;
-        layout->addLayout(angles);
-        const auto addAngle = [&](const QString &label) {
-            auto *choice = new QComboBox(&confirm);
-            choice->addItem(QStringLiteral("0\u00B0"), 0);
-            choice->addItem(QStringLiteral("180\u00B0"), 180);
-            angles->addRow(label, choice);
-            return choice;
-        };
-        auto *mount = addAngle(tr("Camera mounting angle"));
-        mount->setCurrentIndex(mount->findData(m_board.profile.cameraMountRotation));
-        auto *input = addAngle(tr("Host inference input orientation"));
-        input->setCurrentIndex(input->findData(m_board.profile.inputRotation<0?0:m_board.profile.inputRotation));
-        auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &confirm);
-        buttons->button(QDialogButtonBox::Ok)->setText(tr("Add device"));
-        auto *cancel = buttons->button(QDialogButtonBox::Cancel);
-        cancel->setText(tr("Cancel"));
-        cancel->setDefault(true);
-        cancel->setFocus();
-        connect(buttons, &QDialogButtonBox::accepted, &confirm, &QDialog::accept);
-        connect(buttons, &QDialogButtonBox::rejected, &confirm, &QDialog::reject);
-        layout->addWidget(buttons);
-        confirm.resize(510, confirm.sizeHint().height());
-        const auto answer = confirm.exec();
+        m_window->offerUsbSetup(existingDevice,networkSetup,{{"serial",m_serial},{"boot_id",m_board.boot},
+            {"public_key",m_board.profile.publicKey},{"transport",m_transport}});
         m_prompting = false;
-        if (answer != QDialog::Accepted || !canOffer()) return;
-        prepare(mount->currentData().toInt(),input->currentData().toInt());
     }
-    void prepare(int mountAngle,int inputAngle)
+    void prepare(bool automatic)
     {
+        m_automatic=automatic;
         m_phase = "prepare_installation";
         const auto worker = RuntimeDiscovery::rvControlForLaunch();
         if (!worker.error.isEmpty()) { fail(worker.error); return; }
-        if (!m_session->userStopped() || m_session->busy()) m_session->stop();
-        if (!idle()) { fail(tr("Stop imaging before setting up the new RV1103.")); return; }
+        if (!automatic && (!m_session->userStopped() || m_session->busy())) m_session->stop();
+        m_stopRevision=m_session->stopRevision();
+        if (!operationAllowed()) { if(!automatic)fail(tr("Stop imaging before setting up the new RV1103.")); return; }
         m_phase = "adb_identity_recheck";
-        shell(probeCommand, [this, mountAngle, inputAngle](int status, const QByteArray &probe) {
-            if (!idle()) return;
+        shell(probeCommand, [this](int status, const QByteArray &probe) {
+            if (!operationAllowed()) return;
             try {
                 if (status != 0) throw std::runtime_error("USB identity probe failed.");
                 RvDeviceStore store(m_session->deviceStorePath());
                 const auto current = enrollmentBoard(parseIdentity(m_serial, probe),store.profiles());
-                if (current.boot != m_board.boot || current.profile.json() != m_board.profile.json()
-                    || current.address != m_board.address || current.bootstrap != m_board.bootstrap)
-                    throw std::runtime_error("The RV1103 identity or address changed.");
+                if (current.boot != m_board.boot || current.profile.json() != m_board.profile.json())
+                    throw std::runtime_error("The RV1103 identity changed.");
+                // The image may have finished setting usb0 up since discovery.
+                m_board=current;
             } catch (const std::exception &) {
-                fail(tr("The RV1103 connection changed. Reconnect the board and try again."));
+                if(m_automatic)m_seen.clear();
+                else fail(tr("The RV1103 connection changed. Reconnect the board and try again."));
                 return;
             }
-            m_board.profile.cameraMountRotation = mountAngle;
-            m_board.profile.inputRotation = inputAngle;
+            if(m_automatic && !boardAddressReady(m_board)) { offerSetup(true,true); return; }
             configureNetwork(false);
         });
     }
-    void configureNetwork(bool elevated)
+    void runNetwork(bool presenceOnly,bool elevated,Result result)
     {
-        if (!idle()) return;
-        m_phase = elevated ? "windows_rndis_configuration_elevated" : "windows_rndis_configuration";
         const auto ps = QDir(qEnvironmentVariable("SystemRoot", "C:/Windows"))
             .filePath("System32/WindowsPowerShell/v1.0/powershell.exe");
-        auto script = QStringLiteral("$usbParent = 'USB\\VID_2207&PID_0019\\%1'\n$elevated = $%2\n")
-            .arg(m_serial, elevated ? "true" : "false") + QString::fromLatin1(networkScript);
+        auto script = QStringLiteral("$usbParent = 'USB\\VID_2207&PID_0019\\%1'\n$elevated = $%2\n$presenceOnly = $%3\n$waitForAdapter = $%4\n")
+            .arg(m_serial, elevated ? "true" : "false",presenceOnly ? "true" : "false",
+                 m_automatic ? "false" : "true") + QString::fromLatin1(networkScript);
         if (elevated) {
             script = QStringLiteral(
                 "$ErrorActionPreference='Stop'; $p=Start-Process -FilePath "
@@ -522,11 +538,22 @@ private:
                 .arg(encodedPowerShell(script));
         }
         run(ps, {"-NoProfile", "-NonInteractive", "-EncodedCommand", encodedPowerShell(script)},
-            elevated ? 120000 : 15000, [this, elevated](int code, const QByteArray &) {
-                if (!idle()) return;
-                if (!elevated && code == 10) { configureNetwork(true); return; }
+            elevated ? 120000 : 15000,std::move(result));
+    }
+    void configureNetwork(bool elevated)
+    {
+        if (!operationAllowed()) return;
+        m_phase = elevated ? "windows_rndis_configuration_elevated" : "windows_rndis_configuration";
+        runNetwork(false,elevated,[this, elevated](int code, const QByteArray &) {
+                if (!operationAllowed()) return;
+                if (code == 11 && m_automatic) { m_seen.clear(); return; }
+                if (!elevated && code == 10) {
+                    if(m_automatic)offerSetup(true,true);
+                    else configureNetwork(true);
+                    return;
+                }
                 if (code != 0) { fail(tr("Could not configure the RV1103 USB network adapter.")); return; }
-                if (m_board.address.isEmpty()) {
+                if (!boardAddressReady(m_board)) {
                     m_phase = "board_usb_ipv4_configuration";
                     shell(configureBoardCommand(m_board), [this](int status, const QByteArray &) {
                         if (status != 0) { fail(tr("Could not assign an IPv4 address to the RV1103.")); return; }
@@ -537,11 +564,11 @@ private:
     }
     void verify()
     {
-        if (!idle()) return;
-        m_phase = "ssh_runtime_check_and_repair";
+        if (!operationAllowed()) return;
+        m_phase = m_automatic ? "ssh_complete_runtime_inspection" : "ssh_runtime_check_and_repair";
         const auto worker = RuntimeDiscovery::rvControlForLaunch();
         if (!worker.error.isEmpty()) { fail(worker.error); return; }
-        QStringList args{"--verify-usb-enrollment",
+        QStringList args{m_automatic ? "--check-usb-enrollment" : "--verify-usb-enrollment",
             QString::fromUtf8(QJsonDocument(m_board.profile.json()).toJson(QJsonDocument::Compact)),
             m_board.boot, m_board.bootstrap ? QStringLiteral("fresh") : QStringLiteral("installed")};
         try {
@@ -550,15 +577,26 @@ private:
         }catch(const std::exception &error){fail(QString::fromUtf8(error.what()));return;}
         run(worker.executable, args,
             180000, [this](int code, const QByteArray &output) {
-                if (!idle()) return;
+                if (!operationAllowed()) return;
                 QJsonParseError parse;
                 const auto receipt=QJsonDocument::fromJson(output,&parse).object();
                 m_receipt={{"json_status",parse.errorString()},{"response_bytes",output.size()},
                            {"verified",receipt["verified"].toBool()},
-                           {"litesr_model",receipt["litesr_model"].toString()},
+                           {"capture_runtime",receipt["capture_runtime"].toString()},
                            {"automatic_tof",receipt["automatic_tof"].toString()},
                            {"runtime_replaced",receipt["runtime_replaced"].toBool()}};
-                if (code != 0 || receipt["verified"] != true || receipt["litesr_model"]!="ready" || receipt["automatic_tof"]!="ready") {
+                if(m_automatic) {
+                    if(code==0 && parse.error==QJsonParseError::NoError) {
+                        const auto inspection=inspectReceipt(receipt,m_board);
+                        if(inspection==RuntimeInspection::Update) { offerSetup(true); return; }
+                        if(inspection==RuntimeInspection::Ready) { registerAndStart(); return; }
+                    }
+                    const auto error=receipt["setup_error"].toString();
+                    fail(error.isEmpty() ? tr("RV1103 verification failed. Check its factory login, calibration and USB connection.")
+                                        : tr("RV1103 setup unavailable: %1").arg(error));
+                    return;
+                }
+                if (code != 0 || receipt["verified"] != true || receipt["capture_runtime"]!="ready" || receipt["automatic_tof"]!="ready") {
                     const auto error=receipt["setup_error"].toString();
                     fail(error.isEmpty() ? tr("RV1103 verification failed. Check its factory login, calibration and USB connection.")
                                          : tr("RV1103 setup unavailable: %1").arg(error));
@@ -566,20 +604,27 @@ private:
                 }
                 if(m_requester)m_requester->setProperty("rvUsbRuntimeReplaced",receipt["runtime_replaced"].toBool());
                 m_phase = "device_profile_registration";
-                try {
-                    RvDeviceStore store(m_session->deviceStorePath());
-                    if(store.revision()!=m_registryRevision)throw std::runtime_error("Device registry changed during USB setup; retry the connection.");
-                    auto profile = m_board.profile;
-                    const auto old = store.profiles();
-                    auto updated = RvDeviceStore::mergeProfiles(old, {profile});
-                    if(m_board.existing)for(auto &entry:updated)if(entry.id==profile.id)entry=profile;
-                    store.save(updated, profile.id);
-                    m_added = true;
-                    if(!m_board.existing)QSettings().remove(RvSessionController::legacyHostInputRotationKey(profile));
-                    m_session->reloadDeviceProfiles();
-                    if (idle() && m_session->deviceProfile().json() == profile.json())m_session->start();
-                } catch (const std::exception &error) { fail(QString::fromUtf8(error.what())); }
+                registerAndStart();
             }, RuntimeDiscovery::nativeWorkerEnvironment(worker.executable));
+    }
+    void registerAndStart()
+    {
+        if(!operationAllowed())return;
+        try {
+            RvDeviceStore store(m_session->deviceStorePath());
+            if(store.revision()!=m_registryRevision)throw std::runtime_error("Device registry changed during USB setup; retry the connection.");
+            const auto profile=m_board.profile;
+            auto updated=RvDeviceStore::mergeProfiles(store.profiles(),{profile});
+            if(m_board.existing)for(auto &entry:updated)if(entry.id==profile.id)entry=profile;
+            store.save(updated,profile.id);
+            m_added=true;
+            if(!m_board.existing)QSettings().remove(RvSessionController::legacyHostInputRotationKey(profile));
+            m_session->reloadDeviceProfiles();
+            if(idle() && m_session->deviceProfile().json()==profile.json()) {
+                if(m_automatic)m_session->startAutomatically(true);
+                else m_session->start();
+            }
+        } catch(const std::exception &error) { fail(QString::fromUtf8(error.what())); }
     }
     void fail(const QString &message)
     {
@@ -591,19 +636,33 @@ private:
             {"inference_input_degrees",m_board.profile.inputRotation},{"profile_registered",m_added},
             {"process_history",m_history},{"board_receipt",m_receipt}};
         if (!m_board.profile.publicKey.isEmpty()) details["ssh_fingerprint"]=m_board.profile.fingerprint();
+        if (m_automatic) {
+            // Background detection must not interrupt a disconnected startup
+            // or a hot unplug. Explicit USB setup still reports actionable errors.
+            const auto directory=QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation);
+            RvImportDiagnostics::writeReport(QDir(directory).filePath("DctsDiagnostics/rv1103"),
+                                            "usb_enrollment",message,details);
+            m_window->statusBar()->showMessage(message,10000);
+            m_prompting=false;
+            return;
+        }
         RvImportDiagnostics::showFailure(promptParent(),"usb_enrollment",message,details);
         m_prompting = false;
     }
 
     QPointer<RvSessionController> m_session;
     QPointer<RvDeviceManagerDialog> m_requester;
-    QWidget *m_window;
+    SensorMainWindow *m_window;
     QString m_adb, m_seen, m_notice, m_serial, m_transport, m_phase, m_processStatus, m_registryRevision;
     QDateTime m_started;
     QJsonArray m_history;
     QJsonObject m_receipt;
+    QJsonObject m_expectedIdentity;
     Board m_board;
     bool m_prompting = false, m_added = false;
+    bool m_automatic=false;
+    quint64 m_stopRevision=0;
+    quint64 m_discoveryStopRevision=0;
     QTimer m_poll, m_timeout;
     QProcess m_process;
     Result m_result;
@@ -622,7 +681,7 @@ QJsonObject checkRvUsbEnrollment()
     const QByteArray attached = serial.toLatin1() + " device product:occam transport_id:2\r\n";
     const auto found = findTransport(attached);
     RvDeviceProfile reference;
-    reference.calibration = "rv20261008-f1";
+    reference.calibration = QLatin1String(RvCalibration::Id);
     reference.publicKey = "AAAAC3NzaC1lZDI1NTE5AAAAIAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB";
     const QByteArray identity = serial.toLatin1() + "\r\n"
         + "5313e1f0-cbaf-48c4-8020-adf4ead884cc\r\nssh-ed25519 "
@@ -653,6 +712,8 @@ QJsonObject checkRvUsbEnrollment()
     QFile reportFile(report);
     const auto diagnostic=reportFile.open(QIODevice::ReadOnly)
         ? QJsonDocument::fromJson(reportFile.readAll()).object() : QJsonObject();
+    const QJsonObject confirmedIdentity{{"serial",serial},{"boot_id",usbIdentity.boot},
+        {"public_key",usbIdentity.key},{"transport","2"}};
     return {
         {"USB_IMPORT_DIAGNOSTIC_REPORT_WRITTEN", temp.isValid() && diagnostic["operation"]=="test_usb_setup"
             && diagnostic["reason"]=="test failure" && diagnostic["details"].toObject()["serial"]==serial
@@ -662,41 +723,73 @@ QJsonObject checkRvUsbEnrollment()
         {"USB_SILENT_SUCCESS_RECEIPT_ACCEPTED", stripShellReceipt(silentReceipt) && silentReceipt.isEmpty()},
         {"USB_PROBE_PAYLOAD_RETAINED", stripShellReceipt(probeReceipt) && probeReceipt.trimmed() == "identity"},
         {"USB_MISSING_COMPLETION_RECEIPT_REJECTED", !stripShellReceipt(failureReceipt)},
+        {"USB_CONFIRMED_HANDOFF_ACCEPTS_SAME_ATTACHMENT",confirmedIdentityMatches(confirmedIdentity,usbIdentity,"2")},
+        {"USB_CONFIRMED_HANDOFF_REJECTS_OTHER_SERIAL",!confirmedIdentityMatches(confirmedIdentity,changedSerial,"2")},
+        {"USB_CONFIRMED_HANDOFF_REJECTS_OTHER_KEY",!confirmedIdentityMatches(confirmedIdentity,changedKey,"2")},
+        {"USB_CONFIRMED_HANDOFF_REJECTS_REPLUG",!confirmedIdentityMatches(confirmedIdentity,usbIdentity,"3")},
+        {"USB_CONFIRMED_HANDOFF_REJECTS_REBOOT",[&]{auto reboot=usbIdentity;reboot.boot="00000000-0000-0000-0000-000000000000";
+            return !confirmedIdentityMatches(confirmedIdentity,reboot,"2");}()},
         {"USB_SINGLE_ADB_DEVICE_DETECTED", found.serial == serial && found.id == "2"},
+        {"USB_NO_ATTACHED_DEVICE_IGNORED",findTransport("List of devices attached\r\n\r\n").serial.isEmpty()},
         {"USB_AMBIGUOUS_TRANSPORT_REJECTED", findTransport(attached + attached).id.isEmpty()},
         {"USB_OFFLINE_AND_TCP_TRANSPORTS_IGNORED",
          findTransport("1234567890abcdef offline transport_id:2\n172.32.0.93:5555 device transport_id:3\n").id.isEmpty()},
         {"USB_UNADDRESSED_BOARD_ACCEPTED", blank.address.isEmpty() && blank.profile.host == host},
         {"USB_EXISTING_SUPPORTED_ADDRESS_PRESERVED", addressed.address == "172.32.0.93/16"},
-        {"USB_EXISTING_DIFFERENT_ADDRESS_REJECTED", rejects([&] {
-            enrollmentBoard(parseIdentity(serial, identity + "172.32.0.94/16"));
-        })},
-        {"USB_PROFILE_USES_F1_AND_VERIFIED_ZERO_ORIENTATION", blank.profile.ready() && blank.profile.fov() == 1
-            && blank.profile.inputRotation == 0 && blank.profile.cameraMountRotation == 180},
-        {"USB_MISMATCHED_SERIAL_REJECTED", rejects([&] { parseIdentity("0000000000000000", identity); })},
-        {"USB_F2_GEOMETRY_SELECTS_F2_PROFILE", enrollmentBoard(f2).profile.fov() == 2},
-        {"USB_PARTIAL_F2_RUNTIME_PRESERVES_CALIBRATION", [&] {
-            auto partial=f2;partial.servicesReady=false;return enrollmentBoard(partial).profile.fov()==2;
+        {"USB_FIRMWARE_TEMPORARY_ADDRESS_CAN_BE_CONFIGURED",[&] {
+            const auto temporary=enrollmentBoard(parseIdentity(serial,identity+"172.32.0.70/16\r\n"));
+            return !boardAddressReady(temporary) && temporary.address=="172.32.0.70/16" && temporary.profile.ready();
         }()},
-        {"USB_KNOWN_SERIAL_NOT_REENROLLED", knownIdentity({addressed.profile}, changedKey)},
-        {"USB_KNOWN_KEY_NOT_REENROLLED", knownIdentity({addressed.profile}, changedSerial)},
+        {"USB_ADDITIONAL_BOARD_ADDRESS_ACCEPTED",boardAddressReady(enrollmentBoard(parseIdentity(serial,
+            identity+"192.168.1.1/24\r\n172.32.0.93/16\r\n")))},
+        {"USB_BLANK_ADDRESS_LINES_IGNORED",boardAddressReady(enrollmentBoard(parseIdentity(serial,
+            identity+"\r\n172.32.0.93/16\r\n\r\n")))},
+        {"USB_WRONG_PREFIX_REQUIRES_CONFIGURATION",!boardAddressReady(enrollmentBoard(parseIdentity(serial,
+            identity+"172.32.0.93/24\r\n")))},
+        {"USB_PROFILE_USES_F6_AND_VERIFIED_ZERO_ORIENTATION", blank.profile.ready() && blank.profile.fov() == 6
+            && blank.profile.inputRotation == 0 && blank.profile.cameraMountRotation == 0},
+        {"USB_MISMATCHED_SERIAL_REJECTED", rejects([&] { parseIdentity("0000000000000000", identity); })},
+        {"USB_OLD_F2_GEOMETRY_MIGRATES_TO_F6", enrollmentBoard(f2).profile.fov() == 6},
+        {"USB_PARTIAL_RUNTIME_USES_CURRENT_CALIBRATION", [&] {
+            auto partial=f2;partial.servicesReady=false;return enrollmentBoard(partial).profile.fov()==6;
+        }()},
+        {"USB_AUTOMATIC_MATCH_REQUIRES_COMPLETE_INSPECTION", inspectReceipt({{"verified",true},
+            {"serial",serial},{"boot_id",addressed.boot},{"runtime_matches",true}},addressed)==RuntimeInspection::Ready},
+        {"USB_AUTOMATIC_MISMATCH_REQUIRES_UPDATE", inspectReceipt({{"verified",true},
+            {"serial",serial},{"boot_id",addressed.boot},{"runtime_matches",false}},addressed)==RuntimeInspection::Update},
+        {"USB_PARTIAL_RUNTIME_RECEIPT_CANNOT_AUTOSTART", inspectReceipt({{"verified",true},
+            {"serial",serial},{"boot_id",addressed.boot},{"capture_runtime","ready"},{"automatic_tof","ready"}},addressed)==RuntimeInspection::Invalid},
+        {"USB_WRONG_SERIAL_INSPECTION_REJECTED", inspectReceipt({{"verified",true},
+            {"serial","0000000000000000"},{"boot_id",addressed.boot},{"runtime_matches",true}},addressed)==RuntimeInspection::Invalid},
+        {"USB_PREVIOUS_BOOT_INSPECTION_REJECTED", inspectReceipt({{"verified",true},
+            {"serial",serial},{"boot_id","00000000-0000-0000-0000-000000000000"},{"runtime_matches",true}},addressed)==RuntimeInspection::Invalid},
+        {"USB_STRING_MATCH_RECEIPT_REJECTED", inspectReceipt({{"verified",true},
+            {"serial",serial},{"boot_id",addressed.boot},{"runtime_matches","true"}},addressed)==RuntimeInspection::Invalid},
+        {"USB_UNVERIFIED_INSPECTION_REJECTED", inspectReceipt({{"verified",false},
+            {"serial",serial},{"boot_id",addressed.boot},{"runtime_matches",true}},addressed)==RuntimeInspection::Invalid},
         {"USB_PARTIAL_RUNTIME_CAN_BE_REPAIRED", enrollmentBoard(noServices).bootstrap},
         {"USB_SAVED_IDENTITY_IS_REUSED_WITH_SETTINGS", [&] {
             auto saved=addressed.profile;saved.id="local-alias";saved.name="Saved board";saved.temporaryFovCalibration=true;
             saved.cameraMountRotation=0;saved.inputRotation=180;saved.host="192.168.1.2";
-            auto expected=saved;expected.host=host;
+            auto expected=saved;expected.host=host;expected.temporaryFovCalibration=false;
             const auto board=enrollmentBoard(usbIdentity,{saved});
             return board.existing&&board.profile.json()==expected.json();
         }()},
+        {"USB_UNCONFIGURED_SAVED_CALIBRATION_DETECTED_AUTOMATICALLY",[&]{
+            auto saved=addressed.profile;saved.calibration="unconfigured";saved.inputRotation=-1;
+            const auto board=enrollmentBoard(usbIdentity,{saved});
+            return board.existing && board.profile.fov()==6 && board.profile.inputRotation==0
+                && board.profile.cameraMountRotation==0 && board.profile.ready();
+        }()},
         {"USB_SAVED_SERIAL_KEY_CONFLICT_REJECTED", rejects([&] {enrollmentBoard(changedKey,{addressed.profile});})},
         {"USB_SAVED_KEY_SERIAL_CONFLICT_REJECTED", rejects([&] {enrollmentBoard(changedSerial,{addressed.profile});})},
-        {"USB_SAVED_CALIBRATION_CONFLICT_REJECTED", rejects([&] {enrollmentBoard(f2,{addressed.profile});})},
+        {"USB_OLD_CALIBRATION_MIGRATES_TO_RELEASE", enrollmentBoard(f2,{addressed.profile}).profile.fov()==6},
         {"USB_FRESH_BOARD_ACCEPTED_WITHOUT_DELIVERY_DRIVER", [&] {
             auto raw=identity;
             raw.replace(reference.geometrySha().toLatin1()+"  /root/r144_depth/M48_geometry.bin\r\nready",
                          "missing\r\nbootstrap");
             const auto board=enrollmentBoard(parseIdentity(serial,raw));
-            return board.bootstrap && board.profile.ready() && board.profile.fov()==1
+            return board.bootstrap && board.profile.ready() && board.profile.fov()==6
                 && board.address.isEmpty() && configureBoardCommand(board).contains(board.boot)
                 && !configureBoardCommand(board).contains("tof_driver")
                 && !configureBoardCommand(board).contains("M48_geometry.bin");
@@ -707,12 +800,12 @@ QJsonObject checkRvUsbEnrollment()
         {"USB_PARTIAL_BOARD_WITH_GEOMETRY_CAN_BE_REPAIRED", [&] {
             auto probe=noServices;
             probe.bootstrap=true;
-            return enrollmentBoard(probe).profile.fov()==1;
+            return enrollmentBoard(probe).profile.fov()==6;
         }()},
-        {"USB_DAMAGED_GEOMETRY_REQUIRES_F1_CONFIRMATION", [&] {
+        {"USB_DAMAGED_GEOMETRY_USES_DEFAULT_F6", [&] {
             auto changed = identity;
             changed.replace(reference.geometrySha().toLatin1(), QByteArray(64, '0'));
-            return enrollmentBoard(parseIdentity(serial, changed)).profile.fov()==1;
+            return enrollmentBoard(parseIdentity(serial, changed)).profile.fov()==6;
         }()},
     };
 }

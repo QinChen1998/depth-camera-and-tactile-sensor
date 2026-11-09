@@ -1,8 +1,12 @@
 # 三模型接入、LiteSR 纯深度与上位机清理
 
+> 历史记录：2026-11-09 当前产品已移除全部 LiteSR 板端推理，仅保留上位机 H。本文的旧入口、源码路径、资源及实测结果对应当时版本；当前说明见 [仅保留上位机辅助推理](HOST_ASSIST_ONLY.md)。
+
+2026-11-08 当前开发版已移除 Tiny，保留 LiteSR 普通／高精度和主机 H 三项入口。见 [Tiny 退役记录](TINY_NV12_INTEGRATION.md) 和 [LiteSR 高精度记录](LITESR384_HIGH_ACCURACY.md)。用户取消本轮实机采集；下文全部为 2026-11-06 历史基线，其菜单、准备步骤和性能数据不适用于当前版本。
+
 更新：2026-11-06。本轮修改上位机及其配套板端导入资源；后续已制作包含三项方案的 v1.1.6 安装包，见 [安装记录](INSTALLER_1_1_6.md)。**清理仅限 `E:/WORK/Depth Camera and Tactile Sensor`；`E:/WORK/dToF`、`E:/WORK/RV1103-1106` 的研究模型、权重、训练与实验记录均保留。**
 
-## 当前行为
+## 2026-11-06 行为与验证基线
 
 | 用户可见模型 | 会话预设 | 板端相机和上位机显示 |
 |---|---|---|
@@ -40,6 +44,6 @@ LiteSR 384 密文和权重未改，保留原径向米制、同帧原生 D/I、�
 
 ## 清理与运行
 
-从上位机移出旧 RGB576、LiteSR 256/128、旧 512 网络源码、旧部署副本及包含旧模型的历史交付/备份，共 **59 个目标、18,933 个文件、17,389,542,218 字节**。移动前后逐文件 SHA256 一致；清理清单与原件在 [项目外归档](../../dToF/output/litesr_depth_only_20261106_v1/retired_host_assets/) 和 [移动回执](../../dToF/output/litesr_depth_only_20261106_v1/retirement_result.json)。当前 640×480、LiteSR 384、Tiny 和磁触觉资源保留。dToF 原模型目录和原训练产物没有移除。
+从上位机移出旧 RGB576、LiteSR 256/128、旧 512 网络源码、旧部署副本及包含旧模型的历史交付/备份，共 **59 个目标、18,933 个文件、17,389,542,218 字节**。移动前后逐文件 SHA256 一致；清理清单与原件在 历史项目外归档路径 `../../dToF/output/litesr_depth_only_20261106_v1/retired_host_assets/`（当前路径未找到） 和 [移动回执](../../dToF/output/litesr_depth_only_20261106_v1/retirement_result.json)。当前 640×480、LiteSR 384、Tiny 和磁触觉资源保留。dToF 原模型目录和原训练产物没有移除。
 
 历史 1.1.3/1.1.4/1.1.5 安装程序原字节保留在项目外归档。当前开发入口为 [START_RELEASE.cmd](../START_RELEASE.cmd) / [Release 主程序](../x64/Release/触想工作台.exe)，三模型安装版为 v1.1.6。

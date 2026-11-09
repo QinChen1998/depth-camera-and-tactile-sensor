@@ -38,7 +38,6 @@ void Settings::validate() const {
 QSize Settings::size() const {validate();return mode<=4?QSize(8,8):mode<=7?QSize(16,16):mode<=10?QSize(32,32):QSize(48,32);}
 bool Settings::dual() const{return mode==3||mode==4||mode==7||mode==10||mode==13;}
 bool Settings::nativeCompatible() const{return size()==QSize(48,32);}
-bool Settings::liteSrCompatible() const{return (mode==11||mode==12)&&objects==1&&signal&&!noise;}
 // UniDepth retains its calibrated M48 ordinary-mode policy.
 bool Settings::hostDepthCompatible() const{return mode==11&&objects==1&&!noise;}
 bool Settings::fp16Native16Compatible() const{return (mode==5||mode==6)&&objects==1&&!noise;}

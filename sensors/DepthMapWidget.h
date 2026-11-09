@@ -39,6 +39,7 @@ public:
     int selectedHeight() const;
     int displayRotationDegrees() const;
     void setDisplayRotationDegrees(int degrees);
+    int nativeTofRotationDegrees() const { return m_nativeTofRotation; }
 
 protected:
     void changeEvent(QEvent *event) override;
@@ -49,12 +50,11 @@ private:
     void cancelImagingSwitchUi();
     void advanceImagingSwitchUi();
     bool eventFilter(QObject *watched,QEvent *event) override;
-    void clearCandidate(const QString& reason);
-    void holdCandidate();
-    RvDepthView* m_candidateCanvas=nullptr;
-    void acceptCandidate(const RvDtofCandidates::Result& result);
-    DepthSnapshot m_candidateSnapshot;
     void saveCurrentFrame();
+    void editNativeTofRotation();
+    void syncNativeTofRotation();
+    QPushButton *m_nativeTofAngle = nullptr;
+    int m_nativeTofRotation = 90;
     QPushButton *m_saveButton = nullptr;
     QCheckBox *m_saveCamera = nullptr;
     QCheckBox *m_blackOutsideRange = nullptr;
@@ -62,9 +62,6 @@ private:
     QPushButton *m_applyColorRange = nullptr;
     DepthSnapshot m_snapshot;
     DepthSnapshot m_assistSnapshot;
-    QPushButton *m_liteSrRepairButton=nullptr;
-    QCheckBox *m_boardLiteSrHostContour=nullptr;
-    void editLiteSrRepairSettings();
     void retranslateUi();
     void syncSessionControls();
     QStringList m_sessionControlsKey;

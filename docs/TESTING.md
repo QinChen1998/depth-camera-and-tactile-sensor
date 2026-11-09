@@ -1,8 +1,17 @@
 # 测试与源码统计
 
-从项目根目录执行。工具输出使用新的 `x64/validation/<本轮目录>/`；不覆盖已有报告。历史实机报告不能代替当前改动的验收。
+2026-11-09 后续变更：新增两档 48×32 原生 ToF，固定使用报告标定并完整导入板端，见 [默认标定与原生 ToF 模式](DEFAULT_CALIBRATION_NATIVE_TOF.md)。
+从项目根目录执行。工具输出使用新的 `x64/validation/<本轮目录>/`；不覆盖已有报告。历史实机报告不能代替当前改动的验收。2026-11-08 已将既有验证历史按原路径归档，恢复与 SHA256 索引见 [本地归档](../archives/README.md)。
+
+USB 启动与新板接入修复的证据目录为 `x64/validation/usb_startup_20261109/`。`python -m unittest discover -s tests -p test_usb_network.py -v` 在临时文件系统和模拟 Windows 网卡上运行实际探测/配置脚本，覆盖断开、迟到枚举、错误父设备、固件临时地址、旧地址保留及失败回滚；不访问硬件。C++ 专项继续通过统一 runner 的 `rv-usb-enrollment-test` 执行。USB 实机验证在临时设置中选择 H，避免用户保存的原生档位影响深度统计，正常启动仍保留用户选择。
+
+两档原生 ToF 水平镜像与设备管理角度控件移除的证据目录为 `x64/validation/native_tof_mirror_20261109/`。`port-ui-smoke-test` 用不对称测点验证自定义角度及四个全局旋转下的屏幕水平镜像、悬停原始索引和距离、两档快照不变、UniDepth 不镜像，以及设备保存仍保留既有方向。此次为主机显示改动，使用离线测试，不更新板端文件。
+
+当前成像入口为主机 H，以及不使用神经网络的 48×32 原生 ToF 普通／高精度两档。LiteSR 普通／高精度、Tiny 的模型、推理程序和切换模板已移除。下文板端推理实测章节均为对应日期的历史结果，不能据此运行已删除目标。模型移除记录见 [仅保留上位机辅助推理](HOST_ASSIST_ONLY.md)，当前三档见 [默认标定与原生 ToF 模式](DEFAULT_CALIBRATION_NATIVE_TOF.md)。
 
 ## 构建与离线专项
+
+推理设备新增专项见 [UniDepth 推理设备选择](MULTI_BACKEND_INFERENCE.md)。`tools/test_inference_backends.ps1` 负责实际模型检测、选项策略、完整深度输出、加密加载及设置界面；`tools/verify_port.py` 可对同后端的开发／安装运行包作同输入对照。该专项不扩展下述八组标志的白名单。本轮输出为 `x64/validation/multibackend_20261109/`。
 
 ```powershell
 ./tools/build_desktop.ps1 -Configuration Release -QtRoot E:/Qt/6.11.1/msvc2022_64
@@ -25,11 +34,21 @@ python -m unittest discover -s tests -p 'test_*.py' -v
 | `tactile-3d-test` | QML 三维数据与生命周期 |
 | `tactile-render-test` | 三维渲染、交互、显示刷新和关闭 |
 | `rv-assist-recovery-test` | 当前 640×480 H 模型/F1/F2 的米制几何、100 ms 边界、原生点有效性、尺度连续性与 schema 1/2 诊断 |
-| `rv-usb-enrollment-test` | USB 身份、地址规划、已有设备复用、配置保留及登记准入 |
+| `rv-usb-enrollment-test` | USB 身份、地址规划、已有设备复用、完整检查回执、设置交接身份及登记准入 |
 
 脚本清除继承的 RV/DCTS/Python/Qt 覆盖，强制 `RV_TEST_OFFLINE_ONLY=1`，TEMP/TMP 指向本轮输出的 `tmp/`。调参测试只使用本机 TCP 回环；需要允许本机回环连接，不会打开真实设备。连接失败/超时不能冒充协议拒绝通过负例。QtMsBuild 需要读取本机 Qt 注册表；访问被沙箱拒绝时应修正运行环境，不改模型或设备参数。
 
 判定同时检查退出码、报告存在、有独立 PASS 断言且无 FAIL。统计不把 `BYPASS` 字符串或 `RESULT PASS` 汇总行当作新断言。Python 测试覆盖缺报告、空报告、仅汇总、FAIL、非零退出、环境隔离和非离线命令拒绝。
+
+## USB 自动发现与免填参数（2026-11-09）
+
+当前自动发现不再通过单独的 SSH 端口探测绕过完整文件检查。已保存设备仅在完整资源检查回执通过后自动选择并启动 H；新设备、文件更新或缺少 USB 网络配置时，确认后自动打开设备管理并调用同一个 USB 连接入口。新设备使用安装 180°／推理 0°，已有方向与临时 FOV 设置保留；USB 登录复用保存凭据或工厂 root 登录，不弹出密码或角度输入框。
+
+USB 专项覆盖完整检查回执的真／假／缺失／错误类型、错误序列号和旧 boot ID，以及确认后的换板、公钥变化、重插和重启拒绝。UI 专项实际操作中英文添加／更新提示，验证取消、确认后自动进入设置与排队前停止撤销；所有入口继续受离线保护。原生 worker 自检验证检查与安装共用完整文件计划、长期参数保留、缺凭据的免提示分支及非工厂账号拒绝。Python 测试继续在映射的临时文件系统中执行安装与回滚脚本。
+
+Release/Debug 构建均通过，两配置各八组离线专项、各 1320 个断言通过，原生 worker 各 61 项自检通过，Python 44 项测试通过。当前源码路径审计为 0 个问题，14 个已有历史归档路径警告与上轮一致。
+
+本轮证据在 `x64/validation/usb_auto_connect_20261109/`，最终结果见该目录 `verification.json`。全部操作仅限离线构建和模拟测试，未连接、重启或修改 RV1103，也未制作安装包或上传源码。离线通过不代表实机深度出帧、物理精度或 FPS 验收。
 
 ## USB 一键检查、修复与重复连接（2026-11-07）
 
@@ -62,7 +81,7 @@ python tools/verify_port.py --executable x64/Release/DctsInferenceWorker.exe --r
 
 仅验证上位机辅助推理的实机入口为主程序 `--host-assist-live-validation <绝对报告.json>`。先登记实际 USB 设备、核对公钥与标定并保存登录，在运行该进程的环境中显式设置 `DCTS_LIVE_ENABLE=1` 和与登记设备一致的 `DCTS_LIVE_SERIAL`，清除 `RV_TEST_OFFLINE_ONLY`。通过等待进程退出的方式启动，检查退出码与报告的 `passed=true`；PowerShell 直接调用 GUI EXE 时不能把命令立即返回当作测试完成。
 
-该专项只选择 `host_unidepth_rgb672_vga_fp16_tof16`，进行两轮各 30 秒的普通开始、停止及重启。检查 TensorRT-RTX 后端、640×480 米制输出、16×16 原生测量、输入方向、H 矫正、100 ms 配对上限、相机与深度实际绘制、停止后的晚到结果，以及两份板端长期设置/脚本保持不变。报告只保存计数、耗时、身份和设置，不保存真实图像或测量数组，不运行板端推理。它不属于离线八组，也不使用调参持久化操作；实景精度仍须用独立的物理基准评估。
+该专项只选择 `host_unidepth_rgb672_vga_fp16_tof16`，进行两轮各 30 秒的普通开始、停止及重启。按 `RV_INFERENCE_BACKEND`（默认 `tensorrt`）检查实际后端、模型摘要及精度身份，并检查 640×480 米制输出、16×16 原生测量、输入方向、H 矫正、100 ms 配对上限、相机与深度实际绘制、停止后的晚到结果，以及两份板端长期设置/脚本保持不变。`DCTS_LIVE_CONFIG_SOURCE` 可指定只读的已登记设备配置来源，复制进临时配置后执行。批量入口为 `tools/test_live_inference_backends.ps1`，要求显式 `-AllowLiveDevice`，首次失败即停止。2026-11-09 五后端结果见 [推理设备选择](MULTI_BACKEND_INFERENCE.md)。报告只保存计数、耗时、身份和设置，不保存真实图像或测量数组，不运行板端推理。它不属于离线八组，也不使用调参持久化操作；实景精度仍须用独立的物理基准评估。
 
 2026-11-07 本轮首次部署及主机实测证据位于 `x64/validation/fresh_board_setup_20261107/`。当前设备通过普通 USB 一键连接完成全量安装（`usb-live-REDACTED_DEVICE.json`），不再要求旧 V1.2.0 驱动哈希。原厂摄像头退出后遗留的 DHCP 进程仅在身份、参数、启动时间、RTSP 监听和摄像头 DMA 句柄均匹配时接管；原始摄像头配置及驱动已备份。
 
@@ -130,4 +149,21 @@ python tools/audit_source.py --root . --output x64/validation/my_check/source-in
 
 ## 板端公共源码
 
-统一构建命令、工具链覆盖和私有输入见 [板端源码与构建](../tools/litesr_board/README.md)。改动公共头文件时构建 native、protected384 的 F1/F2 四个目标；Tiny 独立构建。仅提取重复源码的改动可对照相同工具链、参数与私有输入的 SHA256；若产物变化，还需检查模型身份、预处理、协议和对应设备功能。旧八目标一致性记录属于历史；本轮关闭相机及纯采集改动改变 ARM 程序，按当前资源重新导入并实测六个切换方向，见 [记录](THREE_MODEL_DEPTH_ONLY.md)。
+当前交付使用报告标定对应的 F6 原生采集程序，入口见 [原生采集构建](../tools/rv_capture/README.md)。离线验证覆盖 Native16 分片、网格／身份／告警校验、拒绝旧板端深度载荷、H 与原生 ToF 会话预设及安装回滚。旧 F1/F2、多模型切换和 NPU 一致性记录属于历史。真实设备需另行验证当前 H 启停、USB 修复、视频及配对，不因离线报告或历史报告通过而视为本次已实机验证。
+
+## 当前 UniDepth 的 CPU／集显可行性实验
+
+[host_fallback_probe.py](../tools/host_fallback_probe.py) 直接测试当前 RGB672×504 → 640×480 UniDepth ONNX 的执行后端。只生成三组确定性 RGB、分别检查 0°／180°输入及输出逆恢复，不启动上位机普通主窗口、相机、串口或板端连接。它记录实际执行 provider、纯模型延迟、内存、输入变化及 A→B→A 重复一致性；应用层专项仍由本页的统一离线运行器执行。
+
+可选后端为 `cpu`、`directml`、`openvino-cpu`、`openvino-gpu`、`openvino-ep-cpu`。其中最后一项使用 ORT 插件 API 显式选择 CPU，可配合 `--memory-model` 检查从模型字节创建会话。它验证内存加载可用性，尚未验证产品加密 DLL、安装构建或自动回退。
+
+开发依赖采用独立 Python 3.11 环境。本次 ORT/OpenVINO 插件环境为 `onnxruntime==1.31.1`、`onnxruntime-ep-openvino==1.8.1`、`numpy==2.4.6`、`psutil==7.2.2`；独立 OpenVINO 运行时为 `openvino==2026.4.1`。DirectML 另用 `onnxruntime-directml==1.24.4` 的环境，避免不同 ORT wheel 共用同一个 Python 包目录。
+
+```powershell
+# 使用已安装上述依赖的隔离环境 Python；输出必须是尚不存在的目录。
+python -B tools/host_fallback_probe.py --model UniDepthRuntimeRgb672VgaFP16RTX/unidepthv2-small-rgb672-vga.onnx --backend openvino-ep-cpu --threads 8 --memory-model --output x64/validation/my_cpu_probe
+```
+
+用 `--reference <RTX同输入预测.npz>` 执行数值对照；未给参考时只报告运行功能和速度。参考须使用同一模型、六组同输入和实际方向，当前基准由 `DctsInferenceWorker.exe` 生成，并先通过 `verify_port.py`。参考输出键为 `image{0,1,2}_r{0,180}__depth`，值为恢复到标定网格的 `[1,1,480,640]` float32 预测。平均／最大相对数值门槛沿用当前模型的 0.25%／1%；超限返回非零并保留测速，不据此宣称替换后端验收通过。
+
+2026-11-09 实验原件位于 `x64/validation/cpu_igpu_20261109_01/`，结论见该目录 `REPORT.md` 和 `summary.json`。仅当前 UniDepth 纳入结论；FP32 计算副本保留既有 FP16 权重的数值并提高计算精度，不恢复丢失的原始 FP32 权重，不改变网络结构或输入／输出尺寸。纯推理 FPS 不等于 GUI FPS；合成数值差异不等于物理测距误差。测试机只具备 RTX 3080 Ti，DirectML 运行结果不能视为 Intel／AMD 集显验收。

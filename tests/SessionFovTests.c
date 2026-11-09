@@ -10,9 +10,9 @@ int main(void)
     for(unsigned sensor=0;sensor<256;++sensor){
         assert(dcts_processing_fov(sensor,0)==(sensor<16?(int)sensor:-1));++checks;
         assert(dcts_processing_fov(sensor,"")== (sensor<16?(int)sensor:-1));++checks;
-        assert(dcts_processing_fov(sensor,"1")== (sensor<16?1:-1));++checks;
-        assert(dcts_processing_fov(sensor,"2")== (sensor<16?2:-1));++checks;
-        assert(dcts_processing_fov(sensor,"6")==-1);++checks;
+        assert(dcts_processing_fov(sensor,"1")==-1);++checks;
+        assert(dcts_processing_fov(sensor,"2")==-1);++checks;
+        assert(dcts_processing_fov(sensor,"6")== (sensor<16?6:-1));++checks;
         assert(dcts_processing_fov(sensor,"1;reboot")==-1);++checks;
     }
     assert(!dcts_valid_run_id(0) && !dcts_valid_run_id(""));++checks;
@@ -24,11 +24,11 @@ int main(void)
     char path[256], receipt[280];
     snprintf(path,sizeof(path),"%s/readback",folder);
     snprintf(receipt,sizeof(receipt),"%s.calibration.json",path);
-    assert(dcts_write_calibration(path,"dtof_test",6,1)==0);++checks;
+    assert(dcts_write_calibration(path,"dtof_test",1,6)==0);++checks;
     FILE *f=fopen(receipt,"r");char json[512]={0};assert(f);fread(json,1,sizeof(json)-1,f);fclose(f);
-    assert(strstr(json,"\"sensor_fov_correction\":6") && strstr(json,"\"processing_fov_correction\":1") &&
+    assert(strstr(json,"\"sensor_fov_correction\":1") && strstr(json,"\"processing_fov_correction\":6") &&
            strstr(json,"\"temporary_calibration\":true"));++checks;
-    assert(dcts_write_calibration(path,"dtof_test",1,1)==0);++checks;
+    assert(dcts_write_calibration(path,"dtof_test",6,6)==0);++checks;
     f=fopen(receipt,"r");memset(json,0,sizeof(json));assert(f);fread(json,1,sizeof(json)-1,f);fclose(f);
     assert(strstr(json,"\"temporary_calibration\":false"));++checks;
     assert(dcts_write_calibration(path,"unsafe\"run",6,1)==-1);++checks;

@@ -62,7 +62,7 @@ def metadata(index, fov, rotation, experiment, cols, rows, model, profile, epoch
 def native_plane(root, cols, rows, fov, z=.6):
     # Independent reference from the unchanged source extrinsics, not a resized
     # M48 measurement. Each actual cell supplies exactly one radial sample.
-    e = json.loads((root/'assets/camera/extrinsics.json').read_text())
+    e = json.loads((root/'assets/camera/calibration_20261109/extrinsics.json').read_text())
     y, x = np.mgrid[:rows, :cols]
     q = np.stack(((x-cols/2+.5)/(.75*cols)-((fov&3)-1.5)/40,
                   (y-rows/2+.5)/rows-(((fov>>2)&3)-1.5)/40, np.ones_like(x)), -1)
@@ -100,10 +100,20 @@ def check_batch(executable, root, runtime, model, cases, environment, output):
     if status or len(packets) != len(cases)+1:
         raise AssertionError(f'{model}: exit {status}, packets {len(packets)}, expected {len(cases)+1}: {stderr[-500:]}')
     identity = json.loads((runtime/'model.json').read_text())
+    backend=environment.get('RV_INFERENCE_BACKEND','tensorrt')
+    expected_graph=identity['onnx_sha256']
+    protected_manifest=json.loads((runtime/'runtime.json').read_text())
+    if backend=='openvino:INT8':
+        from pathlib import Path
+        compatible=json.loads((Path(environment['RV_ASSIST_COMPAT_ROOT'])/'runtime.json').read_text(encoding='utf-8-sig'))
+        assert compatible['source_graph_sha256']==identity['onnx_sha256']
+        assert compatible['int8']['sha256']=='7dc50150c210b75e72fac35b45967ef874d85e9a883040223dbd5ebd4e01d63d'
+        expected_graph=compatible['int8']['sha256']
+        protected_manifest=compatible['int8']
     ready = packets[0][0]
     assert ready['type'] == 'ready' and ready['host_model'] == model
-    assert ready['graph_sha256'] == identity['onnx_sha256'] and ready['weights_sha256'] == identity['weights_sha256']
-    protection = json.loads((runtime/'runtime.json').read_text()).get('model_protection')
+    assert ready['graph_sha256'] == expected_graph and ready['weights_sha256'] == identity['weights_sha256']
+    protection = protected_manifest.get('model_protection')
     loading = ready.get('model_loading', {})
     if protection:
         assert loading.get('kind') == 'aes256-gcm-memory-v1', loading
@@ -125,7 +135,9 @@ def check_batch(executable, root, runtime, model, cases, environment, output):
             assert len(diagnostic) == payload_bytes
             mono = np.frombuffer(diagnostic[:depth_bytes], '<f4')
             assert np.isfinite(mono).all() and (mono > 0).all()
-            assert m['assist_host_model'] == model and m['assist_graph_sha256'] == identity['onnx_sha256']
+            assert m['assist_host_model'] == model and m['assist_graph_sha256'] == expected_graph
+            if 'assist_execution_device' in m:
+                assert m['assist_execution_device']==backend
             assert m['assist_input_orientation_checked'] is True and m['assist_output_restored_to_calibrated_grid'] is True
             assert m['assist_input_rotation_degrees'] == case['metadata']['assist_input_rotation_degrees']
             for key in ('dtof_present', 'tof_sequence', 'tof_timestamp_ns', 'rgb_timestamp_ns', 'pair_delta_ms',

@@ -13,7 +13,6 @@
 #include "RvTofFrame.h"
 #include "RvPhotonFrame.h"
 #include "RvDtofCandidates.h"
-#include "RvLiteSrContour.h"
 #include "RvDeviceStore.h"
 
 class QMediaPlayer;
@@ -75,13 +74,7 @@ public:
     QJsonObject imagingSwitchDiagnostics() const;
     bool controlledSource() const;
     int dtofCandidateMode() const {return m_dtofMode;}
-    bool photonCountsEnabled() const {return (RvDtofCandidates::isTinyNv12(m_dtofMode)||RvDtofCandidates::isLiteSr(m_dtofMode))&&!RvDtofCandidates::isCaptureOnly(m_dtofMode);}
     RvDtofCandidates::Settings dtofCandidateSettings() const {return m_dtofSettings;}
-    bool tinyNv12Available() const {return m_device.calibration==TinyNv12Contract::Calibration&&m_device.cameraMountRotation==180&&m_device.inputRotation==0;}
-    bool depthOnlyMode() const {return LiteSrBoardContract::isDepthOnly(m_dtofMode);}
-    bool boardLiteSrHostContourEnabled() const {return depthOnlyMode()||!RvDtofCandidates::isTinyNv12(m_dtofMode)&&!LiteSrBoardContract::isNative16Depth(m_dtofMode)&&!RvDtofCandidates::isCaptureOnly(m_dtofMode)&&(RvDtofCandidates::isLiteSrHd(m_dtofMode)||LiteSrBoardContract::isHighResolution(m_dtofMode)||m_boardHostContour);}
-    RvLiteSrContour::RepairSettings boardLiteSrHostRepairSettings() const {return m_boardHostRepair;}
-    bool setBoardLiteSrHostContour(bool enabled,const RvLiteSrContour::RepairSettings& settings);
     bool setDtofCandidate(int mode,const RvDtofCandidates::Settings& settings);
     bool canSelectDepthWidth(int width) const;
     bool canSelectDepthLocation(const QString &location) const;
@@ -102,7 +95,9 @@ public slots:
     void setConfiguration(int cameraWidth, const QString &model, int depthWidth,
                           const QString &location, const QString &method);
     void start();
-    void startAutomatically();
+    void startAutomatically(bool verifiedUsbAttachment = false);
+    bool automaticStartAllowed(const QString &deviceId) const;
+    quint64 stopRevision() const { return m_stopRevision; }
     void deviceUnreachable(const QString &deviceId);
     void stop();
     void reconnectNow();
@@ -112,9 +107,6 @@ signals:
     void hostInferenceUnavailable(const QString &explanation,const QString &detail);
     void boardFilesRequired(const RvDeviceProfile &device);
     void deviceChanged();
-    void dtofCandidateReady(const RvDtofCandidates::Result& result);
-    void dtofCandidateExpired();
-    void dtofCandidateCleared(const QString& reason);
     void dtofCandidateSelectionChanged();
     void configurationChanged();
     void stateChanged();
@@ -180,8 +172,7 @@ private:
     void cancelImagingSwitch(const QString &reason);
     void clearCurrentFrame(const QString &reason);
     void presentVlcFrame();
-    void presentLiteSrHdVideo();
-    bool reconnectLiteSrHdVideo();
+    bool reconnectHostHdVideo();
     void scheduleReconnect(const QString &reason);
     void handleFrame(const QVideoFrame &frame);
     void setState(const QString &state, const QString &detail);
@@ -190,15 +181,13 @@ private:
     RvDeviceProfile m_device;
     QString m_deviceStorePath,m_deviceError,m_deviceRevision;
     QString m_autoStartAttemptedDevice;
+    quint64 m_stopRevision=0;
     int m_dtofMode=-1;
     RvDtofCandidates::Settings m_dtofSettings;
     QString m_dtofOptions,m_dtofToken;
     QJsonObject m_dtofReceipt;
     RvDtofBoardStream* m_dtofStream=nullptr;
     QPointer<RvDtofBoardStream> m_retiringDtofStream;
-    bool m_boardHostContour=false;
-    quint64 m_boardHostRevision=0;
-    RvLiteSrContour::RepairSettings m_boardHostRepair;
     Configuration m_confirmedConfig;
     bool m_hasConfirmedConfig = false;
     bool m_destroying = false;
@@ -231,7 +220,7 @@ private:
     QString m_assistInfo;
     int m_assistLoadingState=0;
     double m_lastAssistFrame = 0;
-    QTimer m_assistExpiry;
+    QTimer m_assistExpiry,m_nativeDepthExpiry;
     QString m_depthConfigError;
     QProcess *m_previewControl = nullptr;
     QTimer m_controlTimeout, m_switchFrameTimeout;

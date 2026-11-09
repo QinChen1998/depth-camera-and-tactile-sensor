@@ -25,6 +25,7 @@ public:
     void importBoardFilesForStart(const RvDeviceProfile &device);
     void beginUsbEnrollment();
     void finishUsbEnrollment(bool added);
+    void connectViaUsb(const QJsonObject &expectedIdentity = {});
 signals:
     void usbConnectionRequested(RvDeviceManagerDialog *dialog);
 protected:
@@ -41,7 +42,7 @@ private:
     void activate();
     void remove();
     void importDevices();
-    void importLiteSrModel(bool confirmed = false);
+    void installCaptureRuntime(bool confirmed = false);
     void exportDevices();
     void runWorker(const QString &operation);
     void readDeviceInformation();
@@ -64,10 +65,13 @@ private:
     QTableWidget *m_table;
     QLineEdit *m_name,*m_host,*m_serial,*m_key,*m_username;
     QSpinBox *m_port;
-    QComboBox *m_calibration,*m_rotation,*m_cameraMount;
-    QCheckBox *m_legacy,*m_confirm,*m_temporaryFov;
+    QComboBox *m_rotation;
+    // Preserve old profiles without exposing a camera preprocessing setting.
+    int m_legacyCameraMountRotation=0;
+    QLabel *m_calibration;
+    QCheckBox *m_legacy,*m_confirm;
     QLabel *m_status,*m_fingerprint,*m_active;
-    QPushButton *m_save,*m_use,*m_remove,*m_probe,*m_verify,*m_forget,*m_readSerial,*m_importLiteSr;
+    QPushButton *m_save,*m_use,*m_remove,*m_probe,*m_verify,*m_forget,*m_readSerial,*m_installCapture;
     QPlainTextEdit *m_serialHelp;
     QVector<QPushButton*> m_actions;
     QProcess *m_worker;

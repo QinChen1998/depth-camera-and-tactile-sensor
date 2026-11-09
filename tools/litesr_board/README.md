@@ -1,12 +1,5 @@
-# 板端源码与构建
+# 已退役的 LiteSR 板端推理
 
-仅保留两个共享构建目标：`native` 是主机 640×480 的原生 dToF＋H.265 采集程序，不包含旧网络或权重；`protected384` 是 LiteSR 384×256 加密纯深度程序，不打开相机。Tiny 的独立构建入口见 [Tiny 包](../tiny_nv12_board/README.md)。
+2026-11-09 当前产品已移除 LiteSR 普通／高精度推理、密文、ARM 程序、NPU 依赖、主机轮廓处理和参数模板。后续用户授权继续清理遗留代码，未被产品引用的 256×256 轮廓研究头和 LiteSR 主机绑定也已移除。此目录仅保留历史说明。
 
-```bash
-bash tools/litesr_board/build.sh native - /absolute/new-native-output
-bash tools/litesr_board/build.sh protected384 /absolute/private384 /absolute/new-384-output
-```
-
-输出目录必须不存在。private384 含与原密文匹配的 Key.h 和 ARM libcrypto.so.1.1，不能进入交付载荷。工具链默认 `/opt/rv1103-sdk/`，可用 RKNN_SDK / RV1103_CROSS_PREFIX 覆盖。每个目标生成 F1/F2 程序；Tiny 固定 F1 及其安装方向。
-
-`common/` 保留实际使用的原生封包、SPI 和 H.265 进度检查。旧 protected256/protected128、旧 512 网络/探测程序和重复依赖已移除。`protected/` 当前仅存部署 worker、协调器及旧版参数脚本的精确升级模板，不再存放旧模型。当前重建、导入、切换结果见 [变更记录](../../docs/THREE_MODEL_DEPTH_ONLY.md)。
+当前板端原生采集源码和构建已迁至 [rv_capture](../rv_capture/README.md)。原始权重、外部研究项目和历史安装包保持；本轮变更见 [默认标定与原生 ToF 模式](../../docs/DEFAULT_CALIBRATION_NATIVE_TOF.md)。

@@ -5,7 +5,8 @@
 #include <QtCore/QtEndian>
 #include <QtCore/QRegularExpression>
 #include <cmath>
-#include "../tools/litesr_board/Contract.h"
+#include <cstring>
+#include "../tools/rv_capture/Contract.h"
 
 // Native sensor grid, before projection, anchors, network and depth enhancement.
 // One cell: range_uq2 uint16 LE (0.25 mm), first-peak SNR uint8,
@@ -26,11 +27,9 @@ struct RvTofFrame {
                 && n <= 9007199254740991.0 && std::floor(n) == n;
         };
         const int mode=metadata["candidate_mode"].toInt(-1);
-        const bool protocol=(mode==TinyNv12Contract::Mode&&metadata["protocol"]==TinyNv12Contract::Protocol
-            &&metadata["engine"]==TinyNv12Contract::Engine&&metadata["model_sha256"]==TinyNv12Contract::ModelSha)
-            ||(metadata["protocol"]=="DTF3"&&mode>=0&&mode<10)
-            ||((metadata["protocol"]==LiteSrBoardContract::Protocol||metadata["protocol"]==LiteSrBoardContract::PairedProtocol)&&LiteSrBoardContract::supports(mode)
-                &&metadata["engine"]==LiteSrBoardContract::engine(mode)&&metadata["model_sha256"]==LiteSrBoardContract::modelSha(mode));
+        const bool protocol=(metadata["protocol"]=="DTF3"&&mode>=0&&mode<10)
+            ||((metadata["protocol"]==RvCaptureContract::Protocol||metadata["protocol"]==RvCaptureContract::PairedProtocol)&&RvCaptureContract::supports(mode)
+                &&metadata["engine"]==RvCaptureContract::engine(mode)&&metadata["model_sha256"]==""&&metadata["capture_only"]==true&&metadata["depth_present"]==false&&metadata["photon_enabled"]==false);
         const bool candidate = metadata["work_mode"]=="dtof_candidate" && protocol
             && QRegularExpression("^[0-9a-f]{32}$").match(metadata["generation"].toString()).hasMatch()
             && QRegularExpression("^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$").match(metadata["boot_id"].toString()).hasMatch()
@@ -76,5 +75,14 @@ struct RvTofFrame {
     double distanceMm(int index) const { return rangeUq2(index)*0.25; }
     quint8 snr(int index) const { return quint8(samples[index*4+2]); }
     bool valid(int index) const { return samples[index*4+3] == 1; }
+    QByteArray radialMetres() const {
+        if(!isValid()||columns()!=48||rows()!=32)return {};
+        QByteArray result(48*32*4,0);
+        for(int i=0;i<48*32;++i){
+            const float metres=valid(i)?float(rangeUq2(i))*.00025f:0.f;
+            quint32 bits;std::memcpy(&bits,&metres,4);qToLittleEndian(bits,result.data()+i*4);
+        }
+        return result;
+    }
 };
 Q_DECLARE_METATYPE(RvTofFrame)

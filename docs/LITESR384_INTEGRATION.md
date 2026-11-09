@@ -1,6 +1,8 @@
 # LiteSR 384×256 接入
 
-> 后续变更：LiteSR 384 已关闭相机，Tiny 允许相同 F1 装配的新序列号；其他模型已移出上位机项目。当前行为与验证以[三模型变更记录](THREE_MODEL_DEPTH_ONLY.md)为准。本文保留首次接入时的历史证据。
+> 历史记录：2026-11-09 当前产品已移除全部 LiteSR 板端推理，仅保留上位机 H。本文的旧入口、源码路径、资源及实测结果对应当时版本；当前说明见 [仅保留上位机辅助推理](HOST_ASSIST_ONLY.md)。
+
+> 当前开发版保留 LiteSR 384 普通／高精度和主机 H，LiteSR 关闭相机，Tiny 已彻底移除。当前行为见[项目架构](ARCHITECTURE.md)及[Tiny 移除记录](TINY_NV12_INTEGRATION.md)。[三模型变更记录](THREE_MODEL_DEPTH_ONLY.md)与本文仅保留首次接入时的历史证据。
 
 ## 使用与兼容
 

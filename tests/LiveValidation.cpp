@@ -4,6 +4,7 @@
 #include "../sensors/DepthMapWidget.h"
 #include "../sensors/RvDepthView.h"
 #include "../sensors/RvCameraView.h"
+#include "../sensors/RvInferenceRuntime.h"
 #include "../sensors/RvTunerController.h"
 #include "../sensors/RvUsbEnrollment.h"
 #include "../sensors/RvDeviceManagerDialog.h"
@@ -13,7 +14,6 @@
 #include <QtEndian>
 #include <cstring>
 #include <QDateTime>
-#include <QDialogButtonBox>
 #include <QLabel>
 #include <QMessageBox>
 #include <QPushButton>
@@ -44,9 +44,9 @@ bool save(const QString &path,const QJsonObject &value){QSaveFile file(path);con
 
 // Explicitly gated real GUI test. All frame products remain in memory. Only
 // scalar counters, timings, settings and model identities enter the reports.
-int runTinyNv12SwitchValidation(SensorMainWindow &,const QString &);
+int runImagingSwitchValidation(SensorMainWindow &,const QString &);
 int runLiveValidation(SensorMainWindow &window,const QString &path,int seconds){
-    return runTinyNv12SwitchValidation(window,path);
+    return runImagingSwitchValidation(window,path);
 }
 
 // Explicitly authorized real USB onboarding through the ordinary UI/worker.
@@ -67,7 +67,7 @@ int runUsbEnrollmentLiveValidation(SensorMainWindow &window,const QString &path)
     action->trigger();auto *manager=window.findChild<RvDeviceManagerDialog*>();if(!manager)return 3;
     auto *connectButton=manager->findChild<QPushButton*>("rvDeviceConnectUsb");
     if(!connectButton)return 3;
-    auto *depthCanvas=static_cast<RvDepthView*>(window.depth()->findChild<QWidget*>("rvDtofFastDepthCanvas"));
+    auto *depthCanvas=static_cast<RvDepthView*>(window.depth()->findChild<QWidget*>("rvNativeDepthCanvas"));
     auto *hostCanvas=static_cast<RvDepthView*>(window.depth()->findChild<QWidget*>("rvAssistDepthCanvas"));
     if(!depthCanvas||!hostCanvas)return 3;
     QObject depthObserver;int depthFrames=0,positiveFrames=0,paintedFrames=0;bool invalidDepth=false;
@@ -81,34 +81,26 @@ int runUsbEnrollmentLiveValidation(SensorMainWindow &window,const QString &path)
         if(!depthClock.isValid())depthClock.start();
         generation=current;lastFrame=id;lastDepth=metadata;++depthFrames;positiveFrames+=positive>0;
     };
-    QObject::connect(session,&RvSessionController::dtofCandidateReady,&depthObserver,[&](const RvDtofCandidates::Result &r){if(r.fresh)acceptDepth(r.depth,r.metadata);});
     QObject::connect(session,&RvSessionController::assistDepthSnapshotReady,&depthObserver,[&](const QByteArray &b,const QJsonObject &m){acceptDepth(b,m);});
     const auto painted=[&](const QJsonObject &m){const auto id=m["frame_id"].toInteger();if(id!=lastPaint){lastPaint=id;++paintedFrames;}};
     depthCanvas->performanceFramePainted=painted;hostCanvas->performanceFramePainted=painted;
     const auto clearCallbacks=qScopeGuard([&]{depthCanvas->performanceFramePainted={};hostCanvas->performanceFramePainted={};});
-    bool confirmed=false,failed=false;QObject context;QTimer responder;
+    QTimer render;render.setInterval(50);
+    QObject::connect(&render,&QTimer::timeout,&depthObserver,[&]{hostCanvas->grab();});render.start();
+    bool failed=false;QObject context;QTimer responder;
     QObject::connect(&responder,&QTimer::timeout,&context,[&]{
         auto *dialog=qobject_cast<QDialog*>(QApplication::activeModalWidget());
         if(!dialog)return;
-        if(dialog->objectName()=="rvUsbEnrollmentPrompt"){
-            bool matches=false;
-            for(auto *label:dialog->findChildren<QLabel*>())matches|=label->text().contains(serial);
-            const auto angles=dialog->findChildren<QComboBox*>();
-            auto *buttons=dialog->findChild<QDialogButtonBox*>();
-            if(!matches||angles.size()!=2||!buttons){failed=true;dialog->reject();return;}
-            angles[0]->setCurrentIndex(angles[0]->findData(180));
-            angles[1]->setCurrentIndex(angles[1]->findData(0));
-            confirmed=true;buttons->button(QDialogButtonBox::Ok)->click();
-        }else if(auto *message=qobject_cast<QMessageBox*>(dialog)){
+        if(auto *message=qobject_cast<QMessageBox*>(dialog)){
             report["error"]=message->text()+"\n"+message->informativeText();
             failed=true;message->done(QMessageBox::Close);
         }
     });
     responder.start(20);connectButton->click();
-    const bool registered=waitFor([&]{return failed||((confirmed||previouslyRegistered)&&connectButton->isEnabled()
-        &&manager->property("rvUsbRuntimeReplaced").isValid()&&session->deviceProfile().serial==serial);},240000)&&!failed&&(confirmed||previouslyRegistered)
+    const bool registered=waitFor([&]{return failed||(connectButton->isEnabled()
+        &&manager->property("rvUsbRuntimeReplaced").isValid()&&session->deviceProfile().serial==serial);},240000)&&!failed
         &&session->deviceProfile().serial==serial;
-    report["confirmation_accepted"]=confirmed;report["registered"]=registered;
+    report["parameters_requested"]=false;report["registered"]=registered;
     report["first_runtime_replaced"]=manager->property("rvUsbRuntimeReplaced").toBool();
     const bool firstDepth=registered&&waitFor([&]{return invalidDepth||session->userStopped()||(positiveFrames>=30&&paintedFrames>=20);},95000)
         &&!invalidDepth&&!session->userStopped()&&positiveFrames>=30&&paintedFrames>=20;
@@ -138,9 +130,9 @@ int runUsbEnrollmentLiveValidation(SensorMainWindow &window,const QString &path)
         const auto firstProfile=session->deviceProfile().json();
         const auto count=RvDeviceStore(session->deviceStorePath()).profiles().size();
         const int beforeFrames=positiveFrames,beforePainted=paintedFrames;
-        confirmed=false;connectButton->click();
+        connectButton->click();
         reconnected=waitFor([&]{return failed||(connectButton->isEnabled()
-            &&manager->property("rvUsbRuntimeReplaced").isValid());},240000)&&!failed&&!confirmed
+            &&manager->property("rvUsbRuntimeReplaced").isValid());},240000)&&!failed
             &&session->deviceProfile().json()==firstProfile
             &&RvDeviceStore(session->deviceStorePath()).profiles().size()==count
             &&!manager->property("rvUsbRuntimeReplaced").toBool();
@@ -164,10 +156,13 @@ int runUsbEnrollmentLiveValidation(SensorMainWindow &window,const QString &path)
 
 // Explicit real-device integration test. Only scalar reports are saved.
 // Uses ordinary session selection/start/switch/stop, never tuner.persist().
-static int runBoardLiteSrLiveValidation(SensorMainWindow &window,const QString &path,bool tinySwitch=false,bool hostOnly=false,bool thermalOnly=false){
+static int runHostLiveValidation(SensorMainWindow &window,const QString &path,bool thermalOnly=false){
+    constexpr bool hostOnly=true;
     auto *s=window.session();auto *t=s->tuner();
     QJsonObject report{{"passed",false},{"images_saved",false},{"measurement_arrays_saved",false},{"saved_sensor_settings_written",false}};
-    report["host_only"]=hostOnly;
+    const auto executionDevice=qEnvironmentVariable("RV_INFERENCE_BACKEND","tensorrt");
+    if(!RvInferenceRuntime::validBackend(executionDevice))return 3;
+    report["execution_device"]=executionDevice;
     if(thermalOnly){report["thermal_only"]=true;report["measurement_seconds"]=600;report["sample_interval_seconds"]=1;}
     if(qEnvironmentVariable("DCTS_LIVE_ENABLE")!="1"||s->deviceProfile().serial!=qEnvironmentVariable("DCTS_LIVE_SERIAL")||qEnvironmentVariable("RV_TEST_OFFLINE_ONLY")=="1")return 3;
     const auto inspect=[&](QJsonObject &o){t->read();if(!waitFor([&]{return !t->pending();},95000)||t->state()!=RvTunerController::Idle)return false;o=t->inspection();return o["owner"]=="idle";};
@@ -175,26 +170,23 @@ static int runBoardLiteSrLiveValidation(SensorMainWindow &window,const QString &
     if(!inspect(before)){report["error"]="Idle preflight failed: "+t->detail();save(path,report);return 2;}
     report["before"]=before;
     auto *menu=window.findChild<QComboBox*>("rvDepthModel");
-    auto *board=static_cast<RvDepthView*>(window.depth()->findChild<QWidget*>("rvDtofFastDepthCanvas"));
     auto *host=static_cast<RvDepthView*>(window.depth()->findChild<QWidget*>("rvAssistDepthCanvas"));
-    if(!menu||!board||!host)return 3;
+    if(!menu||!host)return 3;
     QJsonArray runs;bool success=true;QString previousGeneration;
     QFile journal(path+".progress.jsonl");if(!journal.open(QIODevice::WriteOnly|QIODevice::Truncate))return 3;
     const auto progress=[&](QJsonObject o){o["unix_ms"]=QDateTime::currentMSecsSinceEpoch();journal.write(QJsonDocument(o).toJson(QJsonDocument::Compact)+'\n');journal.flush();};
-    const QString rect="board_litesr_near_384x256_host_contour_hd";
     const QString vga="host_unidepth_rgb672_vga_fp16_tof16";
-    const QString tiny=TinyNv12Contract::Scheme;
-    const QStringList sequence=thermalOnly?QStringList{hostOnly?vga:rect}:hostOnly?QStringList{vga,vga}:tinySwitch?QStringList{rect,tiny,vga,rect,vga,tiny,rect,vga}:QStringList{rect,vga,rect,vga};
+    const QStringList sequence=thermalOnly?QStringList{vga}:QStringList{vga,vga};
     int stage=0;
     for(const auto &scheme:sequence){
-        const bool onHost=scheme==vga,depthOnly=scheme==rect,tinyMode=scheme==tiny;const int mode=tinyMode?18:onHost?14:16;
+        constexpr bool onHost=true,depthOnly=false;
+        constexpr int mode=14;
         const auto hostModel=onHost?scheme.mid(5):QString();
         const auto &profile=RvCameraView::profile(hostModel);
-        const int width=tinyMode?80:onHost?profile.outputWidth:384,height=tinyMode?128:onHost?profile.outputHeight:256;
-        auto *canvas=onHost?host:board;QObject context;
+        const int width=onHost?profile.outputWidth:384,height=onHost?profile.outputHeight:256;
+        auto *canvas=host;QObject context;
         int frames=0,positiveFrames=0,painted=0,videos=0,native=0,photon=0,paired=0,reused=0,corrected=0,unpaired=0,historical=0;bool invalid=false,measuring=false;
         double maximumPairDelta=0;QVector<double> inference,total;
-        int colorChecks=0,colorMismatches=0,brightColorChecks=0;QString colorScreenshot,cameraScreenshot;
         QString error,generation; qint64 lastId=-1,lastPaint=-1;QJsonObject last;QVector<double> npu,contour,compute,sourcePublish;QJsonArray windows;
         int info10=0;double firstPublish=-1,lastPublish=-1,firstCount=0,lastCount=0;
         qint64 nativeSequence=0,nativeTimestamp=0;
@@ -205,9 +197,8 @@ static int runBoardLiteSrLiveValidation(SensorMainWindow &window,const QString &
             if(!generation.isEmpty()&&generation==g&&id<=lastId){fail("Repeated depth frame");return;}
             generation=g;lastId=id;
             if(bytes.size()!=width*height*4||m["width"]!=width||m["height"]!=height){fail("Wrong output shape");return;}
-            if(!onHost&&!tinyMode&&(m["model_sha256"]!=LiteSrBoardContract::modelSha(mode)||m["host_contour_enabled"].toBool()!=true||m["rgb_used"]!=false||m["input_rotation_degrees"]!=0||m["depth_unit"]!="sensor_radial_m_float32")){fail("Board identity, units or contour contract changed");return;}
             if(onHost&&(m["assist_host_model"]!=hostModel||m["assist_experiment"]!="H"||m["assist_output_restored_to_calibrated_grid"]!=true)){fail("Legacy host inference contract changed");return;}
-            if(onHost&&(m["assist_backend"]!="onnxruntime-tensorrt-rtx"||m["depth_unit"]!="camera-Z_m_float32"||m["assist_input_orientation_checked"]!=true||m["assist_input_rotation_degrees"]!=s->assistInputRotationDegrees()||(m["dtof_present"].toBool()&&(m["dtof_width"]!=16||m["dtof_height"]!=16||m["dtof_fov_correction"]!=s->deviceProfile().fov())))){fail("Host backend, orientation or native measurement contract mismatch");return;}
+            if(onHost&&(m["assist_backend"]!=RvInferenceRuntime::backendName(executionDevice)||m["assist_execution_device"]!=executionDevice||!RvInferenceRuntime::validGraphMetadata(m)||m["depth_unit"]!="camera-Z_m_float32"||m["assist_input_orientation_checked"]!=true||m["assist_input_rotation_degrees"]!=s->assistInputRotationDegrees()||(m["dtof_present"].toBool()&&(m["dtof_width"]!=16||m["dtof_height"]!=16||m["dtof_fov_correction"]!=s->deviceProfile().fov())))){fail("Host backend, orientation or native measurement contract mismatch");return;}
             if(onHost&&s->deviceProfile().temporaryFovCalibration){
                 const auto calibration=m["tof_calibration"].toObject();
                 const int sensor=calibration["sensor_fov_correction"].toInt(-1);
@@ -221,10 +212,8 @@ static int runBoardLiteSrLiveValidation(SensorMainWindow &window,const QString &
                 const auto fit=m["assist_fusion"].toObject();
                 if(fit["dtof_corrected"].toBool()||!fit["used_native_indices"].toArray().isEmpty()||!fit["global_used_native_indices"].toArray().isEmpty()||!fit["local_used_native_indices"].toArray().isEmpty()){fail("Historical scale reused old native correction points");return;}
             }
-            if(depthOnly&&(m["video_transport"]!="none"||m["video_fps"]!=0||m["rgb_paused"]!=true)){fail("LiteSR384 camera-off contract mismatch");return;}
-            if(tinyMode&&(m["model_sha256"]!=TinyNv12Contract::ModelSha||m["rgb_used"]!=true||m["depth_unit"]!="camera-Z_m_float32"||m["host_contour_enabled"]!=false||std::abs(m["pair_delta_ms"].toDouble(1000))>50)){fail("Tiny NV12 identity/geometry mismatch");return;}
             int positive=0;
-            for(int i=0;i<width*height;++i){const auto bits=qFromLittleEndian<quint32>(bytes.constData()+4*i);float z;std::memcpy(&z,&bits,4);if(!std::isfinite(z)||z<0||(!onHost&&z>(tinyMode?3.f:1.4f))){fail("Invalid metric value");return;}positive+=z>0;}
+            for(int i=0;i<width*height;++i){const auto bits=qFromLittleEndian<quint32>(bytes.constData()+4*i);float z;std::memcpy(&z,&bits,4);if(!std::isfinite(z)||(z<0||(!onHost&&z>1.4f))){fail("Invalid metric value");return;}positive+=z>0;}
             if(positive)++positiveFrames;
             last=m;++frames;
             if(measuring){
@@ -249,24 +238,12 @@ static int runBoardLiteSrLiveValidation(SensorMainWindow &window,const QString &
                 }
             }
         };
-        QObject::connect(s,&RvSessionController::dtofCandidateReady,&context,[&](const RvDtofCandidates::Result &r){if(!onHost&&r.fresh)accept(r.depth,r.metadata);});
         QObject::connect(s,&RvSessionController::assistDepthSnapshotReady,&context,[&](const QByteArray &b,const QJsonObject &m){if(onHost)accept(b,m);});
-        QObject::connect(s,&RvSessionController::cameraFrameReady,&context,[&](const QImage &im){if(measuring){if(depthOnly||im.size()!=(tinyMode?QSize(80,128):QSize(2304,1296)))fail("Unexpected RGB stream");++videos;}});
-        QObject::connect(s,&RvSessionController::tofFrameReady,&context,[&](const RvTofFrame &f){if(measuring){if(f.columns()!=((onHost||tinyMode)?16:48)||f.rows()!=((onHost||tinyMode)?16:32))fail("Wrong native grid");++native;nativeSequence=f.metadata["tof_sequence"].toInteger();nativeTimestamp=f.metadata["tof_timestamp_ns"].toInteger();}});
+        QObject::connect(s,&RvSessionController::cameraFrameReady,&context,[&](const QImage &im){if(measuring){if(depthOnly||im.size()!=QSize(2304,1296))fail("Unexpected RGB stream");++videos;}});
+        QObject::connect(s,&RvSessionController::tofFrameReady,&context,[&](const RvTofFrame &f){if(measuring){if(f.columns()!=(onHost?16:48)||f.rows()!=(onHost?16:32))fail("Wrong native grid");++native;nativeSequence=f.metadata["tof_sequence"].toInteger();nativeTimestamp=f.metadata["tof_timestamp_ns"].toInteger();}});
         QObject::connect(s,&RvSessionController::photonFrameReady,&context,[&](const RvPhotonFrame &){if(measuring)++photon;});
         canvas->performanceFramePainted=[&](const QJsonObject &m){if(measuring&&m["frame_id"].toInteger()!=lastPaint){
             lastPaint=m["frame_id"].toInteger();++painted;
-            if(tinyMode&&(painted==1||painted%30==0)){
-                const auto pixels=canvas->presentationImage();int bright=0,mismatches=0;
-                if(pixels.size()!=QSize(width,height)){fail("Tiny rendered image shape mismatch");return;}
-                for(int y=0;y<height;++y)for(int x=0;x<width;++x){
-                    const auto expected=DepthColorScale::color(canvas->depthAt(x,y),canvas->displayMinimum(),canvas->displayMaximum(),true,canvas->blackOutsideRange());
-                    const auto actual=pixels.pixel(x,y);mismatches+=actual!=expected;
-                    bright+=std::max({qRed(actual),qGreen(actual),qBlue(actual)})>1;
-                }
-                ++colorChecks;colorMismatches+=mismatches;brightColorChecks+=bright>0;
-                if(mismatches)fail("Tiny valid depth was darkened by the display mask");
-            }
         }};
         auto observer=qScopeGuard([&]{canvas->performanceFramePainted={};});
         progress({{"phase","selecting"},{"scheme",scheme}});
@@ -313,36 +290,23 @@ static int runBoardLiteSrLiveValidation(SensorMainWindow &window,const QString &
         QTimer timer;timer.setInterval(thermalOnly?1000:10000);QObject::connect(&timer,&QTimer::timeout,&context,pulse);
         if(ready){progress({{"phase","measuring"},{"scheme",scheme},{"seconds",seconds},{"generation",generation}});timer.start();waitFor([&]{return invalid||s->userStopped();},seconds*1000);timer.stop();pulse();}
         measuring=false;const double elapsed=clock.nsecsElapsed()/1e9;
-        const bool geometry=onHost||(canvas->property("depthWidth").toInt()==width&&canvas->property("depthHeight").toInt()==height&&canvas->presentationSize()==(tinyMode?QSizeF(1248,1296):QSizeF(32,48)));
+        const bool geometry=onHost||(canvas->property("depthWidth").toInt()==width&&canvas->property("depthHeight").toInt()==height&&canvas->presentationSize()==QSizeF(32,48));
         auto *videoCanvas=window.findChild<QWidget*>("rtspCameraLatestFrame");
-        const auto aspectMatches=[](QWidget *view,QSizeF source,int rotation){
-            if(!view)return false;const auto actual=view->property("presentationRect").toRectF();
-            const auto expected=ImagePresentation::rotatedSize(source,rotation);
-            return actual.height()>0&&std::abs(actual.width()/actual.height()-expected.width()/expected.height())<1e-6;
-        };
-        const bool cameraGeometry=depthOnly?(videoCanvas&&videoCanvas->property("presentationSize").toSizeF().isEmpty()):(videoCanvas&&videoCanvas->property("presentationSize").toSizeF()==(tinyMode?QSizeF(1248,1296):QSizeF(2304,1296)));
-        const bool displayAspect=!tinyMode||(aspectMatches(canvas,QSizeF(1248,1296),canvas->displayRotationDegrees())
-            &&aspectMatches(videoCanvas,QSizeF(1248,1296),videoCanvas?videoCanvas->property("displayRotationDegrees").toInt():0));
-        if(tinyMode&&ready){
-            cameraScreenshot=path+QString(".tiny_camera_stage_%1.png").arg(stage);
-            if(!videoCanvas||!videoCanvas->grab().save(cameraScreenshot))fail("Tiny camera screenshot save failed");
-            colorScreenshot=path+QString(".tiny_stage_%1.png").arg(stage);
-            if(canvas->grab().save(colorScreenshot))report["images_saved"]=true;else fail("Tiny screenshot save failed");
-        }
+        const bool cameraGeometry=depthOnly?(videoCanvas&&videoCanvas->property("presentationSize").toSizeF().isEmpty()):(videoCanvas&&videoCanvas->property("presentationSize").toSizeF()==QSizeF(2304,1296));
         auto *cameraDock=window.findChild<QDockWidget*>("rtspCameraDock");
         const bool cameraVisibility=cameraDock&&(depthOnly?cameraDock->isHidden():!cameraDock->isHidden());
-        if(!hostOnly&&!thermalOnly)window.grab().save(path+QString(".stage_%1.png").arg(stage));
-        const bool pass=cameraVisibility&&ready&&!invalid&&!s->userStopped()&&elapsed>=seconds-.5&&frames-initial>=10&&positiveFrames>=10&&painted>=10&&(depthOnly?videos==0:videos>=30)&&native>=10&&(onHost?photon==0:photon>=10)&&geometry&&cameraGeometry&&displayAspect&&generation!=previousGeneration&&(!hostOnly||(paired>=10&&corrected>=10))&&(!tinyMode||(colorChecks>=10&&colorMismatches==0&&brightColorChecks>=10));
+        if(!hostOnly&&!thermalOnly){if(window.grab().save(path+QString(".stage_%1.png").arg(stage)))report["images_saved"]=true;else fail("Window screenshot save failed");}
+        const bool pass=cameraVisibility&&ready&&!invalid&&!s->userStopped()&&elapsed>=seconds-.5&&frames-initial>=10&&positiveFrames>=10&&painted>=10&&(depthOnly?videos==0:videos>=30)&&native>=10&&(onHost?photon==0:photon>=10)&&geometry&&cameraGeometry&&generation!=previousGeneration&&(!onHost||(paired>=10&&corrected>=10));
         if(!pass&&error.isEmpty())error=QString("Incomplete measurement: ready=%1 positive=%2 painted=%3 video=%4 native=%5 photon=%6 geometry=%7").arg(ready).arg(positiveFrames).arg(painted).arg(videos).arg(native).arg(photon).arg(geometry);
         QJsonObject result{{"scheme",scheme},{"mode",mode},{"passed",pass},{"error",error},{"seconds",elapsed},{"depth_frames",frames-initial},{"positive_depth_frames",positiveFrames},{"painted_frames",painted},{"video_frames",videos},{"native_frames",native},{"photon_frames",photon},{"depth_fps",(frames-initial)/std::max(.001,elapsed)},{"painted_fps",painted/std::max(.001,elapsed)},{"video_fps",videos/std::max(.001,elapsed)},{"npu",stats(npu)},{"contour",stats(contour)},{"display_geometry_preserved",geometry},{"generation",generation},{"model_sha256",last["model_sha256"]},{"input_rotation_degrees",last["input_rotation_degrees"]}};
+        if(depthOnly)result["tof_distance_mode"]=last["tof_distance_mode"];
         result["camera_dock_policy"]=cameraVisibility;result["camera_disabled"]=depthOnly;
         result["imaging_switch"]=s->imagingSwitchDiagnostics();
         if(onHost){result["inference"]=stats(inference);result["host_total"]=stats(total);result["paired_frames"]=paired;result["reused_native_frames"]=reused;result["dtof_corrected_frames"]=corrected;result["unpaired_frames"]=unpaired;result["historical_scale_frames"]=historical;result["maximum_pair_delta_ms"]=maximumPairDelta;result["backend"]=last["assist_backend"];result["host_model"]=last["assist_host_model"];result["graph_sha256"]=last["assist_graph_sha256"];result["tof_calibration"]=last["tof_calibration"];result["camera_mount_rotation_degrees"]=last["camera_mount_rotation_degrees"];result["input_rotation_degrees"]=last["assist_input_rotation_degrees"];}
-        if(tinyMode)result["rendered_color_validation"]=QJsonObject{{"checks",colorChecks},{"mismatched_pixels",colorMismatches},{"checks_with_visible_color",brightColorChecks},{"minimum_m",canvas->displayMinimum()},{"maximum_m",canvas->displayMaximum()},{"black_outside_range",canvas->blackOutsideRange()},{"screenshot",colorScreenshot},{"camera_screenshot",cameraScreenshot},{"camera_geometry_preserved",cameraGeometry},{"crop_aspect_preserved",displayAspect}};
         result["board_compute"]=stats(compute);result["source_to_publish"]=stats(sourcePublish);result["info10_outputs"]=info10;result["windows"]=windows;
         result["board_publish_fps"]=(lastPublish>firstPublish)?1000.*(lastCount-firstCount)/(lastPublish-firstPublish):0.;
         runs.append(result);report["runs"]=runs;save(path,report);progress({{"phase","mode_finished"},{"passed",pass},{"scheme",scheme}});
-        previousGeneration=generation;++stage;if(!pass){success=false;if(!tinySwitch||!ready||invalid||s->userStopped())break;}
+        previousGeneration=generation;++stage;if(!pass){success=false;break;}
         if(hostOnly&&stage<sequence.size()){
             s->stop();
             if(!waitFor([&]{return !s->busy();},30000)){success=false;break;}
@@ -354,23 +318,87 @@ static int runBoardLiteSrLiveValidation(SensorMainWindow &window,const QString &
             if(!released){report["error"]="Board owner did not become idle before restart: "+t->detail();success=false;break;}
         }
     }
-    board->performanceFramePainted={};host->performanceFramePainted={};
+    host->performanceFramePainted={};
     int late=0;QObject stopObserver;
-    QObject::connect(s,&RvSessionController::dtofCandidateReady,&stopObserver,[&](const RvDtofCandidates::Result &r){if(r.fresh)++late;});
     QObject::connect(s,&RvSessionController::assistDepthSnapshotReady,&stopObserver,[&](const QByteArray &,const QJsonObject &){++late;});
     s->stop();waitFor([&]{return !s->busy();},30000);waitFor([]{return false;},1500);
-    bool idle=false;QElapsedTimer stopClock;stopClock.start(); do { idle=inspect(after);if(!idle)waitFor([]{return false;},500); } while(!idle&&stopClock.elapsed()<25000);const bool unchanged=idle&&before["settings"]==after["settings"]&&before["litesr_settings"]==after["litesr_settings"]&&before["service_sha"]==after["service_sha"]&&before["litesr_sha"]==after["litesr_sha"];
+    bool idle=false;QElapsedTimer stopClock;stopClock.start(); do { idle=inspect(after);if(!idle)waitFor([]{return false;},500); } while(!idle&&stopClock.elapsed()<25000);const bool unchanged=idle&&before["settings"]==after["settings"]&&before["capture_settings"]==after["capture_settings"]&&before["service_sha"]==after["service_sha"]&&before["capture_sha"]==after["capture_sha"];
     report["after"]=after;report["normal_stop"]=idle&&s->userStopped();report["late_results_after_stop"]=late;report["saved_sensor_files_unchanged"]=unchanged;
     report["passed"]=success&&stage==sequence.size()&&idle&&unchanged&&late==0;save(path,report);window.close();return report["passed"].toBool()?0:2;
 }
 
-int runLiteSr384LiveValidation(SensorMainWindow &w,const QString &p){return runBoardLiteSrLiveValidation(w,p,false);}
-
-int runHostAssistLiveValidation(SensorMainWindow &w,const QString &p){return runBoardLiteSrLiveValidation(w,p,false,true);}
-
-int runBoardThermalLiveValidation(SensorMainWindow &w,const QString &p){return runBoardLiteSrLiveValidation(w,p,false,false,true);}
-int runHostThermalLiveValidation(SensorMainWindow &w,const QString &p){return runBoardLiteSrLiveValidation(w,p,false,true,true);}
-
-
-int runTinyNv12SwitchValidation(SensorMainWindow &w,const QString &p){return runBoardLiteSrLiveValidation(w,p,true);}
-
+int runHostAssistLiveValidation(SensorMainWindow &w,const QString &p){return runHostLiveValidation(w,p);}
+int runHostThermalLiveValidation(SensorMainWindow &w,const QString &p){return runHostLiveValidation(w,p,true);}
+int runImagingSwitchValidation(SensorMainWindow &window,const QString &path){
+    auto *session=window.session();
+    if(qEnvironmentVariable("DCTS_LIVE_ENABLE")!="1"||qEnvironmentVariable("RV_TEST_OFFLINE_ONLY")=="1"
+       ||session->deviceProfile().serial!=qEnvironmentVariable("DCTS_LIVE_SERIAL"))return 3;
+    auto *menu=window.findChild<QComboBox*>("rvDepthModel");
+    auto *host=static_cast<RvDepthView*>(window.depth()->findChild<QWidget*>("rvAssistDepthCanvas"));
+    auto *native=static_cast<RvDepthView*>(window.depth()->findChild<QWidget*>("rvNativeDepthCanvas"));
+    if(!menu||!host||!native)return 3;
+    const QString h="host_unidepth_rgb672_vga_fp16_tof16",ordinary="board_native_tof48",high="board_native_tof48_high_accuracy";
+    QJsonObject report{{"passed",false},{"calibration_release",RvCalibration::Release},{"rendering","offscreen_widget_grab"}};
+    QJsonArray stages;bool all=true;QString priorGeneration;
+    for(const auto &scheme:QStringList{h,ordinary,high,h,high,ordinary,h}){
+        QObject scope;int frames=0,painted=0,videos=0,rawFrames=0;bool invalid=false,measuring=false;
+        QByteArray rawDepth;QJsonObject last,rawMeta;QString generation;double maxDelta=0;
+        auto *canvas=scheme==h?host:native;
+        qint64 lastPaint=-1;
+        canvas->performanceFramePainted=[&](const QJsonObject &m){
+            const auto frame=m["frame_id"].toInteger(-1);
+            if(measuring&&frame!=lastPaint){lastPaint=frame;++painted;}
+        };
+        // A hidden validation process must still exercise actual widget paints.
+        QTimer render;render.setInterval(50);
+        QObject::connect(&render,&QTimer::timeout,&scope,[&]{if(measuring)canvas->grab();});render.start();
+        QObject::connect(session,&RvSessionController::cameraFrameReady,&scope,[&](const QImage&){if(measuring)++videos;});
+        QObject::connect(session,&RvSessionController::tofFrameReady,&scope,[&](const RvTofFrame &f){
+            if(!measuring)return;++rawFrames;rawMeta=f.metadata;rawDepth=f.radialMetres();
+            invalid|=f.columns()!=(scheme==h?16:48)||f.rows()!=(scheme==h?16:32)||f.metadata["dtof_fov_correction"]!=6;
+        });
+        const auto accept=[&](const QByteArray &bytes,const QJsonObject &m){
+            if(!measuring)return;++frames;last=m;generation=m["source_generation"].toString();
+            if(generation.isEmpty())generation=m["generation"].toVariant().toString();
+            invalid|=bytes.size()!=(scheme==h?640*480*4:48*32*4);
+            if(scheme!=h){
+                invalid|=session->assistDepthEnabled()||bytes!=rawDepth||m["tof_sequence"]!=rawMeta["tof_sequence"]
+                    ||m["depth_unit"]!="sensor_radial_m_float32"||m["native_order"]!=true
+                    ||m["sensor_mode"]!=(scheme==ordinary?11:12);
+            }else if(m["dtof_present"]==true){
+                maxDelta=std::max(maxDelta,std::abs(m["pair_delta_ms"].toDouble()));invalid|=maxDelta>100.;
+            }
+        };
+        if(scheme==h)QObject::connect(session,&RvSessionController::assistDepthSnapshotReady,&scope,
+            [&](const QByteArray &b,const QJsonObject &m,const QImage &,const RvTofFrame &,const QByteArray &){accept(b,m);});
+        else QObject::connect(session,&RvSessionController::depthSnapshotReady,&scope,
+            [&](const QByteArray &b,const QJsonObject &m,const QImage &){accept(b,m);});
+        const int index=menu->findData(scheme);if(index<0){all=false;break;}
+        menu->setCurrentIndex(index);QMetaObject::invokeMethod(menu,"activated",Qt::DirectConnection,Q_ARG(int,index));
+        if(session->userStopped())session->start();
+        const bool ready=waitFor([&]{return session->userStopped()||(!session->busy()&&!session->imagingSwitchActive());},95000)
+            &&!session->userStopped()&&session->currentImagingScheme()==scheme;
+        measuring=true;QElapsedTimer clock;clock.start();
+        if(ready)waitFor([&]{return invalid||session->userStopped();},12000);
+        measuring=false;canvas->performanceFramePainted={};
+        const auto snap=window.depth()->snapshot();
+        const bool valid=ready&&!invalid&&!session->userStopped()&&frames>=10&&painted>=10&&rawFrames>=10&&videos>=20
+            &&generation!=priorGeneration&&snap.metresFloat32LE.size()==(scheme==h?640*480*4:48*32*4);
+        QJsonObject result{{"scheme",scheme},{"passed",valid},{"ready",ready},{"invalid_data",invalid},{"frames",frames},
+            {"painted",painted},{"raw_frames",rawFrames},{"video_frames",videos},{"seconds",clock.elapsed()/1000.},
+            {"width",last["width"]},{"height",last["height"]},{"depth_unit",last["depth_unit"]},{"generation",generation},
+            {"sensor_mode",last["sensor_mode"]},{"maximum_pair_delta_ms",maxDelta},{"state",session->stateText()},
+            {"detail",session->detailText()},{"switch",session->imagingSwitchDiagnostics()}};
+        stages.append(result);report["stages"]=stages;save(path,report);
+        if(!valid){all=false;break;}
+        canvas->grab().save(path+"."+scheme+".png");
+        priorGeneration=generation;
+    }
+    host->performanceFramePainted={};native->performanceFramePainted={};
+    QObject stopScope;int late=0;
+    QObject::connect(session,&RvSessionController::depthFrameReady,&stopScope,[&]{++late;});
+    QObject::connect(session,&RvSessionController::assistDepthSnapshotReady,&stopScope,[&]{++late;});
+    session->stop();const bool stopped=waitFor([&]{return !session->busy();},35000);waitFor([]{return false;},1500);
+    report["normal_stop"]=stopped;report["late_depth_results"]=late;report["passed"]=all&&stages.size()==7&&stopped&&late==0;
+    save(path,report);window.close();return report["passed"].toBool()?0:2;
+}

@@ -7,7 +7,7 @@
 ## 备份与交付范围
 
 - 根目录没有 `.git`。原样本地快照在 `x64/validation/source_cleanup_20261105/before/`，322 份源码/资源，逐文件 SHA256 在 `before-sha256.json`；同时保留改前 Release/Debug EXE。
-- 经用户明确批准，脱敏的 252 份公开源码通过 `http://127.0.0.1:7897` 推送至 [GitHub 备份分支](https://github.com/QinChen1998/depth-camera-and-tactile-sensor/tree/backup/pre-cleanup-20261105)，远端核对 commit 为 `3e4ee52f1d3aabb9fb734fe38070dcc285bd3213`。
+- 经用户明确批准，脱敏的 252 份公开源码通过 `http://127.0.0.1:<PROXY_PORT>` 推送至 [GitHub 备份分支](https://github.com/QinChen1998/depth-camera-and-tactile-sensor/tree/backup/pre-cleanup-20261105)，远端核对 commit 为 `3e4ee52f1d3aabb9fb734fe38070dcc285bd3213`。
 - 公开备份排除专有模型、密文、密钥二进制、设备配置、CAD 源、AGENTS 和新增板端 runtime；设备公钥/序列号已脱敏，known_hosts 为空。范围见 `public-backup-audit.json`。公开副本不是可直接交付的安装包，也不能替代本地原样快照。
 - 本轮改后代码保存在当前工作区，没有再次公开推送或制作安装包。原始移植项目只读，未更改；没有连接真实硬件。
 

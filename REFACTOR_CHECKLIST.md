@@ -1,4 +1,21 @@
-# 源码精简与回归检查清单（2026-11-05）
+# 源码精简与归档记录
+
+当前 2026-11-09 后续变更见 [默认标定与原生 ToF 模式](docs/DEFAULT_CALIBRATION_NATIVE_TOF.md)：固定 F6 自动导入，增加普通／高精度 48×32 原生 ToF，移除未引用的 LiteSR 研究头和旧部署二进制。实机和离线结果独立记录。
+## 2026-11-09 仅保留上位机辅助推理
+
+- 移除 LiteSR 普通／高精度入口、专用密文和 ARM 推理、主机轮廓与切换模板；旧设置统一迁移到 H。
+- 原生采集迁入 `tools/rv_capture/`，USB 导入、连接校验、设备管理和安装构建仅依赖采集支持。
+- 本轮证据位于 `x64/validation/host_only_20261109/`；当前验证及边界见 [变更记录](docs/HOST_ASSIST_ONLY.md)。
+
+## 2026-11-08 用户指定清理
+
+- [x] 彻底移除当前项目的 Tiny 专用实现及部署残留，同步 AGENTS、架构、测试、模型保护和历史说明。
+- [x] 指定安装沙盒输入副本及一套重复 VLC 目录／ZIP 按摘要核对后删除，保留另一套安装工具。
+- [x] 既有 `x64/validation/` 历史材料压缩归档并逐文件校验，原路径及 SHA256 见 [本地归档](archives/README.md)。
+- 其余审查候选保留：旧模型绑定头、B 分支、256×256 轮廓实现、编译缓存、IDE 配置、原始模型、当前设备配置及 CAD。
+- 本轮证据使用 `x64/validation/tiny_final_cleanup_20261108/`；构建、离线专项及文件保持结果以该目录 `verification.json` 为准。未连接硬件，不提交或推送。
+
+以下为 2026-11-05 两轮精简的历史记录，其规模、路径及测试结果均对应当时基线。
 
 ## 第二轮：执行用户确认的第 1–7 类（已完成）
 
@@ -22,7 +39,7 @@
 目标：在保留现有功能、数据契约和原始模型的前提下，检查全项目源码、更新测试、精简移植遗留逻辑与目录，并修正文档入口。
 
 - [x] 阅读 `README.md` 与 `docs/ARCHITECTURE.md`，建立本清单。
-- [x] 核对 Git 仓库、现有改动和上传范围，通过 `127.0.0.1:7897` commit/push 到 GitHub，并验证远端备份；完成前不改产品源码。
+- [x] 核对 Git 仓库、现有改动和上传范围，通过 `127.0.0.1:<PROXY_PORT>` commit/push 到 GitHub，并验证远端备份；完成前不改产品源码。
 - [x] 盘点主工程、worker、资源、脚本和测试，记录有效代码行数统计口径与 Release/Debug 基线。
 - [x] 按模块检查过度设计、重复或不可达逻辑、过时测试与失效路径，确定可验证的精简范围。
 - [x] 实施精简；明确过时文件直接移除，不确定文件列入待判断清单。
@@ -30,9 +47,9 @@
 - [x] 更新 `AGENTS.md`、`README.md`、架构与测试文档，核对构建、资源和文档路径。
 - [x] 汇总修改、验证结果、当前有效代码行数和待用户判断的删除/修改文件清单。
 
-## 当前进度
+## 第一轮历史进度
 
-- 当前根目录不含 Git 元数据；已在 `../dToF/output/litesr_depth_only_20261106_v1/retired_host_assets/x64/validation/source_cleanup_20261105/before/` 保存 322 份原样源码/资源，哈希见同目录上级 `before-sha256.json`。
+- 第一轮建立基线时根目录尚无 Git 元数据；当时在 `../dToF/output/litesr_depth_only_20261106_v1/retired_host_assets/x64/validation/source_cleanup_20261105/before/` 保存 322 份原样源码/资源，哈希见同目录上级 `before-sha256.json`。当前目录已建立 Git，分支及未提交改动以实际状态为准。
 - 用户明确批准具体脱敏文件集后，已通过 7897 代理推送至 `QinChen1998/depth-camera-and-tactile-sensor` 的 `backup/pre-cleanup-20261105` 分支，并通过 `ls-remote` 验证远端 commit 为 `3e4ee52f1d3aabb9fb734fe38070dcc285bd3213`。源码精简和本轮全部验证已完成；改后代码保存在本地，没有再次公开推送。
 - 公开备份含 252 份文件，排除专有模型、密文、带密钥二进制、设备配置、CAD 源、AGENTS 和新增板端 runtime 源；实际设备公钥/序列号脱敏，`known_hosts` 为空。审查明细：`../dToF/output/litesr_depth_only_20261106_v1/retired_host_assets/x64/validation/source_cleanup_20261105/public-backup-audit.json`。
 - 所有本次临时报告和验证输出使用新的 `../dToF/output/litesr_depth_only_20261106_v1/retired_host_assets/x64/validation/source_cleanup_20261105/` 子目录。

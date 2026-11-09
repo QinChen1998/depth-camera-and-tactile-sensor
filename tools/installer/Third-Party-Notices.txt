@@ -11,5 +11,8 @@ https://code.qt.io/cgit/qt/qtmultimedia.git/tree/coin?h=v6.11.1
 Microsoft Visual C++ x64 runtime is deployed application-locally.
 ADB attribution and version are in platform-tools.
 ONNX Runtime, NVIDIA runtime and model notices are in UniDepthRuntimeRgb672VgaFP16RTX/licenses.
+OpenVINO 2026.4.1, oneTBB, ONNX Runtime 1.24.4 and DirectML notices are in UniDepthRuntimeCompatible/licenses.
+The decoder INT8/FP32 model is a local derivative of the bundled original model and retains its model notice.
+GPU drivers are supplied by Windows or the GPU vendor; the application includes native CPU inference for systems without a usable GPU driver.
 libssh2, OpenSSL and board tooling notices are in rv_control.
 VLC H.265/RTSP libraries, copyright and release source information are in licenses/VLC.

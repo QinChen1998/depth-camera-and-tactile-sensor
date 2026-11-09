@@ -3,6 +3,52 @@
 #include "ProtectionCommon.h"
 #include "model_key_material.h"
 
+extern "C" __declspec(dllexport) int __cdecl DctsCreateProtectedOpenVino(
+    const DctsOpenVinoApi *api, ov_core_t *core, const char *device, int ir,
+    const wchar_t *path, const char *expected, ov_compiled_model_t **compiled,
+    DctsModelLoadMetrics *metrics, char *error, size_t errorBytes) {
+    if (compiled) *compiled = nullptr;
+    if (error && errorBytes) error[0] = 0;
+    try {
+        dcts::require(api && core && device && path && expected && compiled && metrics,
+                      "Invalid protected OpenVINO arguments");
+        dcts::require(metrics->struct_bytes == sizeof(*metrics), "Protected loader ABI mismatch");
+        *metrics = {}; metrics->struct_bytes = sizeof(*metrics); metrics->abi_version = 1;
+        dcts::require(std::strlen(expected) == 64 && (ir == 0 || ir == 1), "Protected model identity invalid");
+        const auto total = dcts::Clock::now();
+        auto start = dcts::Clock::now();
+        auto package = dcts::readFile(path, dcts::MaxModelBytes + sizeof(dcts::Envelope));
+        auto header = dcts::parseEnvelope(package);
+        metrics->plaintext_bytes = header.plaintext_bytes; metrics->read_ms = dcts::elapsed(start);
+        dcts::SecureBytes secret(32), plaintext(size_t(header.plaintext_bytes));
+        for (size_t i = 0; i < 32; ++i) secret.bytes[i] = DctsKeyPart0[i] ^ DctsKeyPart1[i];
+        start = dcts::Clock::now();
+        dcts::crypt(false, secret.bytes.data(), header, package.data() + sizeof(header),
+                    plaintext.bytes.size(), plaintext.bytes.data());
+        secret.wipe(); metrics->decrypt_ms = dcts::elapsed(start);
+        start = dcts::Clock::now();
+        const auto digest = dcts::sha256(plaintext.bytes.data(), plaintext.bytes.size());
+        dcts::require(dcts::equal(digest.data(), header.plaintext_sha256, digest.size()) &&
+            dcts::hex(digest.data(), digest.size()) == expected, "Decrypted model fingerprint mismatch");
+        metrics->digest_ms = dcts::elapsed(start); start = dcts::Clock::now();
+        *compiled = dctsCompileOpenVino(*api, core, device, plaintext.bytes.data(), plaintext.bytes.size(), ir != 0);
+        metrics->session_create_ms = dcts::elapsed(start); start = dcts::Clock::now();
+        plaintext.wipe(); metrics->plaintext_clear_ms = dcts::elapsed(start);
+        metrics->total_ms = dcts::elapsed(total); return 0;
+    } catch (const std::exception &failure) {
+        if (api && compiled && *compiled) {api->ov_compiled_model_free(*compiled); *compiled = nullptr;}
+        if (error && errorBytes) {
+            const auto length = std::min(errorBytes - 1, std::strlen(failure.what()));
+            std::memcpy(error, failure.what(), length); error[length] = 0;
+        }
+        return 1;
+    } catch (...) {
+        if (api && compiled && *compiled) {api->ov_compiled_model_free(*compiled); *compiled = nullptr;}
+        if (error && errorBytes) error[0] = 0;
+        return 2;
+    }
+}
+
 extern "C" __declspec(dllexport) int __cdecl DctsCreateProtectedSession(
     const OrtApi *api, const OrtEnv *environment, const OrtSessionOptions *options,
     const wchar_t *ciphertext_path, const char *expected_sha256, OrtSession **session,

@@ -106,10 +106,7 @@ void RvTunerController::completed(quint64 operation,const QString &action,const 
     }
     if(action=="persist"){
         m_saved=r["settings"].toObject();m_info["snapshot"]=r["snapshot"];m_info["backup"]=r["backup"];
-        const auto saved=RvTuner::Settings::fromJson(m_applied);const bool nativeCompatible=saved.nativeCompatible();
-        setState(Running,saved.fp16Native16Compatible()?tr("dToF settings saved. Host-assisted inference (640×480) supports these 16×16 ToF settings."):
-            !nativeCompatible?tr("dToF settings saved. Shared imaging requires 48×32; use dToF tuning for this resolution. Saved values will not be overridden."):
-            r["litesr_compatible"].toBool()?tr("dToF settings saved and read back for Native and LiteSR."):tr("dToF settings saved. LiteSR cannot start with this combination; saved values will not be overridden."));
+        setState(Running,tr("dToF settings saved and read back. Imaging uses a 16×16 session preset without changing the saved settings."));
     }else if(action=="start"||action=="switch"){
         if(r["token"]!=m_token||r["settings"].toObject()!=m_requested.json()){fail(tr("Experiment receipt differs from requested settings."));return;}
         m_applied=m_requested.json();m_info["snapshot"]=r["snapshot"];m_oldToken.clear();

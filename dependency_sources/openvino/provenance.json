@@ -1,0 +1,5 @@
+{
+  "version": "2026.4.1",
+  "source": "Official openvino 2026.4.1 Windows wheel; unmodified C API headers",
+  "license": "Apache-2.0"
+}

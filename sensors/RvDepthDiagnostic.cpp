@@ -1,4 +1,5 @@
 #include "RvDepthDiagnostic.h"
+#include "RvInferenceRuntime.h"
 #include "RvCameraView.h"
 #include "DepthColorScale.h"
 #include <QtCore/QCryptographicHash>
@@ -57,7 +58,7 @@ bool Snapshot::valid()const{
        ||!RvCameraView::isUniDepth(output.metadata["assist_host_model"].toString()))return false;
     const auto &m=output.metadata;const auto &profile=RvCameraView::profile(m["assist_host_model"].toString());
     if(profile.provisional&&(m["assist_provisional_model"]!=true||m["assist_candidate_parity_mean_limit"]!=profile.parityMeanLimit))return false;
-    if(m["rectify_map_sha256"]!=QLatin1String(profile.mapSha)||m["assist_graph_sha256"]!=QLatin1String(profile.graphSha)
+    if(m["rectify_map_sha256"]!=QLatin1String(profile.mapSha)||!RvInferenceRuntime::validGraphMetadata(m)
        ||m["depth_K"].toArray()!=RvCameraView::intrinsics(profile)
        ||m["assist_output_restored_to_calibrated_grid"]!=true
        ||(m["assist_input_rotation_degrees"]!=0&&m["assist_input_rotation_degrees"]!=180))return false;
@@ -124,7 +125,7 @@ bool Snapshot::save(const QString &parent,QString *result)const{
        ||!png(stage.filePath("depth.png"),paint(final,lo,hi,black))||(!viewport.isNull()&&!png(stage.filePath("viewport.png"),viewport)))return fail("Cannot write diagnostic files");
     for(const auto *name:{"paired_rgb.png","paired_points.png","inference_rgb.png","mono.png","global.png","depth.png","viewport.png"}){
         QFile f(stage.filePath(name));if(f.open(QIODevice::ReadOnly))hashes[name]=QString::fromLatin1(digest(f.readAll()));}
-    QFile geometry(fov==2?":/camera/dtof_m48_geometry_f2.bin":":/camera/dtof_m48_geometry.bin");
+    QFile geometry(fov==6?RvCalibration::GeometryResource:fov==2?":/camera/dtof_m48_geometry_f2.bin":":/camera/dtof_m48_geometry.bin");
     if(geometry.open(QIODevice::ReadOnly))manifest["geometry_sha256"]=QString::fromLatin1(digest(geometry.readAll()));
     manifest["files_sha256"]=hashes;
     if(!write(stage.filePath("manifest.json"),QJsonDocument(manifest).toJson()))return fail("Cannot write diagnostic manifest");
@@ -143,7 +144,7 @@ int replay(const QString &folder,const QString &reportPath,const QString &compar
             const auto bytes=file.readAll();require(manifest["files_sha256"].toObject()[name]==QString::fromLatin1(digest(bytes)),"Diagnostic fingerprint mismatch");return bytes;};
         const auto m=manifest["metadata"].toObject();const auto model=m["assist_host_model"].toString();require(RvCameraView::isUniDepth(model),"Unknown diagnostic model");
         const bool wide=RvCameraView::isWide(model);const auto &profile=RvCameraView::profile(model);
-        require(m["rectify_map_sha256"]==QLatin1String(profile.mapSha)&&m["assist_graph_sha256"]==QLatin1String(profile.graphSha),"Diagnostic model or view mismatch");
+        require(m["rectify_map_sha256"]==QLatin1String(profile.mapSha)&&RvInferenceRuntime::validGraphMetadata(m),"Diagnostic model or view mismatch");
         const auto nativeMeta=manifest["native_metadata"].toObject();RvTofFrame tof{load("tof.bin",nativeMeta["dtof_bytes"].toInt()),nativeMeta};require(tof.isValidForHostFusion(),"Replay requires a paired native measurement");
         const auto monoBytes=load("mono.f32",DepthBytes),savedBytes=load("depth.f32",DepthBytes),reasons=load("reasons.bin",2*ReasonBytes);
         const auto mono=decode(monoBytes),saved=decode(savedBytes);
@@ -152,7 +153,7 @@ int replay(const QString &folder,const QString &reportPath,const QString &compar
         const QImage rgb=QImage::fromData(imageBytes);require(rgb.size()==QSize(640,480),"Invalid paired RGB");
         Snapshot snapshot{{savedBytes,{},rgb,m,QDateTime::currentDateTimeUtc()},tof,monoBytes+reasons,{}};require(snapshot.valid(),"Diagnostic measurement identity mismatch");
         const int fov=(m.contains("dtof_fov_correction")?m["dtof_fov_correction"]:m["tof_fov_correction"]).toInt(-1);const auto &cal=RvAssistFusion::calibrationForNativeGrid(fov,tof.columns(),tof.rows());
-        QFile geometry(fov==2?":/camera/dtof_m48_geometry_f2.bin":":/camera/dtof_m48_geometry.bin");require(geometry.open(QIODevice::ReadOnly)&&manifest["geometry_sha256"]==QString::fromLatin1(digest(geometry.readAll())),"Diagnostic calibration mismatch");
+        QFile geometry(fov==6?RvCalibration::GeometryResource:fov==2?":/camera/dtof_m48_geometry_f2.bin":":/camera/dtof_m48_geometry.bin");require(geometry.open(QIODevice::ReadOnly)&&manifest["geometry_sha256"]==QString::fromLatin1(digest(geometry.readAll())),"Diagnostic calibration mismatch");
         require(m["assist_experiment"]=="H"&&m["assist_fusion_revision"]=="global_scale_latest_native_rgb_v2",
                 "Replay supports the current H correction revision only");
         auto repaired=RvAssistFusion::fuseGlobalScale(mono,tof,cal,profile);

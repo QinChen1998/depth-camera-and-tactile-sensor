@@ -7,9 +7,9 @@
     "camera"
   ],
   "imaging_schemes": [
-    "board_litesr_near_384x256_host_contour_hd",
     "host_unidepth_rgb672_vga_fp16_tof16",
-    "board_tiny_nv12_128x80"
+    "board_native_tof48",
+    "board_native_tof48_high_accuracy"
   ],
   "unidepth_correction": "H"
 }

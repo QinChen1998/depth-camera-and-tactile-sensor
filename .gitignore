@@ -33,12 +33,9 @@ __pycache__/
 **/model_key_material.h
 
 # Private board implementation and key-bearing binaries stay local.
-/tools/litesr_board/common/
-/tools/litesr_board/**/runtime/
-/tools/litesr_board/**/payload/*.bin
-/tools/tiny_nv12_board/runtime/
-/tools/tiny_nv12_board/payload/tiny_nv12
-/tools/tiny_nv12_board/payload/tiny_nv12_camera
+/tools/rv_capture/common/
+/tools/rv_capture/**/runtime/
+/tools/rv_capture/**/payload/*.bin
 *.pth
 *.pyc
 *.dll

@@ -46,13 +46,14 @@
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
       <WarningLevel>Level3</WarningLevel>
       <AdditionalOptions>/utf-8 /Zc:__cplusplus %(AdditionalOptions)</AdditionalOptions>
-      <AdditionalIncludeDirectories>$(ProjectDir)third_party\ffmpeg_7_1_3;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir)third_party\ffmpeg_7_1_3;$(ProjectDir)dependency_sources\openvino\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>NOMINMAX;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
       <AdditionalDependencies>bcrypt.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <GenerateDebugInformation>true</GenerateDebugInformation>
+      <AdditionalOptions>/PDBALTPATH:%_PDB% %(AdditionalOptions)</AdditionalOptions>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(DctsInstallerBuild)' == 'true'">
@@ -88,6 +89,11 @@
       <PreprocessorDefinitions Condition="'$(DctsUseCudaEp)' != 'true' or '$(DctsInstallerBuild)' == 'true'">DCTS_TENSORRT_RTX;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
     <ClCompile Include="sensors\RvAssistFusion.cpp"/>
+    <ClCompile Include="sensors\RvInferenceRuntime.cpp"/>
+    <ClCompile Include="sensors\RvInferenceSettings.cpp"/>
+    <ClInclude Include="sensors\RvInferenceRuntime.h"/>
+    <QtMoc Include="sensors\RvInferenceSettings.h"/>
+    <ClInclude Include="tools\model_protection\OpenVinoApi.h"/>
     <ClCompile Include="sensors\RvDepthCoverage.cpp"/>
     <ClCompile Include="sensors\RvDepthDiagnostic.cpp"/>
     <ClCompile Include="sensors\RvDepthView.cpp"/>
@@ -97,7 +103,6 @@
     <ClCompile Include="sensors\RvImportDiagnostics.cpp"/>
     <ClCompile Include="sensors\RvDtofBoardStream.cpp"/>
     <ClCompile Include="sensors\RvDtofCandidates.cpp"/>
-    <ClCompile Include="sensors\RvLiteSrContour.cpp"/>
     <ClCompile Include="sensors\RvSessionController.cpp"/>
     <ClCompile Include="sensors\RvTunerController.cpp"/>
     <ClCompile Include="sensors\RvTunerProtocol.cpp"/>
@@ -130,7 +135,6 @@
     <ClInclude Include="sensors\ImageHoverTip.h"/>
     <ClInclude Include="sensors\ImagePresentation.h"/>
     <ClInclude Include="sensors\LatestSensorFrameBuffer.h"/>
-    <ClInclude Include="sensors\LiteSrNativeBindings.h"/>
     <QtMoc Include="sensors\RtspCameraPage.h"/>
     <QtMoc Include="sensors\RvAssistDepth.h"/>
     <ClInclude Include="sensors\RvAssistFusion.h"/>
@@ -141,12 +145,12 @@
     <ClInclude Include="sensors\RvDepthView.h"/>
     <QtMoc Include="sensors\RvDeviceManagerDialog.h"/>
     <ClInclude Include="sensors\RvDeviceStore.h"/>
+    <ClInclude Include="sensors\RvCalibration.h" />
     <ClInclude Include="sensors\RvUsbEnrollment.h"/>
     <ClInclude Include="sensors\RvImportDiagnostics.h"/>
     <ClInclude Include="sensors\RvDtofBoardStream.h"/>
     <ClInclude Include="sensors\RvDtofCandidates.h"/>
     <ClInclude Include="sensors\RvHdVideoStream.h"/>
-    <ClInclude Include="sensors\RvLiteSrContour.h"/>
     <ClInclude Include="sensors\RvPhotonFrame.h"/>
     <QtMoc Include="sensors\RvSessionController.h"/>
     <ClInclude Include="sensors\RvTofFrame.h"/>
@@ -182,31 +186,18 @@
     <ClCompile Include="tests\LiveValidation.cpp"/>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="tools\litesr_board\Contour384.h" />
-    <None Include="tools\litesr_board\common\NativeInput48.inc" />
-    <None Include="tools\litesr_board\Contour384Grid.inc" />
-    <None Include="tools\litesr_board\build.sh" />
-    <None Include="tools\litesr_board\protected384\runtime\main.cpp" />
-    <None Include="tools\litesr_board\protected384\runtime\Preprocess.h" />
-    <None Include="tools\litesr_board\protected384\runtime\ProtectedModel.inc" />
-    <None Include="tools\litesr_board\protected384\runtime\Gui.inc" />
+    <None Include="tools\rv_capture\build.sh" />
   </ItemGroup>
   <ItemGroup>
-    <None Include="tools\litesr_board\StatusPolicy.h" />
-    <None Include="tools\litesr_board\common\camera_rtsp_monitor.cpp" />
-    <None Include="tools\litesr_board\Contour.h" />
-    <None Include="tools\litesr_board\ContourGrid.inc" />
-    <None Include="tools\litesr_board\common\HdVideo.h" />
-    <None Include="tools\litesr_board\common\NativePacket.h" />
-    <None Include="tools\litesr_board\native\runtime\Gui.inc" />
-    <None Include="tools\litesr_board\native\runtime\main.cpp" />
-    <None Include="tools\litesr_board\common\SpiNative48.h" />
+    <None Include="tools\rv_capture\StatusPolicy.h" />
+    <None Include="tools\rv_capture\common\camera_rtsp_monitor.cpp" />
+    <None Include="tools\rv_capture\common\HdVideo.h" />
+    <None Include="tools\rv_capture\common\NativePacket.h" />
+    <None Include="tools\rv_capture\native\runtime\Gui.inc" />
+    <None Include="tools\rv_capture\native\runtime\main.cpp" />
+    <None Include="tools\rv_capture\common\SpiNative48.h" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="sensors\RvTinyNv12Protocol.h" />
-    <ClInclude Include="tests\TinyNv12Tests.h" />
-    <ClInclude Include="tools\tiny_nv12_board\Contract.h" />
-    <ClInclude Include="tools\tiny_nv12_board\Receipt.h" />
   </ItemGroup>
   <ItemGroup><None Include="tools\rv_control\bootstrap\camera-takeover.sh" /></ItemGroup>
   <ItemGroup>

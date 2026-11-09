@@ -5,6 +5,7 @@
 #include "sensors/DepthMapWidget.h"
 #include "sensors/RtspCameraPage.h"
 #include "sensors/RvDeviceManagerDialog.h"
+#include "sensors/RvInferenceSettings.h"
 #include "sensors/RvTunerController.h"
 #include "sensors/TactileVisualizationWidget.h"
 #include <QApplication>
@@ -18,8 +19,6 @@
 #include <QScrollArea>
 #include <QSettings>
 #include <QTimer>
-#include <QNetworkProxy>
-#include <QTcpSocket>
 #include <QVBoxLayout>
 #ifdef Q_OS_WIN
 #include <qt_windows.h>
@@ -67,7 +66,7 @@ SensorMainWindow::SensorMainWindow(LanguageManager *language, QWidget *parent)
         m_inferenceWarning=dialog;
         dialog->setObjectName("hostInferenceUnavailable");
         dialog->setTextFormat(Qt::PlainText);
-        dialog->setInformativeText(tr("For now, choose On-board inference under Imaging scheme, then click Start if needed."));
+        dialog->setInformativeText(tr("Open Settings > Inference Device to detect usable devices, then click Start again."));
         if(!detail.isEmpty())dialog->setDetailedText(detail);
         dialog->setAttribute(Qt::WA_DeleteOnClose);
         dialog->open();
@@ -83,7 +82,6 @@ SensorMainWindow::SensorMainWindow(LanguageManager *language, QWidget *parent)
     m_camera=new RtspCameraPage(m_cameraDock);m_camera->setSessionController(m_session);
     m_cameraDock->setWidget(m_camera);
     connect(m_session,&RvSessionController::dtofCandidateSelectionChanged,this,&SensorMainWindow::updateCameraVisibility);
-    connect(m_cameraDock,&QDockWidget::visibilityChanged,this,[this](bool shown){if(shown&&m_session->depthOnlyMode())m_cameraDock->hide();});
     m_docks={m_tactile,m_depthDock,m_cameraDock};
     for(auto *dock:m_docks)dock->setAllowedAreas(Qt::AllDockWidgetAreas);
     connect(m_session->tuner(),&RvTunerController::shutdownFinished,this,[this]{
@@ -108,6 +106,8 @@ SensorMainWindow::SensorMainWindow(LanguageManager *language, QWidget *parent)
     m_settings=menuBar()->addMenu(QString());m_settings->setObjectName("settingsMenu");
     m_deviceAction=m_settings->addAction(QString());m_deviceAction->setObjectName("rvDeviceManagerAction");
     connect(m_deviceAction,&QAction::triggered,this,[this]{showDeviceManager();});
+    m_inferenceAction=m_settings->addAction(QString());m_inferenceAction->setObjectName("inferenceDeviceAction");
+    connect(m_inferenceAction,&QAction::triggered,this,[this]{RvInferenceSettings::instance()->createDialog(this)->show();});
     m_rendering=m_settings->addMenu(QString());m_rendering->setObjectName("renderModeMenu");
     auto *renderGroup=new QActionGroup(this);renderGroup->setExclusive(true);
     m_standard=m_rendering->addAction(QString());m_standard->setObjectName("actionRenderStandard");
@@ -181,48 +181,31 @@ void SensorMainWindow::offerBoardImport(const RvDeviceProfile &device)
     };
     if (!stillSelected()) return;
     if (QMessageBox::question(this, tr("Install required board files"),
-            tr("%1 is missing required board files. Open the on-board inference model import to install them?")
+            tr("%1 is missing required board capture files. Open the capture support installer?")
                 .arg(device.name), QMessageBox::Yes | QMessageBox::No, QMessageBox::No) != QMessageBox::Yes
         || !stillSelected()) return;
     showDeviceManager(true)->importBoardFilesForStart(device);
 }
 
-void SensorMainWindow::monitorCameraConnection()
+void SensorMainWindow::offerUsbSetup(bool existingDevice, bool networkSetup,const QJsonObject &identity)
 {
-    if (qEnvironmentVariable("RV_TEST_OFFLINE_ONLY") == "1") return;
-    auto *timer = new QTimer(this);
-    timer->setInterval(2500);
-    connect(timer, &QTimer::timeout, this, &SensorMainWindow::probeCameraConnection);
-    timer->start();
-    QTimer::singleShot(0, this, &SensorMainWindow::probeCameraConnection);
-}
-
-void SensorMainWindow::probeCameraConnection()
-{
-    if (m_closing || m_cameraProbe || !m_session->userStopped() || m_session->busy()
-        || !m_session->controlledSource() || QApplication::activeModalWidget()
-        || (m_devices && m_devices->isVisible())) return;
-    const auto device = m_session->deviceProfile();
-    if (!device.ready()) return;
-    auto *probe = new QTcpSocket(this);
-    m_cameraProbe = probe;
-    probe->setProxy(QNetworkProxy::NoProxy);
-    const auto finish = [this, probe, device](bool reachable) {
-        if (m_cameraProbe != probe) return;
-        m_cameraProbe.clear();
-        probe->abort();
-        probe->deleteLater();
-        if (m_closing || m_session->deviceProfile().json() != device.json()) return;
-        if (!reachable) {
-            m_session->deviceUnreachable(device.id);
-        } else if (!QApplication::activeModalWidget() && (!m_devices || !m_devices->isVisible())) {
-            m_session->startAutomatically();
-        }
-    };
-    connect(probe, &QTcpSocket::connected, this, [finish]{finish(true);});
-    connect(probe, &QTcpSocket::errorOccurred, this, [finish](QAbstractSocket::SocketError){finish(false);});
-    QTimer::singleShot(1800, probe, [finish]{finish(false);});
-    probe->connectToHost(device.host, device.sshPort);
+    if(m_closing || m_session->tuner()->shutdownPending())return;
+    const auto text=!existingDevice
+        ? tr("A new RV1103 was detected. Go to Settings to add it automatically?")
+        : networkSetup ? tr("The RV1103 connection needs setup. Go to Settings to complete it automatically?")
+                       : tr("RV1103 board files need updating. Go to Settings to update them automatically?");
+    QMessageBox prompt(QMessageBox::Question,tr("RV1103 connection"),text,
+                       QMessageBox::Yes|QMessageBox::No,this);
+    prompt.setObjectName("rvUsbSetupPrompt");
+    prompt.setDefaultButton(QMessageBox::No);
+    if(prompt.exec()!=QMessageBox::Yes || m_closing || m_session->tuner()->shutdownPending())return;
+    auto *dialog=showDeviceManager();
+    const auto stopRevision=m_session->stopRevision();
+    // The watcher finishes its discovery callback before the shared USB action
+    // is dispatched. The same entry point also enforces the offline guard.
+    QTimer::singleShot(0,dialog,[dialog,identity,session=QPointer<RvSessionController>(m_session),stopRevision]{
+        if(session && session->stopRevision()==stopRevision)dialog->connectViaUsb(identity);
+    });
 }
 
 SensorMainWindow::~SensorMainWindow()
@@ -237,7 +220,7 @@ SensorMainWindow::~SensorMainWindow()
 
 void SensorMainWindow::updateCameraVisibility()
 {
-    const bool video=!m_session->depthOnlyMode();
+    const bool video=true;
     m_cameraDock->toggleViewAction()->setEnabled(video);
     m_cameraDock->setVisible(video);
 }
@@ -300,6 +283,7 @@ void SensorMainWindow::retranslate()
     m_reset->setText(tr("Reset layout"));m_presets->setTitle(tr("Layout Presets"));
     m_savePreset->setText(tr("Save layout..."));m_deletePreset->setText(tr("Delete layout..."));
     m_settings->setTitle(tr("Settings"));m_deviceAction->setText(tr("Device Manager..."));
+    m_inferenceAction->setText(tr("Inference Device..."));
     m_rendering->setTitle(tr("Rendering Mode"));m_standard->setText(tr("Standard Mode"));m_smooth->setText(tr("Smooth Mode"));
     m_languages->setTitle(tr("Language"));m_english->setText(tr("English"));m_chinese->setText(tr("Simplified Chinese"));
     m_about->setText(tr("About"));

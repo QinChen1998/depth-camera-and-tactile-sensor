@@ -1,4 +1,5 @@
 #pragma once
+#include "RvCalibration.h"
 #include <QtCore/QString>
 #include <QtCore/QJsonArray>
 #include <QtCore/QSize>
@@ -26,7 +27,7 @@ struct Profile {double focal;const char *mapSha,*sourceSha,*graphSha,*name,*conv
     double cy() const {return (outputHeight-1)*.5;}
 };
 inline constexpr Profile Rgb672VgaFp16{260.*480/324,
-    "d48026ea3a476187073955208c940b945d35321a4b4abc75e3c506534997da5e",
+    RvCalibration::MapSha,
     "a35dbea69611e21c866b1600569fb8a44c9df2061b505477366d020fef443b6f",
     "50d22cd33e126832793d905788a1efadeb4c9298de72cbfa634d49fdcdbc2dc1","wide","ort-fp16-rgb672-vga-head-fp32-v1",
     "93705cb3295dd7476b44911b8a55f5215bf74e8d5eccd27cecdb1b338270a648",

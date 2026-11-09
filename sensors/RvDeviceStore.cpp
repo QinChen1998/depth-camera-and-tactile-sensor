@@ -70,7 +70,7 @@ RvDeviceProfile RvDeviceProfile::fromJson(const QJsonObject &o) {
         (p.serial=="REDACTED_DEVICE_SERIAL"&&p.publicKey==""?180:0);
     require(!hasMount||(o["camera_mount_rotation"].isDouble()&&o["camera_mount_rotation"].toDouble()==p.cameraMountRotation),"Camera mounting angle must be an integer");
     p.inputRotation=o["input_rotation"].toInt(-2);p.legacyCoordinator=o["legacy_coordinator"].toBool();p.lastConnected=o["last_connected"].toString();
-    require(o["ssh_port"].toDouble()==p.sshPort&&o["input_rotation"].toDouble()==p.inputRotation,"Integer device fields required");p.validate();return p;
+    require(o["ssh_port"].toDouble()==p.sshPort&&o["input_rotation"].toDouble()==p.inputRotation,"Integer device fields required");p.validate();p.calibration=QLatin1String(RvCalibration::Id);p.temporaryFovCalibration=false;return p;
 }
 void RvDeviceProfile::validate() const {
     require(QRegularExpression("^[A-Za-z0-9_-]{1,64}$").match(id).hasMatch(), "Invalid device ID");
@@ -79,7 +79,7 @@ void RvDeviceProfile::validate() const {
     require(QRegularExpression("^[0-9a-f]{16}$").match(serial).hasMatch(), "RV serial must be 16 lowercase hexadecimal characters");
     require(QRegularExpression("^[A-Za-z0-9_.-]{1,64}$").match(username).hasMatch(), "Invalid login username");
     RvDeviceStore::keyFingerprint(publicKey);
-    require(calibration=="unconfigured"||calibration=="rv20261008-f1"||calibration=="rv20261008-f2", "Unsupported calibration profile");
+    require(calibration==QLatin1String(RvCalibration::Id)||calibration=="unconfigured"||calibration=="rv20261008-f1"||calibration=="rv20261008-f2", "Unsupported calibration profile");
     require(!temporaryFovCalibration||fov()>0,"Select F1/F2 before enabling temporary calibration");
     require(cameraMountRotation==0||cameraMountRotation==180, "Camera mounting angle must be 0 or 180 degrees");
     require(inputRotation==-1||inputRotation==0||inputRotation==180, "Inference orientation must be verified as 0 or 180 degrees");
@@ -87,8 +87,8 @@ void RvDeviceProfile::validate() const {
 }
 QString RvDeviceProfile::fingerprint() const { return RvDeviceStore::keyFingerprint(publicKey); }
 QString RvDeviceProfile::credentialTarget() const { return "DexterousHand/RV1103/"+serial+"/"+fingerprint().mid(7)+"/"+username; }
-int RvDeviceProfile::fov() const { return calibration=="rv20261008-f1"?1:calibration=="rv20261008-f2"?2:0; }
-QString RvDeviceProfile::geometrySha() const { return fov()==1?"83b49ace957a4f70982380c6f22a7c39236764ff7311232d03724e85273324db":fov()==2?"54802b37740d0075d8a9da95a0dcb5fde27b2f1e20249312a9f2325280c51729":QString(); }
+int RvDeviceProfile::fov() const { return calibration==QLatin1String(RvCalibration::Id)?RvCalibration::Fov:calibration=="rv20261008-f1"?1:calibration=="rv20261008-f2"?2:0; }
+QString RvDeviceProfile::geometrySha() const { return fov()==RvCalibration::Fov?QLatin1String(RvCalibration::GeometrySha):fov()==1?"83b49ace957a4f70982380c6f22a7c39236764ff7311232d03724e85273324db":fov()==2?"54802b37740d0075d8a9da95a0dcb5fde27b2f1e20249312a9f2325280c51729":QString(); }
 QString RvDeviceProfile::streamUrl(bool hd) const { QUrl u;u.setScheme(hd?"rtsp":"nv12");u.setHost(host);if(hd)u.setPath("/live/0");else u.setPort(8831);return u.toString(); }
 QString RvDeviceStore::keyFingerprint(const QString &key) {
     const auto raw=QByteArray::fromBase64(key.toLatin1(),QByteArray::AbortOnBase64DecodingErrors);

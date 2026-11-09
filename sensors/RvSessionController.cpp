@@ -275,35 +275,21 @@ RvSessionController::RvSessionController(QObject *parent,const QString &deviceSt
 {
     setObjectName(QStringLiteral("rvSessionController"));
     m_tuner=new RvTunerController(this);
-    // Board LiteSR carries its own measured D/I in LSG2. Other schemes never
-    // subscribe to PHQ1; photon transport follows the selected board mode.
     m_previewControl->setObjectName(QStringLiteral("rvPreviewControl"));
     m_deviceStorePath=deviceStorePath;
     try { RvDeviceStore store(m_deviceStorePath);m_device=store.active(); }
     catch(const std::exception &e){m_deviceError=QString::fromUtf8(e.what());}
     QSettings settings;
-    m_boardHostContour=settings.value("depth/boardLiteSrHostContourEnabled",false).toBool();
-    m_boardHostRepair.holeMode=std::clamp(settings.value("depth/boardLiteSrHostHoleMode",1).toInt(),0,2);
-    m_boardHostRepair.removeOutliers=settings.value("depth/boardLiteSrHostOutliers",true).toBool();
     m_streamUrl = m_device.streamUrl();
     // Retired persisted model names never re-enable old inference.
     m_config.model = QStringLiteral("Native");
     auto savedScheme=settings.value("depth/imagingScheme").toString();
-    // Only the three visible product choices may be restored at startup.
-    // Retired saved selections migrate to one of the three supported choices.
-    const bool vgaSupported=RvAssistDepth::supportsHostModel(QLatin1String(RvCameraView::UniDepthVgaNative16));
-    if(savedScheme=="host_unidepth_wide_576_fp16_tof16"&&vgaSupported)
-        savedScheme=QStringLiteral("host_unidepth_rgb672_vga_fp16_tof16");
-    if(savedScheme!=TinyNv12Contract::Scheme&&savedScheme!="board_litesr_near_384x256_host_contour_hd"
-        &&(savedScheme!="host_unidepth_rgb672_vga_fp16_tof16"||!vgaSupported))
-        savedScheme=QStringLiteral("board_litesr_near_384x256_host_contour_hd");
+    if(savedScheme!="board_native_tof48"&&savedScheme!="board_native_tof48_high_accuracy")savedScheme="host_unidepth_rgb672_vga_fp16_tof16";
     settings.setValue("depth/imagingScheme",savedScheme);
-    const bool rectDefault=savedScheme=="board_litesr_near_384x256_host_contour_hd";
-    const bool tinyDefault=savedScheme==TinyNv12Contract::Scheme;
-    const bool boardDefault=rectDefault||tinyDefault;
-    m_config.cameraWidth=boardDefault?576:2304;
-    m_dtofMode=tinyDefault?RvDtofCandidates::TinyNv12:rectDefault?RvDtofCandidates::LiteSrRectFullHd:RvDtofCandidates::NativeHd;
-    m_dtofOptions=liteSrBoardOptions(m_dtofSettings);
+    for(const auto *key:{"depth/boardLiteSrHostContourEnabled","depth/boardLiteSrHostHoleMode","depth/boardLiteSrHostOutliers"})settings.remove(key);
+    m_config.cameraWidth=2304;
+    m_dtofMode=savedScheme=="board_native_tof48"?RvDtofCandidates::Native48:savedScheme=="board_native_tof48_high_accuracy"?RvDtofCandidates::Native48HighAccuracy:RvDtofCandidates::NativeHd;
+    m_dtofOptions=nativeCaptureOptions(m_dtofSettings);
 
     m_controlTimeout.setSingleShot(true);
     m_controlTimeout.setInterval(60000);
@@ -351,16 +337,14 @@ RvSessionController::RvSessionController(QObject *parent,const QString &deviceSt
             if(!m_controlPending)return;
         } catch(const std::exception &e){failPreviewControl(QString::fromUtf8(e.what()));return;}
         if (m_dtofMode >= 0 && status["state"] == "board_files_unavailable" && status["generation"] == m_dtofToken) {
-            const auto model = status["litesr_model"].toString();
+            const auto capture = status["capture_runtime"].toString();
             const auto automaticTof = status["automatic_tof"].toString();
-            const bool installable = (automaticTof == "missing" && (model == "ready" || model == "missing"))
-                || (automaticTof == "ready" && model == "missing");
+            const bool installable = capture=="missing"||capture=="mismatch"||automaticTof!="ready";
             const bool manual = m_previewControl->arguments().contains("--recover-fault");
             const auto device = m_device;
             const auto detail = installable ? tr("Required board files are missing.")
                 : automaticTof != "ready" ? tr("The board capture script is unavailable or unsupported.")
-                : model == "mismatch" ? tr("The on-board inference model checksum does not match.")
-                : tr("The on-board inference runtime is incomplete.");
+                : tr("The board capture runtime is incomplete.");
             failPreviewControl(detail);
             if (manual && installable && m_userStopped && !busy() && m_device.json() == device.json())
                 emit boardFilesRequired(device);
@@ -449,10 +433,12 @@ RvSessionController::RvSessionController(QObject *parent,const QString &deviceSt
     m_assist->setHostModel(vgaSelected?vgaModel:QString::fromLatin1(RvCameraView::UniDepthVgaNative16));
     m_assist->setExperiment(QStringLiteral("H"));
     m_assist->setInputRotationDegrees(effectiveHostInputRotation(m_device));
-    m_assist->setEnabled(!boardDefault);
+    m_assist->setEnabled(hostHdAssist());
     connect(m_assist,&RvAssistDepth::loadingStateChanged,this,[this](int state){
         if(m_destroying)return;m_assistLoadingState=state;emit assistStateChanged();
     });
+    m_nativeDepthExpiry.setSingleShot(true);
+    connect(&m_nativeDepthExpiry,&QTimer::timeout,this,[this]{if(!m_destroying)emit depthStreamCleared(tr("Native ToF depth expired"));});
     m_assistExpiry.setSingleShot(true);
     connect(&m_assistExpiry,&QTimer::timeout,this,[this]{
         if(m_destroying)return;
@@ -463,7 +449,7 @@ RvSessionController::RvSessionController(QObject *parent,const QString &deviceSt
         if(m_destroying)return;m_assistInfo=status;emit assistStateChanged();
     });
     connect(m_assist,&RvAssistDepth::cleared,this,[this](const QString &reason){
-        m_assistExpiry.stop();
+        m_nativeDepthExpiry.stop();m_assistExpiry.stop();
         m_lastAssistFrame=0;m_assistInfo=UiStyle::depthErrorText(reason);setProperty("rvAssistMetadata",QVariant());
         if(m_assist->failed()){
             if(m_imagingSwitchActive)cancelImagingSwitch(reason);
@@ -518,7 +504,8 @@ RvSessionController::RvSessionController(QObject *parent,const QString &deviceSt
                 .arg(fit["projected_points"].toInt()).arg(metadata["assist_inference_ms"].toDouble(),0,'f',1).arg(metadata["assist_frame_age_ms"].toDouble(),0,'f',0);
         setProperty("rvAssistMetadata",metadata.toVariantMap());
         const double sourceAge=std::max(metadata["assist_frame_age_ms"].toDouble(),metadata["assist_measurement_age_ms"].toDouble());
-        m_assistExpiry.start(std::max(1,1000-int(std::ceil(sourceAge))));
+        const int processingBudget=std::clamp(metadata["assist_processing_budget_ms"].toInt(1000),1000,120000);
+        m_assistExpiry.start(std::max(1,processingBudget-int(std::ceil(sourceAge))));
         finishImagingSwitch();
         emit assistDepthSnapshotReady(depth,metadata,camera,tof,diagnostic);
         if(!m_destroying&&epoch==m_presentationEpoch)emit assistStateChanged();
@@ -601,7 +588,7 @@ RvSessionController::~RvSessionController()
     m_destroying = true;
     delete m_tuner;m_tuner=nullptr;
     m_recoveryDisplayTimer.stop(); m_recoveryDisplayTimer.disconnect(this);
-    m_assistExpiry.stop();m_assistExpiry.disconnect(this);
+    m_nativeDepthExpiry.stop();m_assistExpiry.stop();m_assistExpiry.disconnect(this);
     if(m_assist){m_assist->disconnect(this);delete m_assist;m_assist=nullptr;}
     clearCurrentFrame(tr("Disconnected / No data"));
     m_reconnectTimer.stop(); m_frameTimer.stop(); m_controlTimeout.stop();
@@ -706,7 +693,7 @@ int RvSessionController::effectiveHostInputRotation(const RvDeviceProfile &devic
     return valid&&(legacy==0||legacy==180)?legacy:device.inputRotation;
 }
 QImage RvSessionController::cameraInCalibrationFrame(const QImage &image) const {
-    return RvCameraStream::correctCameraMounting(image,m_device.cameraMountRotation);
+    return m_device.calibration==QLatin1String(RvCalibration::Id)?image:RvCameraStream::correctCameraMounting(image,m_device.cameraMountRotation);
 }
 int RvSessionController::assistInputRotationDegrees() const {return m_assist?m_assist->inputRotationDegrees():180;}
 QString RvSessionController::assistHostModel() const {return m_assist?m_assist->hostModel():QStringLiteral("unidepth");}
@@ -737,19 +724,6 @@ void RvSessionController::setAssistDepthEnabled(bool enabled)
     emit assistStateChanged();
 }
 
-bool RvSessionController::setBoardLiteSrHostContour(bool enabled,const RvLiteSrContour::RepairSettings& settings)
-{
-    if(m_destroying||busy()||m_imagingSwitchActive||LiteSrBoardContract::isNative16Depth(m_dtofMode)||!RvDtofCandidates::isLiteSrFull(m_dtofMode)||RvDtofCandidates::isCaptureOnly(m_dtofMode)||!controlledSource()||settings.holeMode<0||settings.holeMode>2)return false;
-    if(depthOnlyMode()&&!enabled)return false;
-    if(boardLiteSrHostContourEnabled()==enabled&&m_boardHostRepair==settings)return true;
-    if(m_dtofStream&&!m_dtofStream->setHostContour(enabled,settings))return false;
-    m_boardHostContour=enabled;m_boardHostRepair=settings;++m_boardHostRevision;
-    QSettings preferences;preferences.setValue("depth/boardLiteSrHostContourEnabled",enabled);
-    preferences.setValue("depth/boardLiteSrHostHoleMode",settings.holeMode);preferences.setValue("depth/boardLiteSrHostOutliers",settings.removeOutliers);
-    m_currentMetadata={};emit dtofCandidateCleared(tr("Waiting for the selected board depth settings"));
-    emit dtofCandidateSelectionChanged();emit configurationChanged();return true;
-}
-
 bool RvSessionController::setDtofCandidate(int mode,const RvDtofCandidates::Settings& settings)
 {
     if(m_imagingSwitchActive)return false;
@@ -760,16 +734,15 @@ bool RvSessionController::applyDtofCandidate(int mode,const RvDtofCandidates::Se
 {
     if(m_destroying||!RvDtofCandidates::supports(mode))return false;
     QString options;
-    try{if(mode>=0)options=liteSrBoardOptions(settings);}catch(...){return false;}
+    try{if(mode>=0)options=nativeCaptureOptions(settings);}catch(...){return false;}
     if(mode==m_dtofMode&&(mode<0||options==m_dtofOptions))return true;
     if(busy()||!controlledSource())return false;
-    if(RvDtofCandidates::isLiteSrHd(mode)&&!m_userStopped&&!prepareManagedVlc()){m_depthConfigError=tr("VLC 3 with H.265 support is required for the managed camera");emit configurationChanged();return false;}
-    if(RvDtofCandidates::isLiteSrHd(m_dtofMode)&&!RvDtofCandidates::isLiteSrHd(mode))m_config.cameraWidth=576;
+    if(RvDtofCandidates::isCaptureOnly(mode)&&!m_userStopped&&!prepareManagedVlc()){m_depthConfigError=tr("VLC 3 with H.265 support is required for the managed camera");emit configurationChanged();return false;}
     m_dtofMode=mode;m_dtofOptions=options;m_dtofSettings=settings;m_dtofReceipt={};
-    if(mode>=0){m_config.cameraWidth=RvDtofCandidates::isLiteSrHd(mode)?2304:576;m_config.depthWidth=144;m_config.location="none";m_config.method="none";m_streamUrl=m_device.streamUrl();}
+    if(mode>=0){m_config.cameraWidth=RvDtofCandidates::isCaptureOnly(mode)?2304:576;m_config.depthWidth=144;m_config.location="none";m_config.method="none";m_streamUrl=m_device.streamUrl();}
     emit dtofCandidateSelectionChanged();
     if(!m_userStopped)submitConfiguration(m_config,true,true);
-    else{emit dtofCandidateCleared(tr("Camera is not started"));emit configurationChanged();}
+    else{emit configurationChanged();}
     return true;
 }
 
@@ -791,10 +764,21 @@ void RvSessionController::setDepthModel(const QString &model)
 
 void RvSessionController::selectImagingScheme(const QString& scheme,const RvDtofCandidates::Settings& settings)
 {
-    if(scheme!=TinyNv12Contract::Scheme&&scheme!="board_litesr_near_384x256_host_contour_hd"
-        &&(!scheme.startsWith("host_")||!RvAssistDepth::supportsHostModel(scheme.mid(5))))return;
+    const int nativeMode=scheme=="board_native_tof48"?RvDtofCandidates::Native48:scheme=="board_native_tof48_high_accuracy"?RvDtofCandidates::Native48HighAccuracy:-1;
+    if(nativeMode<0&&scheme!="host_unidepth_rgb672_vga_fp16_tof16")return;
     if(m_destroying||busy()||m_imagingSwitchActive||!controlledSource())return;
-    if(scheme=="host_assisted"||(scheme.startsWith("host_")&&!scheme.startsWith("host_litesr_"))) {
+    if(nativeMode>=0){
+        if(m_dtofMode==nativeMode&&!assistDepthEnabled())return;
+        if(!m_userStopped)beginImagingSwitch(scheme,true);
+        m_assist->setEnabled(false);
+        m_dtofMode=nativeMode;m_dtofOptions=nativeCaptureOptions(settings);m_dtofSettings=settings;m_dtofReceipt={};
+        m_config=withCameraWidth(2304);m_streamUrl=m_device.streamUrl();
+        QSettings().setValue("depth/imagingScheme",scheme);emit dtofCandidateSelectionChanged();
+        if(!m_userStopped)submitConfiguration(m_config,true,true);
+        else{emit configurationChanged();updateState();}
+        return;
+    }
+    if(scheme.startsWith("host_")) {
         const auto selected=scheme=="host_assisted"?QStringLiteral("unidepth"):scheme.mid(5);
         if(!RvAssistDepth::supportsHostModel(selected))return;
         if(!m_userStopped){
@@ -805,12 +789,12 @@ void RvSessionController::selectImagingScheme(const QString& scheme,const RvDtof
             emit hostInferenceUnavailable(tr("The required host inference files are missing or invalid."),{});
             emit configurationChanged();return;
         }
-        const auto currentGrid=liteSrNativeGrid(m_dtofReceipt);
+        const auto currentGrid=nativeCaptureGrid(m_dtofReceipt);
         if(!m_userStopped&&hostHdAssist()&&!RvCameraView::supportsNativeGrid(selected,currentGrid.width(),currentGrid.height())){
             m_depthConfigError=tr("Selected model does not support the current %1×%2 native ToF grid. Stop capture and save compatible settings first.").arg(currentGrid.width()).arg(currentGrid.height());
             m_depthInfoText=m_depthConfigError;setState(tr("Error"),m_depthConfigError);emit configurationChanged();return;
         }
-        const auto options=liteSrBoardOptions(settings);
+        const auto options=nativeCaptureOptions(settings);
         if(m_dtofMode==RvDtofCandidates::NativeHd&&m_config.cameraWidth==2304&&m_dtofOptions==options
             &&assistHostModel()==selected&&assistDepthEnabled()&&!m_assist->failed())return;
         const bool keepCapture=!m_userStopped&&hostHdAssist()&&assistDepthEnabled()&&m_dtofStream
@@ -837,22 +821,9 @@ void RvSessionController::selectImagingScheme(const QString& scheme,const RvDtof
         m_config=withCameraWidth(2304);m_streamUrl=m_device.streamUrl();
         setAssistDepthEnabled(true);emit dtofCandidateSelectionChanged();
         // Selecting while stopped is inert; an active selection uses the shared
-        // coordinator to stop the board model before starting the camera stream.
+        // coordinator to renew native capture and the camera stream.
         if(!m_userStopped)submitConfiguration(m_config,true,true);
         else{emit configurationChanged();updateState();}
-        return;
-    }
-    if(scheme==TinyNv12Contract::Scheme||scheme=="board_litesr_near_384x256_host_contour_hd"){
-        if(scheme==TinyNv12Contract::Scheme&&!tinyNv12Available()){m_depthConfigError=tr("Tiny NV12 requires the calibrated F1 device and its saved camera orientation.");emit configurationChanged();return;}
-        auto selected=settings;selected.liteSrHoles=m_dtofSettings.liteSrHoles;selected.liteSrOutliers=m_dtofSettings.liteSrOutliers;
-        if(scheme==TinyNv12Contract::Scheme)selected=RvDtofCandidates::Settings{};
-        try{liteSrBoardOptions(selected);}catch(...){return;}
-        const int mode=scheme==TinyNv12Contract::Scheme?RvDtofCandidates::TinyNv12:RvDtofCandidates::LiteSrRectFullHd;
-        if(m_dtofMode==mode&&m_dtofOptions==liteSrBoardOptions(selected)&&!assistDepthEnabled())return;
-        if(!m_userStopped){beginImagingSwitch(scheme,true);if(!m_imagingSwitchActive||m_userStopped)return;}
-        setAssistDepthEnabled(false);
-        if(applyDtofCandidate(mode,selected))QSettings().setValue("depth/imagingScheme",scheme);
-        else cancelImagingSwitch(tr("Imaging scheme switch was not accepted"));
         return;
     }
 
@@ -935,7 +906,7 @@ void RvSessionController::setDepthMethod(const QString &method)
 void RvSessionController::rejectConfiguration()
 {
     // A rejected request does not stop or relabel the running stream.
-    m_depthConfigError = tr("Select a retained host model or RV1103 on-board inference scheme for depth inference.");
+    m_depthConfigError = tr("Select host-assisted inference for depth inference.");
     m_depthInfoText = m_depthConfigError;
     setState(tr("Error"), m_depthConfigError);
     emit configurationChanged();
@@ -965,7 +936,7 @@ void RvSessionController::submitConfiguration(const Configuration &candidate, bo
     const auto worker = RuntimeDiscovery::rvControlForLaunch();
     if (!worker.ok()) { failPreviewControl(worker.error); return; }
     const QString root = QFileInfo(worker.executable).absolutePath();
-    if (((m_dtofMode<0&&candidate.cameraWidth==2304)||RvDtofCandidates::isLiteSrHd(m_dtofMode))&&!prepareManagedVlc()) {
+    if (((m_dtofMode<0&&candidate.cameraWidth==2304)||RvDtofCandidates::isCaptureOnly(m_dtofMode))&&!prepareManagedVlc()) {
         failPreviewControl(tr("VLC 3 with H.265 support is required for the managed camera")); return;
     }
     m_transitioning = true;
@@ -992,8 +963,7 @@ void RvSessionController::submitConfiguration(const Configuration &candidate, bo
     if(startAfter&&!reconnecting&&assistDepthEnabled()&&m_assist->failed()){
         m_assist->setEnabled(false);m_assist->setEnabled(true);
     }
-    if(startAfter&&!m_imagingSwitchActive&&((hostHdAssist()&&assistDepthEnabled())
-        ||(RvDtofCandidates::isLiteSr(m_dtofMode)&&!RvDtofCandidates::isCaptureOnly(m_dtofMode))))
+    if(startAfter&&!m_imagingSwitchActive&&hostHdAssist()&&assistDepthEnabled())
         beginImagingSwitch(currentImagingScheme(),true);
     if(!receptionAuthorized())return;
     // Revoke old callbacks immediately, but keep the old LSG2 receiver polling
@@ -1022,7 +992,7 @@ void RvSessionController::submitConfiguration(const Configuration &candidate, bo
     if(m_dtofMode>=0){
         m_dtofToken=QUuid::createUuid().toString(QUuid::Id128);m_dtofReceipt={};
         args={"--dtof",QString::number(m_dtofMode),m_dtofToken,m_dtofOptions};
-        if(RvDtofCandidates::isCaptureOnly(m_dtofMode))args<<"--host-model"<<assistHostModel();
+        if(hostHdAssist())args<<"--host-model"<<assistHostModel();
     }
     // Explicit Start may recover any fault after ownership checks. Background
     // recovery must pass the board's structural-fault classifier and rate cap.
@@ -1127,11 +1097,18 @@ void RvSessionController::start()
     startImaging(false);
 }
 
-void RvSessionController::startAutomatically()
+bool RvSessionController::automaticStartAllowed(const QString &deviceId) const
+{
+    return qEnvironmentVariable("RV_TEST_OFFLINE_ONLY")!="1" && !m_destroying
+        && m_userStopped && !busy() && !m_tunerExclusive && !deviceId.isEmpty()
+        && m_autoStartAttemptedDevice!=deviceId;
+}
+
+void RvSessionController::startAutomatically(bool verifiedUsbAttachment)
 {
     if (qEnvironmentVariable("RV_TEST_OFFLINE_ONLY") == "1" || !m_userStopped || busy()
         || m_dtofMode < 0 || !controlledSource() || !m_device.ready()
-        || m_autoStartAttemptedDevice == m_device.id) return;
+        || (!verifiedUsbAttachment && m_autoStartAttemptedDevice == m_device.id)) return;
     startImaging(true);
 }
 
@@ -1183,6 +1160,7 @@ void RvSessionController::startImaging(bool automatic)
 
 void RvSessionController::stop()
 {
+    ++m_stopRevision;
     if (m_destroying) return;
     if (m_userStopped && m_transitioning) return;
     const bool previousTransition = m_transitioning;
@@ -1245,10 +1223,7 @@ void RvSessionController::beginConnection(bool resetAttempts)
     if(m_dtofMode>=0){
         if(!dtofBoardReceipt(m_dtofReceipt,m_dtofMode,m_dtofToken,m_dtofOptions)){failPreviewControl(tr("Candidate confirmation is missing"));return;}
         auto* stream=new RvDtofBoardStream(m_dtofReceipt,m_dtofSettings,this,m_device.host);m_dtofStream=stream;
-        if(RvDtofCandidates::isLiteSrFull(m_dtofMode)&&!RvDtofCandidates::isCaptureOnly(m_dtofMode)&&!stream->setHostContour(boardLiteSrHostContourEnabled(),m_boardHostRepair)){
-            failPreviewControl(tr("This board runtime does not provide the same-frame native input required for host contour processing"));return;
-        }
-        if(RvDtofCandidates::isLiteSrHd(m_dtofMode)){
+        if(RvDtofCandidates::isCaptureOnly(m_dtofMode)){
             m_rtspStatusReady=false;m_lastEncodedFrame=m_lastRetrievedFrame=0;m_hdVideoSeen=false;m_hdVideoReconnects=0;setProperty("rvVideoReconnectCount",0);
             m_encoderProgressClock.restart();m_hdFrameClock.restart();
             stream->videoProgress=[this,stream](const QJsonObject& meta){
@@ -1271,36 +1246,19 @@ void RvSessionController::beginConnection(bool resetAttempts)
                 if(m_assist->tofDriven())dispatchHostHdMeasurement();
             }
             setProperty("rvRawTofSequence",raw.metadata["tof_sequence"].toVariant());emit tofFrameReady(raw);
-        };
-        stream->photonFrame=[this,stream](const RvPhotonFrame& frame){
-            if(m_dtofStream==stream&&!m_userStopped&&!m_controlPending&&photonCountsEnabled())emit photonFrameReady(frame);
-        };
-        stream->rgbFrame=[this,stream](const QImage& rawImage,const QJsonObject& metadata){
-            if(m_dtofStream!=stream||m_userStopped||m_controlPending||depthOnlyMode())return;
-            const auto image=cameraInCalibrationFrame(rawImage);
-            const auto epoch=m_presentationEpoch;
-            setProperty("rvTransport","dtf3_nv12");setProperty("rvWidth",image.width());setProperty("rvSourceWidth",image.width());setProperty("rvSourceHeight",image.height());
-            setProperty("rvRgbSequence",metadata["rgb_sequence"].toVariant());setProperty("rvPresentedFrames",property("rvPresentedFrames").toULongLong()+1);
-            emit cameraFrameReady(image);
-            if(m_userStopped||epoch!=m_presentationEpoch)return;
-            ++m_framesInWindow;
-            if(m_fpsClock.elapsed()>=1000){m_videoFps = m_framesInWindow * 1000.0 / m_fpsClock.elapsed();m_framesInWindow=0;m_fpsClock.restart();emit stateChanged();}
-        };
-        stream->frame=[this,stream](const RvDtofCandidates::Result& result){
-            if(m_dtofStream!=stream||m_userStopped||m_controlPending)return;
-            const auto epoch=m_presentationEpoch,refinement=m_boardHostRevision;m_currentMetadata=result.metadata;m_lastFrameClock.restart();
-            if(result.fresh)m_recoveryDisplayTimer.stop();
-            m_waitingForSelectedFrame=false;m_switchFrameTimeout.stop();
-            setProperty("rvMode","dtof_candidate");setProperty("rvModel",RvDtofCandidates::name(m_dtofMode));setProperty("rvDepthMetadata",result.metadata);
-            m_depthInfoText=tr("RV1103 | %1 | %2×%3 | compute %4 ms").arg(tr("On-board inference model")).arg(RvDtofCandidates::outputWidth(m_dtofMode)).arg(RvDtofCandidates::outputHeight(m_dtofMode)).arg(result.metadata["board_compute_ms"].toDouble(),0,'f',1);
-            if(result.metadata["host_contour_enabled"].toBool())m_depthInfoText+=tr(" | host contour %1 ms").arg(result.metadata["host_contour_ms"].toDouble(),0,'f',1);
-            setState(tr("Connected"),m_depthInfoText);updateState();
-            if(!m_userStopped&&epoch==m_presentationEpoch&&refinement==m_boardHostRevision){
-                if(result.fresh)finishImagingSwitch();
-                emit dtofCandidateReady(result);
+            if(RvDtofCandidates::isNativeDepth(m_dtofMode)){
+                const auto bytes=raw.radialMetres();if(bytes.isEmpty())return;
+                auto metadata=raw.metadata;
+                metadata["source_generation"]=metadata["generation"];metadata["generation"]=double(m_presentationEpoch);
+                metadata["model"]=RvDtofCandidates::name(m_dtofMode);metadata["width"]=48;metadata["height"]=32;
+                metadata["depth_unit"]="sensor_radial_m_float32";metadata["depth_location"]="native_sensor";
+                metadata["sensor_mode"]=RvCaptureContract::sensorMode(m_dtofMode);
+                metadata["native_order"]=true;metadata["interpolation"]=false;metadata["calibration_release"]=RvCalibration::Release;
+                m_nativeDepthExpiry.start(std::max(1,1000-int(std::ceil(metadata["raw_age_ms"].toDouble()))));
+                if(m_waitingForSelectedFrame){m_waitingForSelectedFrame=false;m_switchFrameTimeout.stop();updateState();}
+                finishImagingSwitch();emit depthFrameReady(bytes,metadata);emit depthSnapshotReady(bytes,metadata,QImage());
             }
         };
-        stream->expired=[this,stream]{if(m_dtofStream==stream&&!m_userStopped)emit dtofCandidateExpired();};
         stream->error=[this,stream,epoch](const QString& reason){
             if(m_dtofStream!=stream||m_userStopped)return;
             const QPointer<RvDtofBoardStream> alive(stream);
@@ -1309,11 +1267,10 @@ void RvSessionController::beginConnection(bool resetAttempts)
             });
         };
         m_connectionClock.restart();m_framesInWindow=0;m_fpsClock.restart();
-        if(hostHdAssist()){
+        if(RvDtofCandidates::isCaptureOnly(m_dtofMode)){
             m_hdVideo=new RvHdVideoStream(m_device.streamUrl(true));m_hdVideoSequence=0;m_hdOutputSequence=0;
             m_hdVideo->start();m_frameTimer.start();
         }
-        else if(RvDtofCandidates::isLiteSrHd(m_dtofMode)&&!startVlc(QUrl(m_device.streamUrl(true)))){failPreviewControl(tr("VLC 3 with H.265 support is required for the managed camera"));return;}
         setState(tr("Connecting"),tr("Waiting for RV1103 candidate output"));return;
     }
     if (resetAttempts) { m_reconnectAttempt = 0; m_nextReconnectDelayMs = 1000; }
@@ -1421,7 +1378,7 @@ void RvSessionController::handleFrame(const QVideoFrame &frame)
                     <<" probe_bytes="<<m_vlc->probeBytes;
         }
         ++m_vlc->sequence;
-        return; // presentLiteSrHdVideo applies all managed-source checks.
+        return; // the managed presenter applies all source checks.
     }
     if (m_userStopped || m_controlPending || m_transitioning || m_reconnectTimer.isActive() || m_vlc || m_nv12)
         return;
@@ -1461,7 +1418,7 @@ bool RvSessionController::startVlc(const QUrl &source)
     // available via the process-local RV_RTSP_OUTPUT=vmem override.
     // Both receivers feed the same bounded mailbox; only the existing generation,
     // VENC progress gate and freshness watchdog authorize presentation.
-    if((RvDtofCandidates::isLiteSrHd(m_dtofMode)||hostHdAssist())&&qEnvironmentVariable("RV_RTSP_OUTPUT")!="vmem"){
+    if((RvDtofCandidates::isCaptureOnly(m_dtofMode)||hostHdAssist())&&qEnvironmentVariable("RV_RTSP_OUTPUT")!="vmem"){
         auto backend=std::make_unique<RtspVlcBackend>();
         backend->managedCamera=true;backend->output="qt";backend->cacheMs=-1;backend->threads=-1;
         backend->transport="qt_ffmpeg_default";
@@ -1487,12 +1444,12 @@ bool RvSessionController::startVlc(const QUrl &source)
     // Optional A/B comparison without changing the project or persistent settings.
     if (qEnvironmentVariable("RTSP_CAMERA_BACKEND").compare(QStringLiteral("qt"), Qt::CaseInsensitive) == 0)
         return false;
-    const QStringList directories=(m_managedRtsp||RvDtofCandidates::isLiteSrHd(m_dtofMode))?QStringList{m_managedVlcDirectory}:vlcDirectories();
+    const QStringList directories=(m_managedRtsp||RvDtofCandidates::isCaptureOnly(m_dtofMode))?QStringList{m_managedVlcDirectory}:vlcDirectories();
     for (const auto &directory : directories) {
         if (directory.isEmpty()) continue;
         auto backend = std::make_unique<RtspVlcBackend>();
         if (!backend->load(directory)) continue;
-        backend->managedCamera=m_managedRtsp||RvDtofCandidates::isLiteSrHd(m_dtofMode);
+        backend->managedCamera=m_managedRtsp||RvDtofCandidates::isCaptureOnly(m_dtofMode);
         const char *args[] = {"--no-audio", "--no-video-title-show", "--avcodec-hw=none"};
         backend->instance = backend->create(3, args);
         if (!backend->instance) continue;
@@ -1635,7 +1592,7 @@ void RvSessionController::stopVlc(bool retainBoardReceiver)
 void RvSessionController::clearCurrentFrame(const QString &reason)
 {
     m_videoFps = 0;
-    m_assistExpiry.stop();
+    m_nativeDepthExpiry.stop();m_assistExpiry.stop();
     if(m_assist)m_assist->cancel(reason);
     m_lastAssistFrame=0;
     m_currentMetadata = {};
@@ -1646,17 +1603,16 @@ void RvSessionController::clearCurrentFrame(const QString &reason)
             "rvTransport","rvIdentitySource","rvBootId","rvSourceWidth","rvSourceHeight",
             "rvDecodedSequence","rvEncodedSequence","rvFirstFrameMs","rvReconnectCount"})setProperty(name,QVariant());
     if (!m_destroying) {
-        emit dtofCandidateCleared(reason);
         emit depthStreamCleared(reason);
         emit streamCleared();
     }
 }
 
-bool RvSessionController::reconnectLiteSrHdVideo()
+bool RvSessionController::reconnectHostHdVideo()
 {
     // An RTSP decoder can join before parameter sets/IDR arrive. Renew only
-    // that receiver once; retain the NPU, matched depth and board generation.
-    if(!RvDtofCandidates::isLiteSrHd(m_dtofMode)||!m_dtofStream||m_hdVideoReconnects>=1||m_encoderProgressClock.elapsed()>=3000)return false;
+    // that receiver once; retain native capture and the board generation.
+    if(!RvDtofCandidates::isCaptureOnly(m_dtofMode)||!m_dtofStream||m_hdVideoReconnects>=1||m_encoderProgressClock.elapsed()>=3000)return false;
     ++m_hdVideoReconnects;setProperty("rvVideoReconnectCount",m_hdVideoReconnects);
     if(m_hdVideo){auto *old=m_hdVideo;m_hdVideo=nullptr;delete old;
         m_hdVideo=new RvHdVideoStream(m_device.streamUrl(true));m_hdVideoSequence=0;
@@ -1664,32 +1620,6 @@ bool RvSessionController::reconnectLiteSrHdVideo()
     auto* old=m_vlc;m_vlc=nullptr;delete old;
     m_hdVideoSeen=false;m_rtspStatusReady=false;m_hdFrameClock.restart();
     return startVlc(QUrl(m_device.streamUrl(true)));
-}
-
-void RvSessionController::presentLiteSrHdVideo()
-{
-    if(!m_vlc||!m_dtofStream||m_userStopped||m_controlPending||m_transitioning)return;
-    if(m_encoderProgressClock.elapsed()>=3000){failPreviewControl(tr("Managed camera encoder progress stopped; check board status"),true);return;}
-    QImage image;quint64 sequence=0;
-    {std::lock_guard<std::mutex> lock(m_vlc->mutex);if(m_vlc->presented!=m_vlc->sequence){image=m_vlc->latest;m_vlc->presented=m_vlc->sequence;sequence=m_vlc->sequence;}}
-    if(image.isNull()){
-        if(m_hdFrameClock.elapsed()>(m_hdVideoSeen?3000:15000)&&!reconnectLiteSrHdVideo())failPreviewControl(tr("The stream is temporarily unavailable"),true);
-        return;
-    }
-    if(image.size()!=QSize(2304,1296)){failPreviewControl(tr("Managed H.265 source dimensions do not match 2304 x 1296"));return;}
-    if(!m_rtspStatusReady||sequence<=m_rtspDecodeFloor)return;
-    image=cameraInCalibrationFrame(image);
-    m_hdVideoSeen=true;m_hdFrameClock.restart();
-    setProperty("rvMode","litesr_h265");setProperty("rvTransport","rtsp_h265+lsg2");
-    setProperty("rvIdentitySource","lsg2_receipt_and_venc_progress");setProperty("rvBootId",m_dtofReceipt["boot_id"].toString());
-    setProperty("rvGeneration",m_dtofToken);setProperty("rvModel",RvDtofCandidates::name(m_dtofMode));
-    setProperty("rvSourceWidth",image.width());setProperty("rvSourceHeight",image.height());setProperty("rvWidth",image.width());
-    setProperty("rvDecodedSequence",sequence);setProperty("rvEncodedSequence",m_lastEncodedFrame);
-    setProperty("rvPresentedFrames",property("rvPresentedFrames").toULongLong()+1);
-    const auto epoch=m_presentationEpoch;emit cameraFrameReady(image);
-    if(m_userStopped||epoch!=m_presentationEpoch)return;
-    ++m_framesInWindow;
-    if(m_fpsClock.elapsed()>=1000){m_videoFps = m_framesInWindow * 1000.0 / m_fpsClock.elapsed();m_framesInWindow=0;m_fpsClock.restart();emit stateChanged();}
 }
 
 void RvSessionController::observeHostHdClock(const QJsonObject &m)
@@ -1779,9 +1709,9 @@ void RvSessionController::presentHostHdVideo()
     if(!m_hdVideo||!m_dtofStream||m_userStopped||m_controlPending||m_transitioning)return;
     if(m_encoderProgressClock.elapsed()>=3000){failPreviewControl(tr("Managed camera encoder progress stopped; check board status"),true);return;}
     auto s=m_hdVideo->snapshot();
-    if(!s.error.isEmpty()){if(!reconnectLiteSrHdVideo())failPreviewControl(s.error,true);return;}
+    if(!s.error.isEmpty()){if(!reconnectHostHdVideo())failPreviewControl(s.error,true);return;}
     if(s.sequence==m_hdVideoSequence||s.image.isNull()){
-        if(m_hdFrameClock.elapsed()>(m_hdVideoSeen?3000:15000)&&!reconnectLiteSrHdVideo())failPreviewControl(tr("The stream is temporarily unavailable"),true);
+        if(m_hdFrameClock.elapsed()>(m_hdVideoSeen?3000:15000)&&!reconnectHostHdVideo())failPreviewControl(tr("The stream is temporarily unavailable"),true);
         return;
     }
     m_hdVideoSequence=s.sequence;
@@ -1797,6 +1727,13 @@ void RvSessionController::presentHostHdVideo()
     setProperty("rvEncodedSequence",m_lastEncodedFrame);setProperty("rvPresentedFrames",property("rvPresentedFrames").toULongLong()+1);
     const auto epoch=m_presentationEpoch;emit cameraFrameReady(s.image);
     if(m_userStopped||epoch!=m_presentationEpoch)return;
+    if(!hostHdAssist()||!assistDepthEnabled()){
+        setState(tr("Playing"),tr("H.265 video and native 48x32 ToF"));
+        ++m_framesInWindow;
+        if(m_fpsClock.elapsed()>=1000){m_videoFps=m_framesInWindow*1000.0/m_fpsClock.elapsed();
+            m_framesInWindow=0;m_fpsClock.restart();emit stateChanged();}
+        return;
+    }
     try{
         const auto model=assistHostModel();
         const auto &view=RvCameraView::profile(model);
@@ -1898,8 +1835,7 @@ void RvSessionController::presentVlcFrame()
     const int pollMs=(hostHdAssist()&&assistDepthEnabled()&&RvCameraView::profile(assistHostModel()).networkProfile?5:15);
     if(m_frameTimer.interval()!=pollMs)m_frameTimer.setInterval(pollMs);
     if (m_userStopped || m_controlPending || m_transitioning) return;
-    if(hostHdAssist()){presentHostHdVideo();return;}
-    if(RvDtofCandidates::isLiteSrHd(m_dtofMode)){presentLiteSrHdVideo();return;}
+    if(RvDtofCandidates::isCaptureOnly(m_dtofMode)){presentHostHdVideo();return;}
     const quint64 epoch = m_presentationEpoch;
     const auto stillCurrent = [this, epoch] {
         return !m_userStopped && !m_controlPending && epoch == m_presentationEpoch;

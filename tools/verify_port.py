@@ -23,6 +23,10 @@ def main():
     parser.add_argument('--qt-root',type=Path,required=True)
     parser.add_argument('--runtime',type=Path,help='Model runtime for the candidate executable')
     parser.add_argument('--reference-runtime',type=Path,help='Defaults to the candidate runtime')
+    parser.add_argument('--backend',default='tensorrt',help='Explicit device, e.g. cpu, directml:0, openvino:CPU, openvino:INT8')
+    parser.add_argument('--reference-backend',help='Defaults to --backend; exact output comparison remains mandatory')
+    parser.add_argument('--compatible-runtime',type=Path)
+    parser.add_argument('--reference-compatible-runtime',type=Path)
     parser.add_argument('--model',choices=(VGA,),default=VGA)
     parser.add_argument('--output',type=Path,required=True)
     args=parser.parse_args()
@@ -41,6 +45,11 @@ def main():
             assert sha256(target)==expected,('Runtime hash mismatch',name)
     temporary=args.output/'tmp';temporary.mkdir()
     env=test_environment(args.qt_root.resolve(),temporary)
+    env['RV_INFERENCE_BACKEND']=args.backend
+    env['RV_ASSIST_COMPAT_ROOT']=str((args.compatible_runtime or root/'UniDepthRuntimeCompatible').resolve())
+    reference_env=dict(env)
+    reference_env['RV_INFERENCE_BACKEND']=args.reference_backend or args.backend
+    reference_env['RV_ASSIST_COMPAT_ROOT']=str((args.reference_compatible_runtime or args.compatible_runtime or root/'UniDepthRuntimeCompatible').resolve())
     profile=json.loads((candidate_runtime/'model.json').read_text())
     width,height,_,_=SIZES[model]
     y,x=np.mgrid[:height,:width]
@@ -49,15 +58,15 @@ def main():
     def add(name,m,native=None,rgb=None,accepted=True,epoch=None,**extra):
         cases.append(dict(name=name,metadata=m,native=native if native is not None else native_plane(root,16,16,m['dtof_fov_correction']),
                           rgb=rgb if rgb is not None else images[0],accepted=accepted,epoch=epoch if epoch is not None else m['generation'],**extra))
-    for fov in (1,2):
+    for fov in (6,):
         for rotation in (0,180):
             for variant in range(3):
                 i=len(cases)+1
                 m=metadata(i,fov,rotation,'H',16,16,model,profile,i)
                 add(f'f{fov}_r{rotation}_image{variant}',m,native_plane(root,16,16,fov,(.25,.6,1.2)[variant]),images[variant])
     i=len(cases)+1
-    m=metadata(i,2,0,'H',16,16,model,profile,100)
-    native=native_plane(root,16,16,2)
+    m=metadata(i,6,0,'H',16,16,model,profile,100)
+    native=native_plane(root,16,16,6)
     add('H_first_native',m,native)
     for delta in (20.,50.,100.,-100.,100.001,-100.001):
         reused=dict(m,tof_reused=True,pair_delta_ms=delta,rgb_timestamp_ns=m['tof_timestamp_ns']-round(delta*1e6),frame_id=len(cases)+1)
@@ -66,21 +75,21 @@ def main():
     add('H_changed_native_rejected',reused,bytes([native[0]^1])+native[1:],accepted=False)
     add('H_false_reuse_rejected',dict(reused,tof_reused=False),native,accepted=False)
     for fault in ('wrong_grid','missing_fov','conflicting_fov','bad_rotation','invalid_bit','low_snr'):
-        i=len(cases)+1;m=metadata(i,2,0,'H',16,16,model,profile,i+200);native=native_plane(root,16,16,2)
-        if fault=='wrong_grid':m.update(dtof_width=48,dtof_height=32,dtof_bytes=6144);native=native_plane(root,48,32,2)
+        i=len(cases)+1;m=metadata(i,6,0,'H',16,16,model,profile,i+200);native=native_plane(root,16,16,6)
+        if fault=='wrong_grid':m.update(dtof_width=48,dtof_height=32,dtof_bytes=6144);native=native_plane(root,48,32,6)
         if fault=='missing_fov':m.pop('dtof_fov_correction')
         if fault=='conflicting_fov':m['tof_fov_correction']=1
         if fault=='bad_rotation':m['assist_input_rotation_degrees']=90
         if fault=='invalid_bit':native=native[:3]+b'\x02'+native[4:]
         if fault=='low_snr':native=b''.join(native[j:j+2]+b'\x05'+native[j+3:j+4] for j in range(0,len(native),4))
         add(fault,m,native,accepted=fault=='low_snr',uncorrected=fault=='low_snr')
-    i=len(cases)+1;m=metadata(i,2,0,'H',16,16,model,profile,500)
+    i=len(cases)+1;m=metadata(i,6,0,'H',16,16,model,profile,500)
     for key in ('tof_sequence','tof_timestamp_ns','rgb_timestamp_ns','tof_reused','pair_delta_ms','dtof_width','dtof_height','dtof_bytes','dtof_format','dtof_range_unit','dtof_source','dtof_coordinate','dtof_fov_correction','tof_warning_flags','pair_clock_uncertainty_ms','pair_clock_source'):
         m.pop(key,None)
     m.update(dtof_present=False,work_mode='host_rgb');add('H_rgb_only_no_invented_points',m,b'',uncorrected=True)
     for folder in ('candidate','reference','restart'):(args.output/folder).mkdir()
     current,hashes=check_batch(args.executable,root,candidate_runtime,model,cases,env,args.output/'candidate')
-    reference,before=check_batch(args.reference_executable,root,runtime,model,cases,env,args.output/'reference')
+    reference,before=check_batch(args.reference_executable,root,runtime,model,cases,reference_env,args.output/'reference')
     assert before==hashes,'Frozen depth/monocular/diagnostic output differs from source software'
     _,restarted=check_batch(args.executable,root,candidate_runtime,model,cases[:3],env,args.output/'restart')
     assert all(restarted[c['name']]==hashes[c['name']] for c in cases[:3]),'Stop/restart changed output'
@@ -90,7 +99,7 @@ def main():
     removed=dict(cases[0],name='A_removed',metadata=dict(cases[0]['metadata'],assist_experiment='A'),accepted=False)
     code,packets,_=exchange(args.executable,root,candidate_runtime,model,[removed],env)
     assert code==0 and packets[-1][0].get('error') and not packets[-1][1],'Removed correction mode accepted'
-    summary=dict(passed=True,model=model,model_loading=current["ready"]["model_loading"],cases=len(cases),bitwise_identical_outputs=len(hashes),
+    summary=dict(passed=True,model=model,backend=args.backend,model_loading=current["ready"]["model_loading"],cases=len(cases),bitwise_identical_outputs=len(hashes),
                  stop_restart_identical=True,varied_rgb_not_replayed=True,model_manifest_verified=True,
                  removed_modes_rejected=True,hardware_started=False,physical_accuracy_verified=False,
                  executable_sha256=sha256(args.executable),source_executable_sha256=sha256(args.reference_executable),results=current)

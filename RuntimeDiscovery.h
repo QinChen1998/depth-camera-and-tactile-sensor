@@ -10,6 +10,7 @@ struct NativeWorkerResult {
 };
 QString applicationRoot();
 QString rvAssistRoot();
+QString rvCompatibleRoot();
 QString rvAssistModelRoot(const QString &model);
 QStringList vlcDirectories();
 NativeWorkerResult rvControlForLaunch();

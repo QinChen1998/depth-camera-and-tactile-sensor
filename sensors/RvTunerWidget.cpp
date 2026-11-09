@@ -117,7 +117,7 @@ void RvTunerWidget::refresh(){
     m_buttons["Read"]->setEnabled(!pending&&!exclusive);m_buttons["Start"]->setEnabled(m_loaded&&valid&&!pending&&!exclusive);
     m_buttons["Stop"]->setEnabled(exclusive||pending);m_buttons["Apply"]->setEnabled(valid&&running&&!pending);
     const auto applied=m_controller->appliedSettings();m_buttons["Persist"]->setEnabled(valid&&running&&!pending&&!applied.isEmpty()&&draft==applied);
-    m_buttons["Persist"]->setToolTip(tr("All supported resolutions can be saved permanently. Apply pending edits first. Both Native and LiteSR sensor command lines are backed up and verified. DEPTHOR V3 also accepts 8×8 ordinary, long range or high accuracy with one target and Noise off; other shared imaging requires compatible 48×32 settings."));
+    m_buttons["Persist"]->setToolTip(tr("All supported resolutions can be saved permanently. Apply pending edits first. Both native service and host capture command lines are backed up and verified. Host-assisted imaging uses a separate 16×16 session preset."));
     m_buttons["SignalPreview"]->setEnabled(m_loaded&&!pending&&(!exclusive||running));m_buttons["Record"]->setEnabled(!m_frame.samples.isEmpty());m_buttons["Export"]->setEnabled(!m_records.isEmpty());
 }
 void RvTunerWidget::acceptFrame(const RvTuner::Frame &frame){

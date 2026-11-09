@@ -1,0 +1,45 @@
+{
+  "release_id": "RV1103_SC3336_TMF8829_20261109",
+  "calibration_sha256": "c7836f67c2d4645389634b03e7e93518b13c6ecda3292c8d90319d24136d3dfa",
+  "physical_intrinsics_sha256": "c2fcf1daf51d0f66a97726cbbc5cb6daaf5239c5dbeb283ed28e40cc1a487888",
+  "geometry_sha256": "4ca13f0d66987cfd84453a2aacf7ae086b7a730025fe3c90cdf3c6bc88782cc7",
+  "rectify_sha256": "26d03a2880cfa0f31f31b988669884915cf15c3042c40ddf947c1bf69e9d97fc",
+  "source_size": [
+    2304,
+    1296
+  ],
+  "input_size": [
+    672,
+    504
+  ],
+  "output_size": [
+    640,
+    480
+  ],
+  "rectified_intrinsics_integer_centres": [
+    385.18518518518516,
+    385.18518518518516,
+    319.5,
+    239.5
+  ],
+  "source_bounds_xyxy": [
+    412.2149641353891,
+    29.375732167417596,
+    2049.7555116928897,
+    1256.8473424889312
+  ],
+  "native_fov": 6,
+  "native_order": true,
+  "mapping_applied_once": true,
+  "graph_changed": false,
+  "depth_unit": "camera-Z_m_float32",
+  "files": {
+    "calibration.json": "c7836f67c2d4645389634b03e7e93518b13c6ecda3292c8d90319d24136d3dfa",
+    "intrinsics.json": "c2fcf1daf51d0f66a97726cbbc5cb6daaf5239c5dbeb283ed28e40cc1a487888",
+    "extrinsics.json": "8b7eaacf42c8b0f21498b388519731b049f14a692b5289efcaac0675bdfa6cf6",
+    "projection.bin": "7964f14e5635d1e6a613c8d8bab39a07b7138dbe13cce4b4c3a793953b8c1596",
+    "M48_geometry.bin": "4ca13f0d66987cfd84453a2aacf7ae086b7a730025fe3c90cdf3c6bc88782cc7",
+    "manifest.json": "5df8ec089161c1d4a71a878c940c52e296ba93f9cebd345e93dbed3b3b00180b",
+    "rgb672_rectify.bin": "26d03a2880cfa0f31f31b988669884915cf15c3042c40ddf947c1bf69e9d97fc"
+  }
+}

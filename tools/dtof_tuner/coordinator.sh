@@ -11,7 +11,7 @@ same(){ [ -r "/proc/$1/stat" ] && [ "$(sed 's/.*) //' /proc/"$1"/stat | awk '{pr
 health(){ [ ! -e /run/r144_depth/fault ] && [ ! -e /run/dtof_candidates/fault ] && [ ! -e /run/rgbtof_calibration_v2/fault ] && [ ! -e "$state/fault" ] || fail 'Active fault retained; inspect device logs'; }
 quiescent(){
  [ ! -e "$owner" ] || fail 'Capture owner has not released resources'
- for name in live tmf8829_ext tmf8829_tuner rkipc litesr_gui litesr_near_gui native_hd_gui sensor_fusion_service capture_bridge rgbtof_bridge dtof48 next_pipeline tiny_nv12 tiny_nv12_camera; do
+ for name in live tmf8829_ext tmf8829_tuner rkipc litesr_gui litesr_near_gui native_hd_gui sensor_fusion_service capture_bridge rgbtof_bridge dtof48 next_pipeline; do
   ! pidof "$name" >/dev/null || fail "Capture process remains: $name"
  done
 }
@@ -45,8 +45,8 @@ validate_owner(){
  case "$cmd" in
   *"sh $formal/service.sh "*) kind=native;;
   *"sh $candidate/session.sh "*)
-   [ "$(cat /run/dtof_candidates/manager.pid)" = "$pid" ] && [ "$(cat /run/dtof_candidates/manager.starttime)" = "$born" ] || fail 'LiteSR manager identity mismatch'
-   kind=litesr;;
+   [ "$(cat /run/dtof_candidates/manager.pid)" = "$pid" ] && [ "$(cat /run/dtof_candidates/manager.starttime)" = "$born" ] || fail 'Capture manager identity mismatch'
+   kind=capture;;
   *"sh /root/dtof_tuner/session.sh "*) kind=tuner;;
   *) fail 'Unknown capture owner; no process was signalled';;
  esac
@@ -86,7 +86,7 @@ stop_owner(){
  while same "$pid" "$born";do n=$((n+1));[ "$n" -le 180 ] || fail 'Normal STOP timed out; ownership preserved';sleep .1;done
  quiescent
  if [ "$had_tof" = 1 ];then
-  case "$old_kind" in native) logs='/run/r144_depth/tof.log';;litesr) logs='/run/dtof_candidates/sensor.log';;tuner) logs="$state/tof.log";;esac
+  case "$old_kind" in native) logs='/run/r144_depth/tof.log';;capture) logs='/run/dtof_candidates/sensor.log';;tuner) logs="$state/tof.log";;esac
   if ! grep -q stop_command_acknowledged "$logs.0" "$logs.1" 2>/dev/null || grep -q 'stop_command_failed\|TOF_WARNING' "$logs.0" "$logs.1" 2>/dev/null;then
    mkdir -p "$state";touch "$state/fault";fail 'STOP acknowledgement missing; fault evidence retained'
   fi

@@ -7,7 +7,7 @@ lock=/run/dtof_switch.lock
 same(){ [ -r "/proc/$1/stat" ] && [ "$(sed 's/.*) //' /proc/"$1"/stat | awk '{print $20}')" = "$2" ]; }
 case "${1:-}" in
  candidate) [ "$#" = 4 ]; case "$2" in
-   14|16|18) "$root/litesr_gui.sh" validate "$2" "$3" "$4";;
+   14|24|25) "$root/native_gui.sh" validate "$2" "$3" "$4";;
    *) exit 2;;
   esac;;
  legacy) [ "$#" = 6 ]; case "$2" in 144|576|2304) ;; *) exit 2;; esac
@@ -48,7 +48,7 @@ if [ "$1" = legacy ]; then
 fi
 /root/r144_depth/control.sh stop >/dev/null
 [ ! -e /run/r144_fusion_20260923 ] || { echo 'Sensor ownership retained' >&2;exit 2; }
-[ -z "$(pidof live tmf8829_ext rkipc litesr_gui litesr_near_gui native_hd_gui litesr512_gui litesr512_gui2 sensor_fusion_service capture_bridge rgbtof_bridge dtof48 next_pipeline tiny_nv12 tiny_nv12_camera || true)" ] || exit 2
+[ -z "$(pidof live tmf8829_ext rkipc litesr_gui litesr_near_gui native_hd_gui litesr512_gui litesr512_gui2 sensor_fusion_service capture_bridge rgbtof_bridge dtof48 next_pipeline || true)" ] || exit 2
 sh /root/r144_depth/ensure-spi.sh
 rm -f "$state/ready.json"
 shift

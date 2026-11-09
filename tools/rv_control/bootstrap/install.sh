@@ -5,8 +5,8 @@ serial=$2
 boot=$3
 stage=$4
 mode=${5:-fresh}
-fov=${6:-1}
-case "$mode:$fov" in fresh:1|repair:1|repair:2) ;; *) exit 2;; esac
+fov=${6:-6}
+case "$mode:$fov" in fresh:6|repair:6) ;; *) exit 2;; esac
 depth=/root/r144_depth
 candidate=/root/dtof_candidates_20261009
 tuner=/root/dtof_tuner
@@ -114,10 +114,10 @@ if exists "$driver"; then
  driver_previous=$(digest "$driver")
 fi
 [ -x /oem/usr/bin/rkipc ] && [ -d /oem/usr/share/iqfiles ] && [ -s /userdata/rkipc.ini ] &&
- [ -r /usr/lib/libcrypto.so.1.1 ] && [ -L /sys/bus/i2c/devices/4-0030/driver ] &&
+ [ -L /sys/bus/i2c/devices/4-0030/driver ] &&
  [ -f "$oem" ] && [ ! -L "$oem" ] ||
- fail 'The required camera firmware, SC3336 binding, or crypto runtime is missing.'
-[ -z "$(pidof tof_driver algorithm_consumer tmf8829_ext tmf8829_host_driver live native_hd_gui litesr_near_gui tmf8829_tuner tiny_nv12 tiny_nv12_camera sensor_fusion_service capture_bridge rgbtof_bridge dtof48 next_pipeline || true)" ] ||
+ fail 'The required camera firmware, SC3336 binding, is missing.'
+[ -z "$(pidof tof_driver algorithm_consumer tmf8829_ext tmf8829_host_driver live native_hd_gui litesr_near_gui tmf8829_tuner sensor_fusion_service capture_bridge rgbtof_bridge dtof48 next_pipeline || true)" ] ||
  fail 'Stop the active ToF or imaging process before setup.'
 if [ "$mode" = fresh ]; then [ -z "$(pidof depth_status || true)" ] || fail 'An existing status service is active.'; fi
 camera=$(pidof rkipc || true)
@@ -204,14 +204,6 @@ export LD_LIBRARY_PATH="$stage/depth:/oem/usr/lib:/usr/lib"
  fail 'The Native16 capture program could not start on this firmware.'
 grep -qx "{\"native_capture_protocol\":\"native-m48-m16-m8-v2\",\"fov\":$fov,\"model_inference\":false,\"photon_enabled\":false,\"m8\":false,\"m16\":true,\"m48\":true}" "$stage/native.json" ||
  fail 'The Native16 capture program did not report the expected calibration capabilities.'
-"$stage/candidate/dcts-litesr-384x256-v3-depth-only/litesr_near_gui" check-protected \
- "$stage/candidate/dcts-litesr-384x256-v3-depth-only/model.dctsm" > "$stage/rect-model.log" 2>&1 &&
- grep -qx DCTS_PROTECTED_LITESR_READY "$stage/rect-model.log" ||
- fail 'The board could not initialize rectangular LiteSR.'
-"$stage/candidate/dcts-tiny-nv12-128x80-v1/tiny_nv12" check-protected \
- "$stage/candidate/dcts-tiny-nv12-128x80-v1/model.dctsm" > "$stage/tiny-model.log" 2>&1 &&
- grep -qx DCTS_PROTECTED_TINY_NV12_READY "$stage/tiny-model.log" ||
- fail 'The board could not initialize Tiny NV12.'
 [ "$(digest "$oem")" = "$oem_sha" ] || fail 'The factory startup script changed during setup.'
 if ! exists "$backup"; then ln "$oem" "$backup";saved_oem=1; fi
 cp -p "$oem" "$stage/oem-before"

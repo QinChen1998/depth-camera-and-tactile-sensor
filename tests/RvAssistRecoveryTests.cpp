@@ -2,6 +2,7 @@
 #include "../sensors/RvAssistFusion.h"
 #include "../sensors/RvCameraView.h"
 #include "../sensors/RvDepthDiagnostic.h"
+#include "../sensors/RvInferenceRuntime.h"
 #include <QtCore/QFile>
 #include <QtCore/QFileInfo>
 #include <QtCore/QJsonDocument>
@@ -51,7 +52,7 @@ int runRvAssistRecoveryTests(const QString &path){
     QFile report(path);if(!report.open(QIODevice::WriteOnly|QIODevice::Text))return 3;
     QTextStream out(&report);bool all=true;
     const auto check=[&](const QString &name,bool ok){out<<name<<' '<<(ok?"PASS":"FAIL")<<Qt::endl;all&=ok;};
-    for(const char *model:{RvCameraView::UniDepthVgaNative16})for(int fov:{1,2}){
+    for(const char *model:{RvCameraView::UniDepthVgaNative16})for(int fov:{1,2,6}){
         Scene scene(model,fov);const auto original=scene.tof.samples;const auto fit=scene.fit();
         const QString prefix=scene.model+"_F"+QString::number(fov)+"_";
         check(prefix+"PINNED_NATIVE16_CALIBRATION",scene.cal.valid&&scene.tof.isValidForHostFusion());
@@ -131,5 +132,17 @@ int runRvAssistRecoveryTests(const QString &path){
     check("H_DIAGNOSTIC_OTHER_MEASUREMENT_REJECTED",!mismatch.valid());
     for(const auto *old:{"unidepth","unidepth_wide","colorsr_rgb","depthor_v3_fp32"})
         check(QString("RETIRED_MODEL_REJECTED_")+old,!RvCameraView::isHostDepth(QLatin1String(old))&&!RvCameraView::supportsNativeGrid(QLatin1String(old),8,8));
+    auto quantized=snapshot;
+    auto &qm=quantized.output.metadata;
+    const auto quantizedIdentity=RvInferenceRuntime::identity("openvino:INT8");
+    for(auto it=quantizedIdentity.begin();it!=quantizedIdentity.end();++it)qm["assist_"+it.key()]=it.value();
+    qm["assist_execution_device"]="openvino:INT8";qm["assist_backend"]="openvino-native";
+    check("INT8_DIAGNOSTIC_EXPLICIT_IDENTITY",quantized.valid());
+    auto wrongQuantized=quantized;wrongQuantized.output.metadata["assist_source_graph_sha256"]=QString(64,'0');
+    check("INT8_DIAGNOSTIC_WRONG_SOURCE_REJECTED",!wrongQuantized.valid());
+    wrongQuantized=quantized;wrongQuantized.output.metadata["assist_execution_device"]="cpu";
+    check("INT8_DIAGNOSTIC_WRONG_DEVICE_REJECTED",!wrongQuantized.valid());
+    wrongQuantized=quantized;wrongQuantized.output.metadata["assist_graph_sha256"]=scene.view.graphSha;
+    check("INT8_DIAGNOSTIC_ORIGINAL_HASH_REJECTED",!wrongQuantized.valid());
     return all?0:2;
 }

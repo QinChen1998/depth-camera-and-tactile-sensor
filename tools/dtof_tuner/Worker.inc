@@ -38,10 +38,9 @@ QJsonObject tunerInspect(Ssh &connection,const QJsonObject &request){
     const auto service=current["service"].toObject();
     require(service["model"]=="Native"&&(service["state"]=="stopped"||service["state"]=="running"),"Formal service is not healthy Native/stopped; no retired model may be restored");
     if(lines[2]=="native")require(service["state"]=="running"&&service["generation"].toVariant().toString().toLatin1()==lines[3],"Native owner differs from formal status");
-    if(lines[2]=="idle"||lines[2]=="litesr")require(service["state"]=="stopped","Native status contradicts the actual capture owner");
+    if(lines[2]=="idle"||lines[2]=="capture")require(service["state"]=="stopped","Native status contradicts the actual capture owner");
     return {{"boot_id",QString::fromLatin1(lines[0])},{"snapshot",QString::fromLatin1(lines[1])},{"owner",QString::fromLatin1(lines[2])},
-        {"settings",settings.json()},{"litesr_settings",lite.json()},{"service_sha",tunerHash(native)},{"litesr_sha",tunerHash(candidate)},
-        {"litesr_compatible",settings.liteSrCompatible()&&lite==settings},{"state","idle"}};
+        {"settings",settings.json()},{"capture_settings",lite.json()},{"service_sha",tunerHash(native)},{"capture_sha",tunerHash(candidate)},{"state","idle"}};
 }
 QString tunerWrite(const QString &path,const QByteArray &bytes){return "printf '%s' "+shellQuote(QString::fromLatin1(bytes.toBase64()))+" | base64 -d > "+shellQuote(path)+"\n";}
 QString tunerSaveCommand(const QJsonObject &r,const RvTuner::Settings &s,const QByteArray &beforeNative,const QByteArray &beforeLite,const QString &id){
@@ -63,8 +62,8 @@ QString tunerSaveCommand(const QJsonObject &r,const RvTuner::Settings &s,const Q
         body+="chmod 755 "+paths[i]+".dtof_"+id+".pending\nsh -n "+paths[i]+".dtof_"+id+".pending\n";
         body+="[ \"$(sha256sum "+paths[i]+".dtof_"+id+".pending | cut -d' ' -f1)\" = "+tunerHash(after[i])+" ] || fail 'Pending configuration SHA mismatch'\n";
     }
-    const QJsonObject manifest{{"kind","dtof_only_native_and_litesr"},{"settings",s.json()},{"before_snapshot",expected},{"token",token},
-        {"native_before",tunerHash(beforeNative)},{"native_after",tunerHash(afterNative)},{"litesr_before",tunerHash(beforeLite)},{"litesr_after",tunerHash(afterLite)}};
+    const QJsonObject manifest{{"kind","dtof_only_native_and_capture"},{"settings",s.json()},{"before_snapshot",expected},{"token",token},
+        {"native_before",tunerHash(beforeNative)},{"native_after",tunerHash(afterNative)},{"capture_before",tunerHash(beforeLite)},{"capture_after",tunerHash(afterLite)}};
     body+=tunerWrite(dir+"/manifest.json",QJsonDocument(manifest).toJson());
     // Commit both files inside a rollback-owning subshell. Never overwrite drift.
     body+="(set -e\nchanged=0\nrollback(){\n code=$?;trap - EXIT;set +e\n if [ \"$code\" != 0 ] && [ \"$changed\" = 1 ];then\n bad=0\n";
@@ -86,7 +85,7 @@ QJsonObject tunerPersist(Ssh &connection,const QJsonObject &r,const RvTuner::Set
     const QString snapshot=QString::fromLatin1(connection.execute("sh -c "+shellQuote(body),70000).trimmed());tunerDigest(snapshot);
     require(tunerRead(connection,nativePath)==afterNative&&tunerRead(connection,litePath)==afterLite,"Permanent configuration readback failed; inspect backup and retained fault evidence");
     require(QString::fromLatin1(tunerCall(connection,"snapshot").trimmed())==snapshot,"Configuration drift after permanent save");
-    return {{"state","running"},{"persisted",true},{"settings",s.json()},{"snapshot",snapshot},{"backup",dir},{"litesr_compatible",s.liteSrCompatible()}};
+    return {{"state","running"},{"persisted",true},{"settings",s.json()},{"snapshot",snapshot},{"backup",dir}};
 }
 QJsonObject tunerOperation(Ssh &connection,const QString &action,const QJsonObject &r){
     if(action=="inspect")return tunerInspect(connection,r);

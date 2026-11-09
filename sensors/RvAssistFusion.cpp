@@ -57,7 +57,8 @@ bool nativeGridMatches(const RvTofFrame &tof,const Calibration &cal){
 
 bool loadCalibration(const QByteArray &bytes,Calibration &out,QString &error) {
     out={};
-    if(bytes.size()!=281932 || (QCryptographicHash::hash(bytes,QCryptographicHash::Sha256).toHex() != "54802b37740d0075d8a9da95a0dcb5fde27b2f1e20249312a9f2325280c51729"
+    if(bytes.size()!=281932 || (QCryptographicHash::hash(bytes,QCryptographicHash::Sha256).toHex() != RvCalibration::GeometrySha
+            && QCryptographicHash::hash(bytes,QCryptographicHash::Sha256).toHex() != "54802b37740d0075d8a9da95a0dcb5fde27b2f1e20249312a9f2325280c51729"
             && QCryptographicHash::hash(bytes,QCryptographicHash::Sha256).toHex() != "83b49ace957a4f70982380c6f22a7c39236764ff7311232d03724e85273324db")
         || qFromLittleEndian<quint32>(bytes.constData())!=0x47454f32
         || qFromLittleEndian<qint32>(bytes.constData()+4)!=144
@@ -87,8 +88,8 @@ bool loadCalibration(const QByteArray &bytes,Calibration &out,QString &error) {
 
 const Calibration &calibrationForFov(int fov) {
     const auto load=[](const QString &path){Calibration cal;QString error;QFile file(path);if(file.open(QIODevice::ReadOnly))loadCalibration(file.readAll(),cal,error);return cal;};
-    static const Calibration f1=load(":/camera/dtof_m48_geometry.bin"),f2=load(":/camera/dtof_m48_geometry_f2.bin"),invalid;
-    return fov==1?f1:fov==2?f2:invalid;
+    static const Calibration f1=load(":/camera/dtof_m48_geometry.bin"),f2=load(":/camera/dtof_m48_geometry_f2.bin"),f6=load(RvCalibration::GeometryResource),invalid;
+    return fov==6?f6:fov==1?f1:fov==2?f2:invalid;
 }
 
 const Calibration &calibrationForNativeGrid(int fov,int columns,int rows){
@@ -97,9 +98,9 @@ const Calibration &calibrationForNativeGrid(int fov,int columns,int rows){
         const auto &base=calibrationForFov(f);const auto rays=makeNative16Rays(f);
         if(!base.valid||rays[0][2]<=0)return out;
         out.translation=base.translation;std::copy(rays.begin(),rays.end(),out.cameraRays.begin());out.valid=true;return out;};
-    static const auto f1=make(1),f2=make(2),invalid=Calibration{};
+    static const auto f1=make(1),f2=make(2),f6=make(6),invalid=Calibration{};
     if(columns!=16||rows!=16)return invalid;
-    return fov==1?f1:fov==2?f2:invalid;
+    return fov==6?f6:fov==1?f1:fov==2?f2:invalid;
 }
 
 Result monocular(const std::vector<float> &mono,const char *reason,QSize size) {

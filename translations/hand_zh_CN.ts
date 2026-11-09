@@ -3,17 +3,16 @@
 <TS version="2.1" language="zh_CN" sourcelanguage="en_US">
   <context>
     <name>DepthMapWidget</name>
-    <message>
-      <source>On-board inference (128x128, camera off)</source>
-      <translation>板端推理（128×128，相机关闭）</translation>
-    </message>
+    <message><source>Input angle (%1°)</source><translation>输入角度（%1°）</translation></message>
+    <message><source>Native ToF angle</source><translation>原生 ToF 角度</translation></message>
+    <message><source>Clockwise angle (0–359°):</source><translation>顺时针角度（0–359°）：</translation></message>
+    <message><source>Rotate both native ToF displays clockwise. UniDepth, raw measurements and saved images keep their orientation.</source><translation>顺时针旋转两档原生 ToF 显示。UniDepth、原始测量和保存图像的方向保持不变。</translation></message>
+    <message><source>Board inference</source><translation>板端推理</translation></message>
+    <message><source>Board inference high accuracy</source><translation>板端推理高精度</translation></message>
+    <message><source>Native 48×32 ToF radial depth; no neural inference.</source><translation>原生 48×32 ToF 径向深度，不执行神经网络推理。</translation></message>
     <message>
       <source>16x16 depth and same-frame photon input; 128x128 output. Camera disabled. Selecting another model restores its capture configuration.</source>
       <translation>使用 16×16 深度和同帧光子强度，输出 128×128 深度。此模式关闭相机；选择其他模型会切换到对应的采集配置。</translation>
-    </message>
-    <message>
-      <source>On-board inference (384x256)</source>
-      <translation>板端推理（384×256）</translation>
     </message>
     <message>
       <source>48x32 depth and photon input; 384x256 output. Same sensor field of view. Experimental weight reuse; physical accuracy is unverified.</source>
@@ -396,30 +395,6 @@
       <translation>上位机深度预览</translation>
     </message>
     <message>
-      <source>LiteSR area full (experimental)</source>
-      <translation>LiteSR 区域完整模型（实验）</translation>
-    </message>
-    <message>
-      <source>LiteSR no guidance (experimental)</source>
-      <translation>LiteSR 无强度引导（实验）</translation>
-    </message>
-    <message>
-      <source>LiteSR WTA full (experimental)</source>
-      <translation>LiteSR WTA 完整模型（实验）</translation>
-    </message>
-    <message>
-      <source>LiteSR interpolation reference</source>
-      <translation>LiteSR 插值对照</translation>
-    </message>
-    <message>
-      <source>LiteSR area full + contour (experimental)</source>
-      <translation>LiteSR 区域完整＋轮廓优化（实验）</translation>
-    </message>
-    <message>
-      <source>Host refinement of LiteSR area full: optional isolated outlier repair and limited linear hole filling, edge-preserving smoothing and contour antialiasing. Experimental radial depth.</source>
-      <translation>在上位机对 LiteSR 区域完整深度进行可选孤立异常修复、限定范围线性填洞、保边平滑和轮廓抗锯齿。实验性径向深度。</translation>
-    </message>
-    <message>
       <source>Repair settings...</source>
       <translation>修复设置…</translation>
     </message>
@@ -508,36 +483,12 @@
       <translation>RV1103 运行板端完整版 INT8 模型，上位机根据同帧原生数据优化轮廓，无需启动上位机神经网络。另一个板端轮廓选项仍全部在 RV1103 计算。</translation>
     </message>
     <message>
-      <source>LiteSR full INT8 inference runs on RV1103. Enable Host contour optimization to run the spatial refinement on the PC; leave it off for the unrefined board output.</source>
-      <translation>LiteSR 完整版 INT8 推理在 RV1103 执行。勾选“上位机轮廓优化”后在电脑细化深度；关闭则显示板端完整版原始输出。</translation>
-    </message>
-    <message>
       <source>Runs on the PC: 7 x 7 edge-preserving smoothing, four tangent passes and contour antialiasing. Smoothing adjusts depth by at most 12 mm after repairs. Positive valid depths below 10 cm remain supported.</source>
       <translation>在上位机执行：7×7 保边平滑、4 次切向迭代与轮廓抗锯齿。修复后的平滑调整不超过 12 mm，保留小于 10 cm 的有效正深度。</translation>
     </message>
     <message>
-      <source>On-board inference</source>
-      <translation>板端推理</translation>
-    </message>
-    <message>
       <source>Official near-depth post-training, 1-140 cm input and output. INT8 inference runs on RV1103; matched contour refinement and display run on the PC. Real near-depth accuracy is unverified. RGB is not a model input.</source>
       <translation>官方近距数据后训练，输入和输出范围 1–140 cm。RV1103 运行 INT8 推理，上位机进行同帧轮廓优化与显示。实物近距精度尚未验证，RGB 不参与推理。</translation>
-    </message>
-    <message>
-      <source>RV1103 LiteSR + host contour + HD H.265 (experimental)</source>
-      <translation>板端 LiteSR＋上位机轮廓＋高清视频 H.265（实验）</translation>
-    </message>
-    <message>
-      <source>RV1103 runs LiteSR full INT8; the PC refines matched depth while 2304 x 1296 H.265 video updates independently. RGB is not a model input.</source>
-      <translation>板端运行 LiteSR 完整 INT8 模型，上位机优化同帧深度轮廓，同时独立显示 2304×1296 H.265 视频。RGB 不参与模型推理。</translation>
-    </message>
-    <message>
-      <source>Host LiteSR near full (1-140 cm, FP32, experimental)</source>
-      <translation>上位机 LiteSR 近距完整模型（1–140 cm，FP32，实验）</translation>
-    </message>
-    <message>
-      <source>Host LiteSR near no guidance (1-140 cm, FP32, experimental)</source>
-      <translation>上位机 LiteSR 近距无强度引导（1–140 cm，FP32，实验）</translation>
     </message>
     <message>
       <source>Same-frame native ToF and photon counts, host FP32 inference, 1-140 cm. No near-range repair. Experimental signal mapping; physical accuracy is unverified.</source>
@@ -556,10 +507,6 @@
 %1</translation>
     </message>
     <message>
-      <source>RV1103 LiteSR near full + host contour (INT8, experimental) High resolution (RGB paused)</source>
-      <translation>板端 LiteSR 近距完整模型＋上位机轮廓（INT8，实验） 高分辨率（暂停RGB）</translation>
-    </message>
-    <message>
       <source>512 x 512 model output using the same near-depth weights. INT8 inference runs on RV1103; matched contour and display run on the PC. Real accuracy, especially the 1 cm boundary, is unverified. RGB video pauses in this mode and resumes when switching to another model.</source>
       <translation>复用近距权重原生输出512×512；RV1103执行INT8推理，上位机处理同帧轮廓并显示。真实精度，尤其1厘米边界，尚未验收。此模式暂停RGB视频，切回其他模型时恢复。</translation>
     </message>
@@ -570,14 +517,6 @@
     <message>
       <source>RV1103 computation | %1 | %2×%3</source>
       <translation>RV1103 计算 | %1 | %2×%3</translation>
-    </message>
-    <message>
-      <source>LiteSR RGB 256 (host, experimental)</source>
-      <translation>LiteSR RGB 256（上位机，实验）</translation>
-    </message>
-    <message>
-      <source>LiteSR NV12 256 (host, experimental)</source>
-      <translation>LiteSR NV12 256（上位机，实验）</translation>
     </message>
     <message>
       <source>DEPTHOR Small V3 FP32 (experimental)</source>
@@ -638,14 +577,6 @@
     <message>
       <source>Turn RGB and projected dToF upright for the selected model. Output returns to the calibrated sensor grid; display rotation is independent.</source>
       <translation>将 RGB 与投影后的 dToF 转正后输入所选模型。输出还原至标定网格；显示旋转独立。</translation>
-    </message>
-    <message>
-      <source>RV1103 LiteSR area full (INT8, experimental)</source>
-      <translation>板端 LiteSR 区域完整模型（INT8，实验）</translation>
-    </message>
-    <message>
-      <source>RV1103 LiteSR area full + contour (INT8, experimental)</source>
-      <translation>板端 LiteSR 区域完整＋轮廓优化（INT8，实验）</translation>
     </message>
     <message>
       <source>On-board INT8 inference and all depth processing run on RV1103. Same-frame native D/I, 256 x 256 output displayed at the native ToF aspect ratio. Positive near returns are interpolated separately below the trained 10 cm minimum.</source>
@@ -719,18 +650,10 @@
       <source>H uses global scale at RGB cadence and may reuse the newest dToF measurement within 100 ms. Reuse is labeled; it is not a new measurement. Without a valid pair, only the historical scale is retained.</source>
       <translation>H 按 RGB 节奏做全局尺度校正，允许复用配对时间差 100 ms 内最新的 dToF 测量。界面标注复用，不视为新测量；没有有效配对时仅沿用历史尺度。</translation>
     </message>
-      <message>
-        <source>Tiny NV12 128x80 (on-board)</source>
-        <translation>板端推理（Tiny NV12 128×80）</translation>
-    </message>
     <message>
-        <source>NV12-guided on-board depth, 80x128 pixels.</source>
-        <translation>NV12 引导的板端深度，图像宽 80、高 128 像素。</translation>
-    </message>
-    <message>
-        <source>Tiny NV12 requires the calibrated F1 device and its saved camera orientation.</source>
-        <translation>Tiny NV12 需要对应的 F1 标定设备及已确认的相机方向。</translation>
-    </message>
+    <source>Host-assisted depth inference (640×480).</source>
+    <translation>上位机辅助深度推理（640×480）。</translation>
+  </message>
 </context>
   <context>
     <name>ImagePresentation</name>
@@ -839,10 +762,6 @@
     <message>
       <source>Stopped</source>
       <translation>已停止</translation>
-    </message>
-    <message>
-      <source>2304 x 1296 H.265 + LiteSR depth</source>
-      <translation>2304×1296 H.265＋LiteSR 深度</translation>
     </message>
     <message>
       <source>2304 x 1296 H.265 + host depth</source>
@@ -1074,7 +993,12 @@
       <source>Could not prepare a readable TensorRT-RTX worker and model path.</source>
       <translation>无法为 TensorRT-RTX 推理程序和模型准备可读的运行路径。</translation>
     </message>
-  </context>
+      <message><source>Inference device changed; waiting for a new paired frame</source><translation>推理设备已切换，等待新的配对帧</translation></message>
+    <message><source>Detecting available inference devices...</source><translation>正在检测可用的推理设备…</translation></message>
+    <message><source>No usable inference device was found. Open Inference Device in Settings to retry.</source><translation>未找到可用的推理设备，请在设置中的“推理设备”重新检测。</translation></message>
+    <message><source>No NVIDIA GPU was detected. Open Inference Device in Settings to select a CPU or compatible GPU.</source><translation>未检测到 NVIDIA 显卡，请在设置中的“推理设备”选择 CPU 或兼容显卡。</translation></message>
+    <message><source>Loading the host-assisted inference model...</source><translation>正在加载上位机辅助推理模型…</translation></message>
+</context>
   <context>
     <name>RvDepthView</name>
     <message>
@@ -1253,6 +1177,7 @@ Projected camera-Z %8 m</source>
   </context>
   <context>
     <name>RvSessionController</name>
+    <message><source>Native ToF depth expired</source><translation>原生 ToF 深度已过期</translation></message>
     <message>
       <source>The required host inference files are missing or invalid.</source>
       <translation>上位机推理所需的文件缺失或无效。</translation>
@@ -1510,6 +1435,10 @@ Projected camera-Z %8 m</source>
       <translation>H.265 视频与上位机推理</translation>
     </message>
     <message>
+      <source>H.265 video and native 48x32 ToF</source>
+      <translation>H.265 视频与 48×32 原生 ToF</translation>
+    </message>
+    <message>
       <source>RV1103 | %1 | %2×%3 | compute %4 ms</source>
       <translation>RV1103 | %1 | %2×%3 | 计算 %4 ms</translation>
     </message>
@@ -1532,10 +1461,6 @@ Projected camera-Z %8 m</source>
     <message>
       <source>Selected model does not support the current %1×%2 native ToF grid. Stop capture and save compatible settings first.</source>
       <translation>所选模型不支持当前%1×%2原生ToF网格。请先停止采集并保存兼容参数。</translation>
-    </message>
-    <message>
-      <source>On-board inference model</source>
-      <translation>板端推理模型</translation>
     </message>
     <message>
       <source>Required board files are missing.</source>
@@ -1606,10 +1531,14 @@ Projected camera-Z %8 m</source>
       <translation>请在「设置 → 设备管理」中使用「USB 一键连接」添加设备。</translation>
     </message>
       <message>
-        <source>Tiny NV12 requires the calibrated F1 device and its saved camera orientation.</source>
-        <translation>Tiny NV12 需要对应的 F1 标定设备及已确认的相机方向。</translation>
-    </message>
-  </context>
+    <source>Select host-assisted inference for depth inference.</source>
+    <translation>请选择上位机辅助推理以生成深度图。</translation>
+  </message>
+  <message>
+    <source>The board capture runtime is incomplete.</source>
+    <translation>板端采集运行文件不完整。</translation>
+  </message>
+</context>
   <context>
     <name>TactileView</name>
     <message>
@@ -2286,6 +2215,7 @@ After reconnecting power, click 'Connect selected module' using the new values.<
   </context>
   <context>
     <name>RvDeviceManagerDialog</name>
+    <message><source>2026-11-09 calibration / F=6 (automatic)</source><translation>2026-11-09 标定 / F=6（自动应用）</translation></message>
     <message>
       <source>Read automatically when connecting</source>
       <translation>连接后自动读取</translation>
@@ -2671,10 +2601,6 @@ New: %2</source>
       <translation>安装板端推理与自动切换…</translation>
     </message>
     <message>
-      <source>Verified %1. Protected LiteSR is missing. Use Install protected on-board inference.</source>
-      <translation>已验证 %1。缺少加密 LiteSR，请点击「安装板端推理与自动切换」。</translation>
-    </message>
-    <message>
       <source>Verified %1. The existing on-board inference model checksum differs.</source>
       <translation>已验证 %1。现有板端推理模型的校验值不符。</translation>
     </message>
@@ -2683,24 +2609,8 @@ New: %2</source>
       <translation>已验证 %1。板端推理运行环境不完整。</translation>
     </message>
     <message>
-      <source>Verified %1. Protected LiteSR and automatic dToF are ready.</source>
-      <translation>已验证 %1。加密 LiteSR 和 dToF 自动切换均已就绪。</translation>
-    </message>
-    <message>
-      <source>Verified %1. On-board inference model status is unavailable.</source>
-      <translation>已验证 %1。暂时无法获取板端推理模型状态。</translation>
-    </message>
-    <message>
-      <source>LiteSR model verified on %1. Click Start in the camera panel when ready.</source>
-      <translation>已校验 %1 上的 LiteSR 模型。就绪后可在原视频面板点击“开始”。</translation>
-    </message>
-    <message>
       <source>On-board model import is unavailable in offline mode.</source>
       <translation>离线模式下无法导入板端推理模型。</translation>
-    </message>
-    <message>
-      <source>Stop imaging and dToF tuning before importing a LiteSR model.</source>
-      <translation>导入 LiteSR 模型前，请先停止成像及 dToF 调参。</translation>
     </message>
     <message>
       <source>Select near-range on-board INT8 model</source>
@@ -2713,10 +2623,6 @@ New: %2</source>
     <message>
       <source>Import on-board inference model</source>
       <translation>导入板端推理模型</translation>
-    </message>
-    <message>
-      <source>Copy the verified LiteSR model to %1 (%2) if it is missing? Existing model files will be preserved.</source>
-      <translation>如果 %1（%2）缺少 LiteSR 模型，是否将校验通过的文件复制到板端？已有模型文件将保留。</translation>
     </message>
     <message>
       <source>Stop dToF tuning before changing trusted devices.</source>
@@ -2755,10 +2661,6 @@ New: %2</source>
       <translation>dToF 自动切换已就绪。选择板端推理模型文件以启用板端推理。</translation>
     </message>
     <message>
-      <source>Protected LiteSR and automatic dToF are ready on %1. Click Start in either imaging panel.</source>
-      <translation>%1 的加密 LiteSR 和 dToF 自动切换均已就绪。可在任一成像模块点击「开始」。</translation>
-    </message>
-    <message>
       <source>Automatic dToF is ready. The existing on-board inference model checksum differs and the file was preserved.</source>
       <translation>dToF 自动切换已就绪。现有板端推理模型校验不符，已保留原文件。</translation>
     </message>
@@ -2778,7 +2680,47 @@ New: %2</source>
       <source>Use selected FOV calibration</source>
       <translation>使用所选 FOV 标定</translation>
     </message>
-  </context>
+    <message>
+    <source>Install board capture support...</source>
+    <translation>安装板端采集支持…</translation>
+  </message>
+  <message>
+    <source>Verified %1. Automatic dToF support is missing. Use Install board capture support to install the required files.</source>
+    <translation>已验证 %1。缺少自动 dToF 支持，请点击“安装板端采集支持”补装文件。</translation>
+  </message>
+  <message>
+    <source>Verified %1. Native capture support is missing. Use Install board capture support.</source>
+    <translation>已验证 %1。缺少原生采集支持，请点击“安装板端采集支持”。</translation>
+  </message>
+  <message>
+    <source>Verified %1. Native capture and automatic dToF are ready.</source>
+    <translation>已验证 %1。原生采集和自动 dToF 支持已就绪。</translation>
+  </message>
+  <message>
+    <source>Verified %1. Board capture status is unavailable.</source>
+    <translation>已验证 %1。板端采集状态不可用。</translation>
+  </message>
+  <message>
+    <source>Verified %1. The board capture runtime is incomplete.</source>
+    <translation>已验证 %1。板端采集运行文件不完整。</translation>
+  </message>
+  <message>
+    <source>Native capture and automatic dToF are ready on %1. Click Start in either imaging panel.</source>
+    <translation>%1 的原生采集和自动 dToF 支持已就绪，可在任一成像面板点击开始。</translation>
+  </message>
+  <message>
+    <source>Board capture installation is unavailable in offline mode.</source>
+    <translation>离线模式无法安装板端采集支持。</translation>
+  </message>
+  <message>
+    <source>The board capture runtime is incomplete.</source>
+    <translation>板端采集运行文件不完整。</translation>
+  </message>
+  <message>
+    <source>Verified %1. The existing board capture runtime checksum differs.</source>
+    <translation>已验证 %1。板端采集运行文件的校验值不匹配。</translation>
+  </message>
+</context>
   <context>
     <name>RvTunerWidget</name>
     <message>
@@ -2850,10 +2792,6 @@ Range %6 mm (radial) | SNR %7 | slot %8 | Signal %9 | Noise encoded %10</source>
     <message>
       <source>Read the current device configuration first. Opening or restoring this dock does not start acquisition.</source>
       <translation>请先读取设备当前配置。打开模块或恢复布局不会自动采集。</translation>
-    </message>
-    <message>
-      <source>All supported resolutions can be saved permanently. Apply pending edits first. Both Native and LiteSR sensor command lines are backed up and verified. DEPTHOR V3 also accepts 8×8 ordinary, long range or high accuracy with one target and Noise off; other shared imaging requires compatible 48×32 settings.</source>
-      <translation>所有受支持分辨率均可长期保存。请先应用待修改参数。Native 和 LiteSR 两份传感器命令均备份并核验；DEPTHOR V3 还支持 8×8 普通、远距离或高精度模式，要求单目标、Noise 关；其他共享成像仍要求兼容的 48×32 参数。</translation>
     </message>
     <message>
       <source>Target %1</source>
@@ -3035,7 +2973,11 @@ Range %6 mm (radial) | SNR %7 | slot %8 | Signal %9 | Noise encoded %10</source>
       <source>Measurement</source>
       <translation>测量序号</translation>
     </message>
-  </context>
+    <message>
+    <source>All supported resolutions can be saved permanently. Apply pending edits first. Both native service and host capture command lines are backed up and verified. Host-assisted imaging uses a separate 16×16 session preset.</source>
+    <translation>所有支持的分辨率均可长期保存，请先应用待修改参数。原生服务与上位机采集命令均会备份并回读验证。上位机辅助成像使用独立的 16×16 会话预设。</translation>
+  </message>
+</context>
   <context>
     <name>RvTunerController</name>
     <message>
@@ -3061,10 +3003,6 @@ Range %6 mm (radial) | SNR %7 | slot %8 | Signal %9 | Noise encoded %10</source>
     <message>
       <source>Device operation failed or timed out; check device logs.</source>
       <translation>设备操作失败或超时，请检查设备日志。</translation>
-    </message>
-    <message>
-      <source>Reading current Native and LiteSR settings...</source>
-      <translation>正在读取 Native 和 LiteSR 当前参数…</translation>
     </message>
     <message>
       <source>Checking parameters, installed runtime, device identity and actual capture owner...</source>
@@ -3103,14 +3041,6 @@ Range %6 mm (radial) | SNR %7 | slot %8 | Signal %9 | Noise encoded %10</source>
       <translation>dToF 参数已长期保存。共享成像要求 48×32；当前分辨率请在 dToF 调试模块中使用。已保存值不会被自动覆盖。</translation>
     </message>
     <message>
-      <source>dToF settings saved and read back for Native and LiteSR.</source>
-      <translation>Native 和 LiteSR 的 dToF 参数已长期保存并回读核验。</translation>
-    </message>
-    <message>
-      <source>dToF settings saved. LiteSR cannot start with this combination; saved values will not be overridden.</source>
-      <translation>dToF 参数已保存。此组合不兼容 LiteSR，启动时将明确拒绝，不会覆盖已保存值。</translation>
-    </message>
-    <message>
       <source>Experiment receipt differs from requested settings.</source>
       <translation>实验回执与请求参数不一致。</translation>
     </message>
@@ -3146,7 +3076,11 @@ Range %6 mm (radial) | SNR %7 | slot %8 | Signal %9 | Noise encoded %10</source>
       <source>dToF settings saved. Host-assisted inference (640×480) supports these 16×16 ToF settings.</source>
       <translation>dToF参数已保存。上位机辅助推理（640×480）支持此16×16 ToF配置。</translation>
     </message>
-  </context>
+    <message>
+    <source>dToF settings saved and read back. Imaging uses a 16×16 session preset without changing the saved settings.</source>
+    <translation>dToF 参数已保存并回读验证。成像使用 16×16 会话预设，不修改已保存的参数。</translation>
+  </message>
+</context>
   <context>
     <name>RvAssistFusion</name>
     <message>
@@ -3157,12 +3091,24 @@ Range %6 mm (radial) | SNR %7 | slot %8 | Signal %9 | Noise encoded %10</source>
   <context>
     <name>SensorMainWindow</name>
     <message>
-      <source>Host-assisted inference unavailable</source>
-      <translation>上位机辅助推理不可用</translation>
+      <source>RV1103 connection</source>
+      <translation>RV1103 连接</translation>
     </message>
     <message>
-      <source>For now, choose On-board inference under Imaging scheme, then click Start if needed.</source>
-      <translation>建议先在「成像方案」中选择「板端推理」，必要时点击「开始」。</translation>
+      <source>A new RV1103 was detected. Go to Settings to add it automatically?</source>
+      <translation>检测到新的 RV1103 设备，是否前往设置自动完成新设备添加？</translation>
+    </message>
+    <message>
+      <source>RV1103 board files need updating. Go to Settings to update them automatically?</source>
+      <translation>RV1103 存在板端文件更新，是否前往设置自动完成更新？</translation>
+    </message>
+    <message>
+      <source>The RV1103 connection needs setup. Go to Settings to complete it automatically?</source>
+      <translation>RV1103 连接配置尚未完成，是否前往设置自动完成配置？</translation>
+    </message>
+    <message>
+      <source>Host-assisted inference unavailable</source>
+      <translation>上位机辅助推理不可用</translation>
     </message>
     <message>
       <source>About</source>
@@ -3268,7 +3214,17 @@ Range %6 mm (radial) | SNR %7 | slot %8 | Signal %9 | Noise encoded %10</source>
       <source>%1 is missing required board files. Open the on-board inference model import to install them?</source>
       <translation>%1 缺少成像所需的板端文件。是否通过「安装板端推理与自动切换」进行安装？</translation>
     </message>
-  </context>
+    <message>
+    <source>Check the host inference runtime and NVIDIA GPU/driver, then click Start again.</source>
+    <translation>请检查上位机推理运行文件及 NVIDIA 显卡和驱动，然后重新点击开始。</translation>
+  </message>
+  <message>
+    <source>%1 is missing required board capture files. Open the capture support installer?</source>
+    <translation>%1 缺少必需的板端采集文件。是否打开采集支持安装入口？</translation>
+  </message>
+    <message><source>Inference Device...</source><translation>推理设备…</translation></message>
+    <message><source>Open Settings &gt; Inference Device to detect usable devices, then click Start again.</source><translation>请在“设置 → 推理设备”中检测可用设备，然后重新点击开始。</translation></message>
+</context>
   <context>
     <name>RvUsbEnrollment</name>
     <message>
@@ -3378,10 +3334,6 @@ SSH 指纹：%2
       <translation>设备已添加。现有板端推理模型的校验值不符，请核对板端模型后再启动板端推理。</translation>
     </message>
     <message>
-      <source>The device was added. On-board inference requires its runtime to be installed on the device.</source>
-      <translation>设备已添加。使用板端 板端推理 前，需要先在设备上部署配套运行环境。</translation>
-    </message>
-    <message>
       <source>RV1103 on-board inference model</source>
       <translation>RV1103 板端推理模型</translation>
     </message>
@@ -3450,4 +3402,25 @@ SSH 指纹：%2
       <translation>无法保存诊断报告副本。</translation>
     </message>
   </context>
+
+<context>
+    <name>RvInferenceSettings</name>
+    <message><source>Close</source><translation>关闭</translation></message>
+    <message><source>CPU (compatible)</source><translation>CPU（兼容模式）</translation></message>
+    <message><source>Detecting inference devices...</source><translation>正在检测推理设备…</translation></message>
+    <message><source>Cannot create the inference test directory.</source><translation>无法创建推理测试目录。</translation></message>
+    <message><source>Cannot prepare the bundled inference worker.</source><translation>无法准备随附的推理程序。</translation></message>
+    <message><source>Testing %1 (%2/%3)...</source><translation>正在测试 %1（%2/%3）…</translation></message>
+    <message><source>The device test timed out.</source><translation>设备测试超时。</translation></message>
+    <message><source>No usable inference device was found.</source><translation>未找到可用的推理设备。</translation></message>
+    <message><source>Detection complete. Only successfully tested options are shown.</source><translation>检测完成，仅显示已成功通过试推理的选项。</translation></message>
+    <message><source>The selected device failed. Switched to CPU.</source><translation>所选设备运行失败，已切换到 CPU。</translation></message>
+    <message><source>Inference Device</source><translation>推理设备</translation></message>
+    <message><source>Choose the device used for host-assisted depth. TensorRT-RTX is preferred on first use when available. Your selection is remembered.</source><translation>选择用于上位机辅助深度推理的设备。首次使用时优先选择可用的 TensorRT-RTX，之后保留您的选择。</translation></message>
+    <message><source>Detect Again</source><translation>重新检测</translation></message>
+    <message><source>CPU / OpenVINO INT8 (mixed precision)</source><translation>CPU / OpenVINO INT8（混合精度）</translation></message>
+    <message><source>%1 — %2 — about %3 FPS</source><translation>%1 · %2 · 约 %3 FPS</translation></message>
+    <message><source>Mixed INT8 trades some depth accuracy for speed. Local testing found 1.34% mean output difference from the original model, with larger differences in some scenes. Verify it for your application.</source><translation>混合 INT8 以部分深度精度换取速度。本地测试与原模型的平均输出差异为 1.34%，部分场景差异更大，请按实际用途验证。</translation></message>
+    <message><source>FPS is a short local inference estimate. Live depth speed also depends on video and processing. Detection briefly pauses host inference and does not connect to a sensor.</source><translation>帧率为本机短时推理估计，实际深度速度还受视频和处理流程影响。检测期间暂停上位机推理，不连接传感器。</translation></message>
+</context>
 </TS>

@@ -1,6 +1,5 @@
 #pragma once
 #include "ImagePresentation.h"
-#include "../tools/tiny_nv12_board/Contract.h"
 #include "DepthColorScale.h"
 #include "ImageHoverTip.h"
 #include <QtWidgets/QWidget>
@@ -19,7 +18,7 @@
 #include <memory>
 #include <chrono>
 
-// Pure display of camera-Z metres. It is not a raw TMF frame or a control source.
+// Metric display: host camera-Z or explicitly selected native radial metres.
 class RvDepthView : public QWidget {
 public:
  double displayedFps()const{
@@ -31,21 +30,29 @@ public:
  explicit RvDepthView(QWidget* parent=nullptr);
  ~RvDepthView() override;
  void setRadialMode(bool nativeOrientation=true){radial=true;nativeRadial=nativeOrientation;setDisplayRange(.1,1.4);setBlackOutsideRange(true);}
- void setBoardCameraZ(bool enabled){if(cameraGrid==enabled)return;cameraGrid=enabled;radial=!enabled;nativeRadial=!enabled;nativeGridSize={};clear();}
  void setDisplayRotationDegrees(int degrees){rotation=ImagePresentation::normalizedRotation(degrees);target={};refreshHover();update();}
  int displayRotationDegrees()const{return rotation;}
+ void setNativeDisplayRotationDegrees(int degrees){
+  if(!radial)return;
+  nativeRotationEnabled=true;nativeRotation=(degrees%360+360)%360;
+  target={};refreshHover();update();
+ }
+ int nativeDisplayRotationDegrees()const{return nativeRotation;}
+ void setNativeDisplayMirrored(bool enabled){
+  if(!radial||nativeDisplayMirrored==enabled)return;
+  nativeDisplayMirrored=enabled;target={};refreshHover();update();
+ }
  void setNativeGridSize(QSize size){nativeGridSize=size;target={};refreshHover();update();}
  QSizeF presentationSize()const{
   const auto grid=nativeGridSize.isEmpty()?depthSize:nativeGridSize;
   if(nativeRadial)return QSizeF(grid.height(),grid.width());
-  if(cameraGrid)return QSizeF(TinyNv12Contract::PresentationWidth,TinyNv12Contract::PresentationHeight);
+  if(radial)return QSizeF(grid);
   if(!imageSourceRect.isEmpty()&&imageSourceRect!=image.rect())return imageSourceRect.size();
   // The VGA virtual camera uses square pixels on the full 4:3 grid.
   if(image.size()==QSize(640,480))return image.size();
   return QSizeF(144,81);
  }
  QRect displayedSourceRect()const{return imageSourceRect;}
- QString legendText()const{return tr(blackOutside?"camera-Z: %1 m blue / %2 m green / %3 m red; invalid and out-of-range black":"camera-Z: %1 m blue / %2 m green / %3 m red; invalid black").arg(rangeMinimum,0,'g',6).arg((rangeMinimum+rangeMaximum)/2,0,'g',6).arg(rangeMaximum,0,'g',6);}
  bool setDepth(const QByteArray& bytes,const QJsonObject& m,const QByteArray& diagnostic={});
  bool setCoverage(const QByteArray &values);
  // Retain only display pixels; expired metric values must not remain queryable.
@@ -106,11 +113,15 @@ protected:
   }
   if(image.isNull()){p.drawText(rect(),Qt::AlignCenter,emptyReason.isEmpty()?tr("Waiting for RV1103 depth"):emptyReason);return;}
   // Fit the calibrated presentation geometry before applying display rotation.
-  target=ImagePresentation::fittedRect(QRectF(rect()).adjusted(8,8,-8,-8),presentationSize(),rotation);
+  target=nativeRotationEnabled?nativePresentationTransform().mapRect(QRectF(QPointF(),presentationSize()))
+      :ImagePresentation::fittedRect(QRectF(rect()).adjusted(8,8,-8,-8),presentationSize(),rotation);
   setProperty("presentationRect",target);
   const auto display=nativeRadial?image.transformed(QTransform().rotate(-90)).flipped(Qt::Horizontal):image;
-  p.setRenderHint(QPainter::SmoothPixmapTransform,radial);
-  ImagePresentation::drawImage(p,target,display,rotation,nativeRadial?QRectF(display.rect()):QRectF(imageSourceRect));
+  p.setRenderHint(QPainter::SmoothPixmapTransform,radial&&depthSize!=QSize(48,32));
+  if(nativeRotationEnabled){
+   p.save();p.setTransform(nativePresentationTransform(),true);
+   p.drawImage(QRectF(QPointF(),presentationSize()),display,nativeRadial?QRectF(display.rect()):QRectF(imageSourceRect));p.restore();
+  }else ImagePresentation::drawImage(p,target,display,rotation,nativeRadial?QRectF(display.rect()):QRectF(imageSourceRect));
   setProperty("displaySourceRect",imageSourceRect);
   if(!held&&(paintedId!=imageFrameId||paintedGeneration!=imageGeneration)){
    if(!fpsClock.isValid())fpsClock.start();
@@ -132,6 +143,19 @@ protected:
  void mouseMoveEvent(QMouseEvent*)override{refreshHover();}
  void leaveEvent(QEvent*)override{hoverTip.clear();}
 private:
+ QTransform nativePresentationTransform()const{
+  const auto size=presentationSize();const auto available=QRectF(rect()).adjusted(8,8,-8,-8);
+  if(size.isEmpty()||available.isEmpty())return {};
+  QTransform turn;turn.rotate((rotation+nativeRotation)%360);
+  const auto bounds=turn.mapRect(QRectF(QPointF(),size));
+  const auto scale=std::min(available.width()/bounds.width(),available.height()/bounds.height());
+  QTransform transform;transform.translate(available.center().x(),available.center().y());
+  // Mirror the final rotated native view horizontally in screen coordinates.
+  // The same transform is inverted for hover; samples and saved pixels stay raw.
+  if(nativeDisplayMirrored)transform.scale(-1,1);
+  transform.rotate((rotation+nativeRotation)%360);transform.scale(scale,scale);transform.translate(-size.width()/2,-size.height()/2);
+  return transform;
+ }
  QJsonObject depthMetadata;
  QJsonObject imagePerformance;
  double guiSetDepthMs=0;
@@ -155,10 +179,11 @@ private:
  std::vector<qint64> fpsTimes;
  double rangeMinimum=0,rangeMaximum=3;
  bool blackOutside=false;
- bool radial=false,cameraGrid=false;
+ bool radial=false;
  int loadingState=0;bool loadingVisible=false,loadingConnected=false;
  double loadingProgress=0,finishFrom=0;QTimer loadingTimer;QElapsedTimer loadingClock;
  int rotation=0;
+ int nativeRotation=0;bool nativeRotationEnabled=false,nativeDisplayMirrored=false;
  QString emptyReason;std::shared_ptr<const std::vector<float>> depth;QSize depthSize;QByteArray coverage;mutable QImage image;QRectF target;
  QRect depthSourceRect;mutable QRect imageSourceRect;
 };

@@ -15,7 +15,6 @@ struct Settings {
     QSize size() const;
     bool dual() const;
     bool nativeCompatible() const;
-    bool liteSrCompatible() const;
     bool hostDepthCompatible() const;
     bool fp16Native16Compatible() const;
     QJsonObject json() const;

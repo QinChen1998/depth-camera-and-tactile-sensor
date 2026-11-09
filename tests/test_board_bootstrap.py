@@ -11,7 +11,7 @@ import unittest
 
 SERIAL = '1234567890abcdef'
 BOOT = '11111111-2222-3333-4444-555555555555'
-CAPABILITIES = ('{"native_capture_protocol":"native-m48-m16-m8-v2","fov":1,'
+CAPABILITIES = ('{"native_capture_protocol":"native-m48-m16-m8-v2","fov":6,'
                 '"model_inference":false,"photon_enabled":false,"m8":false,'
                 '"m16":true,"m48":true}')
 SCRIPT = Path(__file__).resolve().parents[1] / 'tools/rv_control/bootstrap/install.sh'
@@ -63,7 +63,6 @@ class BoardBootstrapTests(unittest.TestCase):
         self.write('oem/usr/bin/rkipc', '#!/bin/sh\nexit 0\n', True)
         (self.root / 'oem/usr/share/iqfiles').mkdir(parents=True)
         self.write('userdata/rkipc.ini', 'original camera settings\n')
-        self.write('usr/lib/libcrypto.so.1.1', 'firmware dependency\n')
         camera_driver = self.root / 'sys/bus/i2c/devices/4-0030/driver'
         camera_driver.parent.mkdir(parents=True)
         if os.name == 'nt':
@@ -86,12 +85,6 @@ class BoardBootstrapTests(unittest.TestCase):
         self.write('stage/depth/ensure-spi.sh', '#!/bin/sh\nexit 0\n', True)
         self.write('stage/candidate/control.sh', '#!/bin/sh\nexit 0\n', True)
         self.write('stage/candidate/native_hd_gui', '#!/bin/sh\nprintf \'%s\\n\' \'' + CAPABILITIES + '\'\n', True)
-        for bundle, program, receipt in (
-                ('dcts-litesr-384x256-v3-depth-only', 'litesr_near_gui', 'DCTS_PROTECTED_LITESR_READY'),
-                ('dcts-tiny-nv12-128x80-v1', 'tiny_nv12', 'DCTS_PROTECTED_TINY_NV12_READY')):
-            self.write('stage/candidate/' + bundle + '/' + program,
-                       '#!/bin/sh\necho ' + receipt + '\n', True)
-            self.write('stage/candidate/' + bundle + '/model.dctsm', 'fixture encrypted model\n')
         self.write('stage/S99zdepth', '#!/bin/sh\nexit 0\n', True)
         fixture_root = shell_path(self.root)
         library = (SCRIPT.parent / 'camera-takeover.sh').read_text(encoding='utf-8')
@@ -111,7 +104,7 @@ class BoardBootstrapTests(unittest.TestCase):
         self.script = self.write('install-fixture.sh',
                                  'PATH=' + shell_path(self.root / 'commands') + ':/usr/bin:/bin:$PATH\n' + script)
 
-    def run_setup(self, action='preflight', serial=SERIAL, mode='fresh', fov='1', **variables):
+    def run_setup(self, action='preflight', serial=SERIAL, mode='fresh', fov='6', **variables):
         environment = dict(os.environ, DCTS_FIXTURE_ROOT=shell_path(self.root), **variables)
         result = subprocess.run([self.bash, '--noprofile', '--norc', shell_path(self.script),
                                  action, serial, BOOT, shell_path(self.stage), mode, fov], env=environment,
@@ -183,7 +176,6 @@ class BoardBootstrapTests(unittest.TestCase):
         self.assertEqual((self.root/'root/r144_depth/tmf8829_ext').read_bytes(), self.new_driver)
         self.assertEqual((self.root/'root/rv1103_mw_spi/bin/tof_driver').read_bytes(), self.new_driver)
         self.assertFalse((self.root/'root/dtof_candidates_20261009/old-model.dctsm').exists())
-        self.assertTrue((self.root/'root/dtof_candidates_20261009/dcts-tiny-nv12-128x80-v1/model.dctsm').is_file())
         self.assertEqual((self.root/'root/dtof_tuner/persistence/record.json').read_text(), 'saved engineering history\n')
         self.assertEqual((self.root/'stage.before/depth/service.sh').read_text(), 'saved sensor arguments\n')
         self.assertFalse((self.root/'run/dtof_switch.lock').exists())
@@ -218,19 +210,18 @@ class BoardBootstrapTests(unittest.TestCase):
         self.assertEqual((self.root/'stage/previous/depth/tmf8829_ext').read_text(), 'old capture driver\n')
         self.assertTrue((self.root/'run/r144_depth/fault').is_file())
 
-    def test_usb_repair_accepts_matching_f2_capture_program(self):
+    def test_usb_repair_rejects_obsolete_fov_before_replacement(self):
         self.existing_runtime()
-        self.write('stage/candidate/native_hd_gui', '#!/bin/sh\nprintf \'%s\\n\' \'' + CAPABILITIES.replace('"fov":1', '"fov":2') + '\'\n', True)
         code, output = self.run_setup('activate', mode='repair', fov='2')
-        self.assertEqual(code, 0, output)
-        self.assertIn('"fov":2', output)
+        self.assertNotEqual(code, 0, output)
+        self.assertEqual((self.root/'root/r144_depth/tmf8829_ext').read_text(), 'old capture driver\n')
 
-    def test_usb_repair_rejects_failed_model_authentication_before_replacement(self):
+    def test_usb_repair_rejects_failed_native_capabilities_before_replacement(self):
         self.existing_runtime()
-        self.write('stage/candidate/dcts-litesr-384x256-v3-depth-only/litesr_near_gui', '#!/bin/sh\nexit 2\n', True)
+        self.write('stage/candidate/native_hd_gui', '#!/bin/sh\nexit 2\n', True)
         code, output = self.run_setup('activate', mode='repair')
         self.assertNotEqual(code, 0, output)
-        self.assertIn('initialize rectangular LiteSR', output)
+        self.assertIn('Native16 capture program could not start', output)
         self.assertEqual((self.root/'root/r144_depth/tmf8829_ext').read_text(), 'old capture driver\n')
 
     def test_usb_repair_checks_entire_upload_manifest_before_replacement(self):
@@ -257,7 +248,7 @@ class BoardBootstrapTests(unittest.TestCase):
         self.assertIn('identity or boot changed', output)
 
     def test_missing_firmware_dependency_is_rejected(self):
-        (self.root / 'usr/lib/libcrypto.so.1.1').unlink()
+        (self.root / 'userdata/rkipc.ini').unlink()
         code, output = self.run_setup()
         self.assertNotEqual(code, 0)
         self.assertIn('required camera firmware', output)

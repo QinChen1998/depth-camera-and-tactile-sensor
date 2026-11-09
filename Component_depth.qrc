@@ -6,6 +6,7 @@
     <file alias="nv12_rectify_2304.bin">assets/camera/nv12_rectify_2304.bin</file>
     <file alias="nv12_rectify.bin">assets/camera/nv12_rectify.bin</file>
     <file alias="nv12_rectify_wide.bin">assets/camera/nv12_rectify_wide.bin</file>
-    <file alias="rgb672_rectify.bin">assets/camera/rgb672_rectify.bin</file>
+    <file alias="rgb672_rectify.bin">assets/camera/calibration_20261109/rgb672_rectify.bin</file>
+    <file alias="dtof_m48_geometry_f6.bin">assets/camera/calibration_20261109/M48_geometry.bin</file>
   </qresource>
 </RCC>

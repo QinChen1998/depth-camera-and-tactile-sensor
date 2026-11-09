@@ -15,12 +15,16 @@ $installer=@(Get-ChildItem -LiteralPath (Join-Path $work 'delivery') -Filter '่ง
 if($installer.Count -ne 1){throw 'Expected a single setup EXE.'}
 New-Item -ItemType Directory -Path $inputFolder,$results | Out-Null
 Copy-Item -LiteralPath $installer[0].FullName -Destination $inputFolder
-Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'sandbox-test.ps1') -Destination $inputFolder
+# The clean VM runs Windows PowerShell 5.1: preserve Chinese paths with a BOM.
+[IO.File]::WriteAllText((Join-Path $inputFolder 'sandbox-test.ps1'),
+    [IO.File]::ReadAllText((Join-Path $PSScriptRoot 'sandbox-test.ps1')),
+    [Text.UTF8Encoding]::new($true))
 $inputFolder=[Security.SecurityElement]::Escape($inputFolder)
 $results=[Security.SecurityElement]::Escape($results)
 $testArguments=if($SmokeOnly){' -SmokeOnly'}else{''}
 @"
 <Configuration>
+  <MemoryInMB>8192</MemoryInMB>
   <vGPU>Disable</vGPU>
   <Networking>Disable</Networking>
   <ClipboardRedirection>Disable</ClipboardRedirection>

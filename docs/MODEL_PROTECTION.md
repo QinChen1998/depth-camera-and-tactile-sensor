@@ -1,6 +1,6 @@
 # 模型保护与安装包约定
 
-2026-11-06：新增第三个可见选项 Tiny NV12 128×80。独立 AES-256-GCM 密文和匹配 ARM 程序位于 `tools/tiny_nv12_board/payload/`，经 `tools/rv_control/build.ps1` 进入原生 worker 的哈希清单，再由 `tools/installer/build.ps1` 收集及校验。原 LiteSR 密文和模型未替换。v1.1.6 已完成三模型安装构建和沙盒启动卸载验证，现有 1.1.5 安装包保持原样。详见 [安装记录](INSTALLER_1_1_6.md)、[Tiny 接入](TINY_NV12_INTEGRATION.md) 和 [板端构建](../tools/tiny_nv12_board/README.md)。
+2026-11-09：当前开发版仅保留主机 H。LiteSR 普通／高精度的密文、ARM 推理程序、RKNN 依赖和参数切换模板均已移除；板端只部署原生采集支持。主机 H 的原生 DLL、AES-256-GCM 加密和 ORT 内存加载契约保持。历史 v1.1.6 安装包未重制，见 [当前移除记录](HOST_ASSIST_ONLY.md) 和 [历史安装记录](INSTALLER_1_1_6.md)。
 
 用户已于 2026 年 11 月 2 日确认：未来制作客户安装包时采用原生 DLL、AES-256-GCM 加密模型和 ORT 内存加载。目标是防止客户从安装目录直接复制得到可用的明文模型，模型随上位机提供使用。防蒸馏和强对抗内存提取不属于本次目标，设备授权、TPM 或云端服务也不是当前既定前提。
 
@@ -15,6 +15,12 @@
 当前维护入口为 `tools/model_protection/ModelProtectionApi.h`、`ProtectedModel.cpp`、`PackModelCopy.cpp`、`ModelProtection.vcxproj`，主机集成位于 `sensors/RvAssistDepth.cpp`，安装入口为 `tools/installer/build.ps1`。这些已在正常源码中；下文 2026-11-02 的独立 CUDA 实验用于历史追溯，不是当前源码入口。1.1.5 安装版改为携带 `UniDepthRuntimeRgb672VgaFP16RTX/` 的 640×480 加密模型；安装器构建从该运行包的明文副本生成新密钥、密文和 DLL，核对原文件 SHA256 和修改时间不变。开发版原文件继续保留。
 
 当前模型按提供方对结构重设计和重新训练的权属声明记录为 `LicenseRef-Proprietary`，使用说明位于模型包的 `licenses/Proprietary-Model-NOTICE.txt`。现有名称、上游/转换字段和哈希用于技术追溯，不应因历史命名自行改写当前权属记录。实际第三方依赖材料保留，见 [许可记录](OPEN_SOURCE_LICENSES.md)。
+
+## 兼容设备和 INT8 的安装版加载
+
+2026-11-09 新增 DirectML、通用 ORT CPU、OpenVINO CPU／Intel GPU 和可选混合 INT8，见 [推理设备选择](MULTI_BACKEND_INFERENCE.md)。原图仍使用现有 AES-256-GCM 密文；DirectML／CPU 复用 `DctsCreateProtectedSession`，OpenVINO 使用新增 `DctsCreateProtectedOpenVino`，在 DLL 内认证、解密、核对固定 SHA256 并从内存编译模型，返回编译句柄后清零临时明文。IR 权重由 OpenVINO 自有张量持有，不能引用已清零的临时解密区。
+
+INT8 的 XML／BIN 使用 `DCTOVIR1` 容器封装，独立加密为 `UniDepthRuntimeCompatible/decoder-int8.dctsm`，配套独立生成的加载 DLL。兼容清单的 `int8.model_protection` 记录同一保护方案、ABI、密文、DLL 和明文摘要。安装版强制保护，交付目录排除 `.onnx`、`.ovm` 及明文 IR，不发生明文兜底。原 ONNX、实验 IR 及开发容器只读保留。本节扩展当前加载方案；下文早期 CUDA 实验及“不量化”描述仅适用于当时的原图对照。
 
 ## 原始权重和本地开发规则
 
@@ -115,22 +121,16 @@ Release/Debug 各通过 28 个合成场景，其中 19 份有效深度、单目�
 
 本次证据可从 [完整汇总](../../dToF/output/litesr_depth_only_20261106_v1/retired_host_assets/x64/validation/model_crypto_trial_20261102/reports/final_summary.json)、[性能明细](../../dToF/output/litesr_depth_only_20261106_v1/retired_host_assets/x64/validation/model_crypto_trial_20261102/reports/performance_full_diagnostic/summary.json)、[Release 一致性](../../dToF/output/litesr_depth_only_20261106_v1/retired_host_assets/x64/validation/model_crypto_trial_20261102/reports/parity_Release/summary.json)、[Debug 一致性](../../dToF/output/litesr_depth_only_20261106_v1/retired_host_assets/x64/validation/model_crypto_trial_20261102/reports/parity_Debug/summary.json) 和 [拒绝测试](../../dToF/output/litesr_depth_only_20261106_v1/retired_host_assets/x64/validation/model_crypto_trial_20261102/reports/rejections.json) 读取。实验位于忽略的目录，清理或迁机后这些链接可能缺失；本文件保留方案、状态和关键结果，缺失的本地报告不能当作新一轮验收证据。
 
-## RV1103 板端 LiteSR
+## RV1103 原生采集
 
-板端沿用 AES-256-GCM 封装，使用独立于 UniDepth 的密钥。`tools/litesr_board/protected/payload/` 保存密文、F1/F2 程序、启动脚本和 dToF 会话切换片段。原生 worker 构建将这些文件纳入 SHA-256 清单，安装版随 worker 打包。板端使用固件提供的 `libcrypto.so.1.1` 解密，核对原 RKNN 哈希，经 `rknn_init` 从内存初始化后清零临时明文。
-
-重新构建板端程序时，用 UniDepth 打包工具对 LiteSR 副本生成密文和私有 `Key.h`，将目标固件的 ARM `libcrypto.so.1.1` 放入私有构建目录，再执行 `bash tools/litesr_board/build.sh protected <私有目录> <新输出目录>`；384/128 变体分别传 `protected384`、`protected128`。完整入口见 [板端构建](../tools/litesr_board/README.md)。密文与两种 FOV 的程序须成组更新，并同步更新部署版本。私有密钥头和明文副本留在内部构建目录。
-
-`tools/litesr_board/protected128/payload/` 保存独立 Native16 模型包，使用上述统一构建入口。明文 RKNN SHA256 为 `b4e983eef4928bbcdd2dc1fe308681fa0f8eda86dc0e38e2dc6662e3496730bf`，对应原始 checkpoint `b9896dd1ef172e4393d32fa191ad2b0d3c941bb6f7441de77992dcd16dfd226d`。原始权重只读，从副本生成独立密钥和密文；不覆盖 256/384 的原模型或密文。私有构建记录位于 `E:/WORK/RV1103-1106/artifacts/experiments/litesr128_integrated_20261105/private128/`，不得将 `Key.h` 或明文副本打入产品载荷。
-
-三种板端模型均由原生控制 worker 验证并部署；原有 256/384 密文不变，仅运行程序更新精确 `0x11` 状态处理。Native16 已验证 ARM 实机认证加载、损坏密文拒绝、无明文回退和八组 NPU 输出逐位一致。每帧复用初始化后的 RKNN 上下文，不重复解密。
+当前安装构建不再复制板端模型或模型解密程序。`tools/rv_capture/` 只提供 Native16 测量、H.265 进度及 H 会话预设，不需要 RKNN/OpenSSL 板端推理运行库。设备升级用完整事务式采集资源修复，旧活动目录留作回滚；此次仅修改本机项目，未部署真实设备。原始研究权重和外部研究目录保持。
 
 ## 安装包构建
 
 在 PowerShell 7 中执行，使用 VS 2022 v143、Qt 6.11.1 MSVC x64、匹配的 Qt 源码/许可材料及 Inno Setup 6.7.3。默认读取已部署到 `x64/Release/platform-tools` 的 ADB，也可通过 `-PlatformTools` 指定来源。通过 `-VlcRoot` 指定已校验的 VideoLAN VLC 3 x64 解压目录，托管 H.265 使用其中的 libVLC 和插件。构建目录使用 `x64/validation/` 下的新子目录。
 
 ```powershell
-./tools/installer/build.ps1 -BuildDirectory (Join-Path $PWD 'x64/validation/installer_release') -QtRoot E:/Qt/6.11.1/msvc2022_64 -VlcRoot C:/path/to/vlc-3.0.24 -TensorRtRuntime ./UniDepthRuntimeRgb672VgaFP16RTX -Version 1.1.6 -Iscc 'C:/path/to/ISCC.exe' -ChineseMessages 'C:/path/to/Languages/ChineseSimplified.isl'
+./tools/installer/build.ps1 -BuildDirectory (Join-Path $PWD 'x64/validation/installer_release') -QtRoot E:/Qt/6.11.1/msvc2022_64 -VlcRoot C:/path/to/vlc-3.0.24 -TensorRtRuntime ./UniDepthRuntimeRgb672VgaFP16RTX -CompatibleRuntime ./UniDepthRuntimeCompatible -Version 1.1.7 -Iscc 'C:/path/to/ISCC.exe' -ChineseMessages 'C:/path/to/Languages/ChineseSimplified.isl'
 ./tools/installer/prepare-sandbox.ps1 -BuildDirectory (Join-Path $PWD 'x64/validation/installer_release')
 ```
 
@@ -138,6 +138,6 @@ Release/Debug 各通过 28 个合成场景，其中 19 份有效深度、单目�
 
 安装目录和主程序名可包含中文。H 推理通过随包的 `DctsInferenceWorker.exe` 启动，优先使用可读的 ASCII 路径或目录别名。别名不可用时，将所需 DLL、程序和加密模型运行文件复制到当前用户的私有 ASCII 临时目录。推理进程退出后清理临时文件和别名。
 
-安装版和默认开发版均使用 ORT 1.31.1 和 TensorRT-RTX EP。安装版自带用户态推理 DLL，主机需要受支持的 Ampere 或更新的 NVIDIA RTX 显卡和兼容 CUDA 12.9 的驱动。显卡、驱动或模型不可用时，上位机显示原因并建议切换到板端推理。
+安装版和默认开发版均使用 ORT 1.31.1 和 TensorRT-RTX EP。安装版自带用户态推理 DLL，主机需要受支持的 Ampere 或更新的 NVIDIA RTX 显卡和兼容 CUDA 12.9 的驱动。显卡、驱动或模型不可用时，上位机显示原因，提示修复上位机运行文件及显卡环境。
 
 打开生成的 `DctsCleanInstall.wsb` 执行离线 Windows Sandbox 验证，结果写入 `sandbox-results/`。TensorRT-RTX 加密加载及 H 输出需另在配备兼容 NVIDIA 驱动的主机验证。串口驱动、NVIDIA 驱动和板端服务按实际设备配置。对外分发前核对 Qt Quick 3D、TensorRT-RTX、CUDA 等第三方依赖的授权覆盖。

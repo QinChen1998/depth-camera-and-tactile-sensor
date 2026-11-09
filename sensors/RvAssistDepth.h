@@ -31,6 +31,7 @@ public:
     // File preflight only; runtime identity and GPU checks stay in the worker.
     static bool hostModelAvailable(const QString &model);
     static QString preflightError(const QString &model);
+    static std::shared_ptr<void> prepareProbeWorker(QString &program,QString &runtime);
     int inputRotationDegrees() const {return m_inputRotation;}
     bool enabled() const {return m_enabled;}
     bool failed() const {return m_failed;}
@@ -55,6 +56,8 @@ private:
     void fail(const QString &reason);
     static QString failureExplanation(const QString &reason);
     QString m_root,m_token;
+    QString m_backend;
+    int m_inferenceTimeoutMs=1500,m_resultAgeLimitMs=1000;
     QString m_hostModel=QStringLiteral("unidepth_rgb672_vga_fp16_tof16");
     QString m_experiment=QStringLiteral("H");
     std::unique_ptr<RvAssistWorkerPaths> m_workerPaths;
@@ -74,3 +77,4 @@ private:
 };
 
 int runRvAssistWorker(const QString &runtimeRoot,const QString &token,const QString &hostModel=QString());
+int runRvInferenceProbe(const QString &backend,const QString &reportPath);

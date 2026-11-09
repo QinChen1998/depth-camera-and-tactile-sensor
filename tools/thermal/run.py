@@ -177,7 +177,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--serial', required=True)
     parser.add_argument('--output', type=Path, required=True)
-    parser.add_argument('--mode', choices=('board','host'), default='board')
+    parser.add_argument('--mode', choices=('host',), default='host')
     parser.add_argument('--environment-note', default='Current assembly and passive/active cooling unchanged; ambient temperature not independently measured.')
     args = parser.parse_args()
     if not re.fullmatch('[0-9a-f]{16}', args.serial):raise SystemExit('Explicit lowercase RV1103 serial required')
@@ -187,7 +187,7 @@ def main():
     gui = next(p for p in folder.glob('*.exe') if not p.name.isascii())
     target = args.output.resolve();target.mkdir(parents=True, exist_ok=False)
     manifest = {'serial': args.serial, 'started_utc': datetime.now(timezone.utc).isoformat(),
-                'mode':args.mode,'model': 'host_unidepth_rgb672_vga_fp16_tof16' if args.mode=='host' else 'board_litesr_near_384x256_host_contour_hd', 'camera_enabled': args.mode=='host',
+                'mode':args.mode,'model': 'host_unidepth_rgb672_vga_fp16_tof16', 'camera_enabled': args.mode=='host',
                 'idle_seconds': 30, 'inference_seconds': 600, 'cooldown_seconds': 60,
                 'sensor_saved_parameters_written': False, 'governor_or_thermal_controls_written': False,
                 'environment_note': args.environment_note}
@@ -211,7 +211,7 @@ def main():
         heartbeat(monitor, journal, 'idle_baseline_started')
         sample_wait(30, monitor, journal, 'idle_baseline_finished')
         with (target/'inference.process.log').open('wb') as output:
-            flag='--host-thermal-live-validation' if args.mode=='host' else '--board-thermal-live-validation'
+            flag='--host-thermal-live-validation'
             child = subprocess.Popen([str(gui), flag, str(gui_report)],
                                      cwd=root, env=clean_environment(folder, args.serial), stdout=output, stderr=subprocess.STDOUT)
             print(json.dumps({'phase': 'inference_gui_started', 'pid': child.pid}), flush=True)

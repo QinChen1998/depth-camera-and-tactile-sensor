@@ -121,7 +121,7 @@ bool RvDepthView::setDepth(const QByteArray &bytes,const QJsonObject &metadata,c
     const auto model=metadata["assist_host_model"].toString();
     const auto &view=RvCameraView::profile(model);
     const bool hostGrid=RvCameraView::isUniDepth(model)&&QSize(width,height)==view.outputSize();
-    if(!((cameraGrid&&width==80&&height==128&&metadata["model"]==TinyNv12Contract::Scheme)||(width==144&&height==81)||(width==288&&height==162)||(width==384&&height==256)||(width==576&&height==324)||hostGrid||(radial&&((width==128&&height==128)||(width==256&&height==256))))
+    if(!((width==144&&height==81)||(width==288&&height==162)||(width==384&&height==256)||(width==576&&height==324)||hostGrid||(radial&&((width==48&&height==32)||(width==128&&height==128)||(width==256&&height==256))))
         ||bytes.size()!=width*height*4||metadata["depth_unit"]!=(radial?"sensor_radial_m_float32":"camera-Z_m_float32")){
         clear();return false;
     }
@@ -161,7 +161,7 @@ bool RvDepthView::setDepth(const QByteArray &bytes,const QJsonObject &metadata,c
     recolor();return true;
 }
 bool RvDepthView::setCoverage(const QByteArray &values){
-    if((!radial&&!cameraGrid)||!depth||values.size()!=depthSize.width()*depthSize.height()){clear();return false;}
+    if(!radial||!depth||values.size()!=depthSize.width()*depthSize.height()){clear();return false;}
     coverage=values;recolor();return true;
 }
 void RvDepthView::holdFrame(){
@@ -213,13 +213,19 @@ void RvDepthView::takeColoredFrame(){
 void RvDepthView::refreshHover(){
     if(!hoverTip.tracking())return;
     const auto position=hoverTip.position();
-    target=ImagePresentation::fittedRect(QRectF(rect()).adjusted(8,8,-8,-8),
-        presentationSize(),rotation);
+    target=nativeRotationEnabled?nativePresentationTransform().mapRect(QRectF(QPointF(),presentationSize()))
+        :ImagePresentation::fittedRect(QRectF(rect()).adjusted(8,8,-8,-8),presentationSize(),rotation);
     if(target.isEmpty()||!target.contains(position)){
         hoverTip.hideText();return;
     }
-    const auto f=ImagePresentation::sourcePosition({(position.x()-target.left())/target.width(),
-                                                   (position.y()-target.top())/target.height()},rotation);
+    QPointF f;
+    if(nativeRotationEnabled){
+        const auto point=nativePresentationTransform().inverted().map(position);
+        const auto size=presentationSize();
+        if(!QRectF(QPointF(),size).contains(point)){hoverTip.hideText();return;}
+        f={point.x()/size.width(),point.y()/size.height()};
+    }else f=ImagePresentation::sourcePosition({(position.x()-target.left())/target.width(),
+                                               (position.y()-target.top())/target.height()},rotation);
     if(image.isNull()||(loadingVisible&&!held)){hoverTip.hideText();return;}
     // Keep the readout in place while the next image is being colored. Update
     // its value only when that image is ready; never query expired held depth.

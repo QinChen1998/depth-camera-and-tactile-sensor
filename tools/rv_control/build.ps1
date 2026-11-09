@@ -55,38 +55,50 @@ foreach($rvName in @('session.sh','tmf8829_tuner','bounded_log.awk','LICENSE-MIT
 }
 Copy-Item -LiteralPath (Join-Path $rvProject 'tools/dtof_tuner/coordinator.sh') -Destination (Join-Path $rvRuntime 'dtof_tuner/coordinator.sh') -Force
 $rvPayload['dtof_tuner/coordinator.sh']=(Get-FileHash (Join-Path $rvRuntime 'dtof_tuner/coordinator.sh') -Algorithm SHA256).Hash.ToLower()
-New-Item -ItemType Directory -Force -Path (Join-Path $rvRuntime 'litesr_board') | Out-Null
-foreach($rvName in @('litesr_gui.sh','dtof-switch.sh','dtof-switch-v1.sh','dtof-switch-v2.sh','dtof-switch-v3.sh')) {
- $rvRelative="litesr_board/$rvName"
- Copy-Item -LiteralPath (Join-Path $rvProject "tools/litesr_board/protected/payload/$rvName") -Destination (Join-Path $rvRuntime $rvRelative) -Force
- $rvPayload[$rvRelative]=(Get-FileHash (Join-Path $rvRuntime $rvRelative) -Algorithm SHA256).Hash.ToLower()
+$retiredCapture=Join-Path $rvRuntime 'litesr_board'
+if(Test-Path -LiteralPath $retiredCapture){
+ $resolvedCapture=[IO.Path]::GetFullPath($retiredCapture)
+ if([IO.Path]::GetDirectoryName($resolvedCapture) -ne [IO.Path]::GetFullPath($rvRuntime)){throw 'Invalid retired capture target'}
+ Remove-Item -LiteralPath $resolvedCapture -Recurse -Force
 }
-foreach($rvName in @('model.dctsm','litesr-fov1.bin','litesr-fov2.bin')) {
- $rvRelative="litesr_board/rect-$rvName"
- Copy-Item -LiteralPath (Join-Path $rvProject "tools/litesr_board/protected384/payload/$rvName") -Destination (Join-Path $rvRuntime $rvRelative) -Force
- $rvPayload[$rvRelative]=(Get-FileHash (Join-Path $rvRuntime $rvRelative) -Algorithm SHA256).Hash.ToLower()
+New-Item -ItemType Directory -Force -Path (Join-Path $rvRuntime 'rv_capture') | Out-Null
+foreach($rvRetired in @('rv_capture/native-fov1.bin','rv_capture/native-fov2.bin','rv1103_bootstrap/native_hd_gui')) {
+ $rvRetiredPath=[IO.Path]::GetFullPath((Join-Path $rvRuntime $rvRetired))
+ if(!$rvRetiredPath.StartsWith([IO.Path]::GetFullPath($rvRuntime)+[IO.Path]::DirectorySeparatorChar)){throw 'Invalid retired payload path'}
+ if(Test-Path -LiteralPath $rvRetiredPath){Remove-Item -LiteralPath $rvRetiredPath -Force}
 }
-
-foreach($rvName in @('native-fov1.bin','native-fov2.bin')) {
- $rvRelative="litesr_board/$rvName"
- Copy-Item -LiteralPath (Join-Path $rvProject "tools/litesr_board/native/payload/$rvName") -Destination (Join-Path $rvRuntime $rvRelative) -Force
- $rvPayload[$rvRelative]=(Get-FileHash (Join-Path $rvRuntime $rvRelative) -Algorithm SHA256).Hash.ToLower()
-}
-$tinyFiles=@{'tiny-model.dctsm'='model.dctsm';'tiny-engine.bin'='tiny_nv12';'tiny-camera.bin'='tiny_nv12_camera';'tiny-camera-session.sh'='camera-session.sh'}
-foreach($rvName in $tinyFiles.Keys){
- $rvRelative="litesr_board/$rvName"
- Copy-Item -LiteralPath (Join-Path $rvProject ("tools/tiny_nv12_board/payload/"+$tinyFiles[$rvName])) -Destination (Join-Path $rvRuntime $rvRelative) -Force
+foreach($rvName in @('native_gui.sh','dtof-host.sh','native-fov6.bin')) {
+ $rvRelative="rv_capture/$rvName"
+ $rvSource=if($rvName.EndsWith('.bin')){"tools/rv_capture/native/payload/$rvName"}else{"tools/rv_capture/payload/$rvName"}
+ Copy-Item -LiteralPath (Join-Path $rvProject $rvSource) -Destination (Join-Path $rvRuntime $rvRelative) -Force
  $rvPayload[$rvRelative]=(Get-FileHash (Join-Path $rvRuntime $rvRelative) -Algorithm SHA256).Hash.ToLower()
 }
 $rvBootstrap=Join-Path $rvRuntime 'rv1103_bootstrap'
 New-Item -ItemType Directory -Force -Path $rvBootstrap | Out-Null
+$oldNpuLibrary=Join-Path $rvBootstrap 'librknnmrt.so'
+if(Test-Path -LiteralPath $oldNpuLibrary){Remove-Item -LiteralPath $oldNpuLibrary -Force}
 foreach($rvName in @('install.sh','ensure-spi.sh','camera-takeover.sh','S99zdepth','M48_geometry.bin','bounded_log.awk',
- 'camera_rtsp_config.awk','depth_status','librknnmrt.so','no_route_monitor.so','native_hd_gui','tof_driver',
+ 'camera_rtsp_config.awk','depth_status','no_route_monitor.so','tof_driver',
  'depth-control.sh','candidate-control.sh','session.sh','service.sh')) {
  Copy-Item -LiteralPath (Join-Path $PSScriptRoot "bootstrap/$rvName") -Destination $rvBootstrap -Force
  $rvPayload["rv1103_bootstrap/$rvName"]=(Get-FileHash -LiteralPath (Join-Path $rvBootstrap $rvName) -Algorithm SHA256).Hash.ToLower()
 }
+$rvCalibration=Join-Path $rvProject 'assets/camera/calibration_20261109'
+Copy-Item -LiteralPath (Join-Path $rvCalibration 'M48_geometry.bin') -Destination $rvBootstrap -Force
+$rvPayload['rv1103_bootstrap/M48_geometry.bin']=(Get-FileHash (Join-Path $rvBootstrap 'M48_geometry.bin')).Hash.ToLower()
+New-Item -ItemType Directory -Force -Path (Join-Path $rvBootstrap 'calibration') | Out-Null
+foreach($rvName in @('calibration.json','intrinsics.json','extrinsics.json','projection.bin','M48_geometry.bin','manifest.json','host_contract.json')) {
+ Copy-Item -LiteralPath (Join-Path $rvCalibration $rvName) -Destination (Join-Path $rvBootstrap "calibration/$rvName") -Force
+ $rvPayload["rv1103_bootstrap/calibration/$rvName"]=(Get-FileHash (Join-Path $rvBootstrap "calibration/$rvName")).Hash.ToLower()
+}
 foreach($rvName in @('known_hosts','licenses/libssh2.txt','licenses/OpenSSL.txt','licenses/upstream.lock.json')){$rvPayload[$rvName]=(Get-FileHash (Join-Path $rvRuntime $rvName) -Algorithm SHA256).Hash.ToLower()}
+$rvBoardFiles=[ordered]@{}
+foreach($rvName in $rvPayload.Keys){if($rvName -match '^(rv_capture|rv1103_bootstrap|dtof_tuner)/'){$rvBoardFiles[$rvName]=$rvPayload[$rvName]}}
+[ordered]@{schema=1;calibration_release='RV1103_SC3336_TMF8829_20261109';processing_fov=6;
+ supported_capture_modes=@(14,24,25);sensor_modes=@(5,11,12);models_required=$false;
+ replacement_policy='complete_hash_checked_transaction_with_rollback';files=$rvBoardFiles} |
+ ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $rvRuntime 'board-import.json') -Encoding UTF8
+$rvPayload['board-import.json']=(Get-FileHash (Join-Path $rvRuntime 'board-import.json')).Hash.ToLower()
 [ordered]@{implementation='rv-control-cpp-v1';executable='RvControlWorker.exe';executable_sha256=(Get-FileHash $rvExecutable -Algorithm SHA256).Hash.ToLower();dependencies=$rvHashes;payload_files=$rvPayload;host_key_algorithm='ssh-ed25519';crypto_backend='OpenSSL';libssh2='1.11.1';transport_test_fixture=$TransportTests.IsPresent;python_required=$false;camera_opened=$false;board_connected=$false} | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $rvRuntime 'implementation.json') -Encoding UTF8
 Write-Output "Native RV $Configuration built/deployed: $rvRuntime"
 } finally {Exit-NativeBuildLock -Mutex $rvBuildOwner}

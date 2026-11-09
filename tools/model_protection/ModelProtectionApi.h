@@ -2,6 +2,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include "../../dependency_sources/onnxruntime/onnxruntime_c_api.h"
+#include "OpenVinoApi.h"
 
 // C ABI: the DLL returns an ORT session, never a plaintext model buffer.
 struct DctsModelLoadMetrics {
@@ -20,9 +21,17 @@ using DctsCreateProtectedSessionFn = int (__cdecl *)(
     const OrtApi *, const OrtEnv *, const OrtSessionOptions *, const wchar_t *,
     const char *, OrtSession **, DctsModelLoadMetrics *, char *, size_t);
 
+// OpenVINO receives the compiled model, never decrypted ONNX/IR bytes.
+using DctsCreateProtectedOpenVinoFn = int (__cdecl *)(
+    const DctsOpenVinoApi *, ov_core_t *, const char *, int, const wchar_t *,
+    const char *, ov_compiled_model_t **, DctsModelLoadMetrics *, char *, size_t);
+
 #ifdef DCTS_MODEL_PROTECTION_BUILD
 extern "C" __declspec(dllexport) int __cdecl DctsCreateProtectedSession(
     const OrtApi *api, const OrtEnv *environment, const OrtSessionOptions *options,
     const wchar_t *ciphertext_path, const char *expected_sha256, OrtSession **session,
     DctsModelLoadMetrics *metrics, char *error, size_t error_bytes);
+extern "C" __declspec(dllexport) int __cdecl DctsCreateProtectedOpenVino(
+    const DctsOpenVinoApi *, ov_core_t *, const char *, int, const wchar_t *,
+    const char *, ov_compiled_model_t **, DctsModelLoadMetrics *, char *, size_t);
 #endif
