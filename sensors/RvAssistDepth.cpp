@@ -363,18 +363,26 @@ QJsonObject readJson(const QString &path) {
 }
 QByteArray packet(const QJsonObject &json,const QByteArray &body={},const QByteArray &aux={}) {
     const auto header=QJsonDocument(json).toJson(QJsonDocument::Compact);
-    QByteArray out(12,Qt::Uninitialized);
-    qToLittleEndian<quint32>(quint32(header.size()),out.data());
-    qToLittleEndian<quint32>(quint32(body.size()),out.data()+4);
-    qToLittleEndian<quint32>(quint32(aux.size()),out.data()+8);
-    return out+header+body+aux;
+    QByteArray out(12+header.size()+body.size()+aux.size(),Qt::Uninitialized);
+    auto *data=out.data();
+    qToLittleEndian<quint32>(quint32(header.size()),data);
+    qToLittleEndian<quint32>(quint32(body.size()),data+4);
+    qToLittleEndian<quint32>(quint32(aux.size()),data+8);
+    std::memcpy(data+12,header.constData(),size_t(header.size()));
+    std::memcpy(data+12+header.size(),body.constData(),size_t(body.size()));
+    std::memcpy(data+12+header.size()+body.size(),aux.constData(),size_t(aux.size()));
+    return out;
 }
 QByteArray planarRgb(const QImage &source) {
     const auto image=source.convertToFormat(QImage::Format_RGB888);
     const int width=image.width(),height=image.height(),pixels=width*height;
     QByteArray out(3*pixels,Qt::Uninitialized);
-    for(int y=0;y<height;++y)for(int x=0;x<width;++x)for(int c=0;c<3;++c)
-        out[c*pixels+y*width+x]=char(image.constScanLine(y)[3*x+c]);
+    auto *destination=out.data();
+    for(int y=0;y<height;++y){
+        const auto *row=image.constScanLine(y);
+        auto *red=destination+y*width,*green=red+pixels,*blue=green+pixels;
+        for(int x=0;x<width;++x){red[x]=char(row[3*x]);green[x]=char(row[3*x+1]);blue[x]=char(row[3*x+2]);}
+    }
     return out;
 }
 
@@ -802,12 +810,13 @@ void RvAssistDepth::submit(const QImage &camera,const RvTofFrame &tof,quint64 ep
     if(m_process.state()==QProcess::NotRunning)startWorker();
     else if(m_ready&&!m_busy)sendLatest();
 }
-void RvAssistDepth::submitHd(const QImage &camera,const QJsonObject &source,quint64 epoch,const QByteArray &nativeSamples) {
+QByteArray RvAssistDepth::preparePlanarInput(const QImage &image){return planarRgb(image);}
+void RvAssistDepth::submitHd(const QImage &camera,const QJsonObject &source,quint64 epoch,const QByteArray &nativeSamples,const QByteArray &preparedInput) {
     if(m_destroying||!m_enabled||m_failed)return;
     const bool paired=source["dtof_present"].toBool();
     const bool reuse=reusesNativeMeasurements();auto selected=source;if(reuse)selected["assist_experiment"]="H";
     const auto &view=RvCameraView::profile(m_hostModel);
-    if(camera.size()!=view.inputSize()||!hdSource(source,view,reuse)
+    if(camera.size()!=view.inputSize()||(!preparedInput.isEmpty()&&preparedInput.size()!=view.rgbBytes())||!hdSource(source,view,reuse)
         ||(reuse&&paired&&!RvTofFrame{nativeSamples,selected}.isValidForHostFusion())
         ||(paired?!RvTofFrame{nativeSamples,source}.isValid(reuse):!nativeSamples.isEmpty())) {
         cancel(tr("Invalid managed H.265 model input"));return;
@@ -822,11 +831,15 @@ void RvAssistDepth::submitHd(const QImage &camera,const QJsonObject &source,quin
     if(!m_pending.camera.isNull()){++m_dropped;m_dropReasons["pending_superseded"]=m_dropReasons["pending_superseded"].toInt()+1;}
     // Empty auxiliary bytes mean RGB only. No all-zero synthetic ToF frame.
     m_pending={camera,{nativeSamples,source},epoch,++m_request,qint64(source["host_decoded_monotonic_ns"].toDouble()/1000000.)};
+    m_pending.planarInput=preparedInput;
     if(RvCameraView::isUniDepthNative16(m_hostModel))m_pending.tof.metadata["assist_host_model"]=m_hostModel;
     m_pending.tof.metadata["assist_input_rotation_degrees"]=m_inputRotation;
     if(isUniDepth(m_hostModel))m_pending.tof.metadata["assist_experiment"]=m_experiment;
     if(isUniDepth(m_hostModel))m_pending.tof.metadata["assist_diagnostic_capture"]=true;
-    if(tofDriven()||reuse)m_pending.tof.metadata["host_pair_enqueued_ms"]=double(monotonicMs());
+    if(tofDriven()||reuse){
+        const double now=double(monotonicMs());const auto paired=source.value("host_pair_enqueued_ms");
+        m_pending.tof.metadata["host_pair_enqueued_ms"]=paired.isDouble()&&paired.toDouble()>=0&&paired.toDouble()<=now?paired.toDouble():now;
+    }
     if(m_process.state()==QProcess::NotRunning)startWorker();
     else if(m_ready&&!m_busy)sendLatest();
 }
@@ -904,7 +917,7 @@ void RvAssistDepth::sendLatest() {
         {"epoch",double(m_current.epoch)},{"metadata",m_current.tof.metadata},{"host_model",m_hostModel}};
 
     QElapsedTimer serialize;serialize.start();
-    const auto bytes=packet(request,planarRgb(m_current.camera),m_current.tof.samples);
+    const auto bytes=packet(request,m_current.planarInput.isEmpty()?planarRgb(m_current.camera):m_current.planarInput,m_current.tof.samples);
     m_current.serializeMs=serialize.nsecsElapsed()/1e6;
     m_busy=true;
     if(m_process.write(bytes)!=bytes.size()) {fail(tr("Cannot send paired frame to host depth process"));return;}
@@ -1276,6 +1289,21 @@ int runRvInferenceProbe(const QString &backend,const QString &reportPath) {
 }
 
 int runRvAssistDepthTests(const QString &reportPath) {
+    // Guard exact model tensor bytes, including padded RGB rows and 180 degree
+    // input orientation, independently of worker/backend floating point work.
+    for(const auto size:{QSize(672,504),QSize(7,5)}){
+        QImage rgb(size,QImage::Format_RGB888);
+        for(int y=0;y<size.height();++y){auto *row=rgb.scanLine(y);
+            for(int x=0;x<size.width();++x)for(int c=0;c<3;++c)row[3*x+c]=uchar((x*3+y*7+c*59)%256);}
+        for(const auto &image:{rgb,rgb.flipped(Qt::Horizontal|Qt::Vertical),rgb.convertToFormat(QImage::Format_ARGB32)}){
+            const auto converted=image.convertToFormat(QImage::Format_RGB888);
+            const auto tensor=RvAssistDepth::preparePlanarInput(image);
+            const int pixels=size.width()*size.height();
+            if(tensor.size()!=3*pixels)return 3;
+            for(int c=0;c<3;++c)for(int y=0;y<size.height();++y)for(int x=0;x<size.width();++x)
+                if(quint8(tensor[c*pixels+y*size.width()+x])!=converted.constScanLine(y)[3*x+c])return 3;
+        }
+    }
     RvAssistDepth assist;
     const auto &profile=RvCameraView::Rgb672VgaFp16;
     QEventLoop loop;

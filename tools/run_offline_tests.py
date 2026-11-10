@@ -42,6 +42,7 @@ def arguments():
     parser.add_argument('--configuration', choices=('Release', 'Debug'), required=True)
     parser.add_argument('--qt-root', type=Path, required=True)
     parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--executable', type=Path, help='Optional isolated build of the same desktop application')
     parser.add_argument('--local-runtime', action='store_true')
     parser.add_argument('--flags', nargs='+', choices=OFFLINE_FLAGS, default=OFFLINE_FLAGS)
     return parser
@@ -50,7 +51,7 @@ def arguments():
 def main():
     args = arguments().parse_args()
     root = Path(__file__).resolve().parents[1]
-    executable = root / 'x64' / args.configuration / '触想工作台.exe'
+    executable = args.executable.resolve() if args.executable else root / 'x64' / args.configuration / '触想工作台.exe'
     if not executable.is_file():
         raise SystemExit('Build the requested configuration first: ' + str(executable))
     output = args.output.resolve()

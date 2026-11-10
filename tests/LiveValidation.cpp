@@ -25,6 +25,7 @@
 #include <QSaveFile>
 #include <QTimer>
 #include <QScopeGuard>
+#include <QMap>
 #include <algorithm>
 #include <cmath>
 
@@ -187,6 +188,7 @@ static int runHostLiveValidation(SensorMainWindow &window,const QString &path,bo
         auto *canvas=host;QObject context;
         int frames=0,positiveFrames=0,painted=0,videos=0,native=0,photon=0,paired=0,reused=0,corrected=0,unpaired=0,historical=0;bool invalid=false,measuring=false;
         double maximumPairDelta=0;QVector<double> inference,total;
+        QMap<QString,QVector<double>> performance;
         QString error,generation; qint64 lastId=-1,lastPaint=-1;QJsonObject last;QVector<double> npu,contour,compute,sourcePublish;QJsonArray windows;
         int info10=0;double firstPublish=-1,lastPublish=-1,firstCount=0,lastCount=0;
         qint64 nativeSequence=0,nativeTimestamp=0;
@@ -244,6 +246,13 @@ static int runHostLiveValidation(SensorMainWindow &window,const QString &path,bo
         QObject::connect(s,&RvSessionController::photonFrameReady,&context,[&](const RvPhotonFrame &){if(measuring)++photon;});
         canvas->performanceFramePainted=[&](const QJsonObject &m){if(measuring&&m["frame_id"].toInteger()!=lastPaint){
             lastPaint=m["frame_id"].toInteger();++painted;
+            for(const auto *key:{"host_hd_prepare_ms","host_hd_prepare_queue_ms","assist_input_prepare_ms",
+                    "assist_parent_validation_ms","assist_previous_gui_publish_ms","assist_frame_age_ms",
+                    "gui_set_depth_ms","gui_color_queue_ms","gui_color_ms","gui_paint_ms","source_to_paint_ms"}){
+                const auto value=m.value(QLatin1String(key));
+                if(value.isDouble()&&std::isfinite(value.toDouble())&&value.toDouble()>=0)
+                    performance[QLatin1String(key)].append(value.toDouble());
+            }
         }};
         auto observer=qScopeGuard([&]{canvas->performanceFramePainted={};});
         progress({{"phase","selecting"},{"scheme",scheme}});
@@ -255,8 +264,10 @@ static int runHostLiveValidation(SensorMainWindow &window,const QString &path,bo
         if(stage==0||hostOnly)s->start();
         const bool ready=waitFor([&]{return invalid||s->userStopped()||(frames>=3&&!s->busy());},95000)&&!invalid&&!s->userStopped()&&frames>=3;
         if(!ready&&error.isEmpty())error=s->detailText()+" / "+s->depthInfoText();
+        const int requestedSeconds=qEnvironmentVariableIntValue("DCTS_LIVE_SECONDS");
+        if(ready&&requestedSeconds>0)waitFor([&]{return invalid||s->userStopped();},10000);
         const int initial=frames;QElapsedTimer clock;clock.start();measuring=ready;
-        const int seconds=thermalOnly?600:30;
+        const int seconds=thermalOnly?600:std::clamp(requestedSeconds>0?requestedSeconds:30,30,300);
         int previousFrames=initial,previousPainted=0;double previousSeconds=0;
         int previousNative=0,previousPhoton=0,previousNpu=0,previousCompute=0,previousContour=0;
         int previousInference=0,previousTotal=0,previousVideos=0,previousPaired=0,previousCorrected=0,previousUnpaired=0;
@@ -287,7 +298,7 @@ static int runHostLiveValidation(SensorMainWindow &window,const QString &path,bo
             }
             windows.append(item);progress(item);if(!thermalOnly&&frames==previousFrames)fail("No fresh output in measurement window");previousFrames=frames;previousPainted=painted;previousSeconds=elapsed;
         };
-        QTimer timer;timer.setInterval(thermalOnly?1000:10000);QObject::connect(&timer,&QTimer::timeout,&context,pulse);
+        QTimer timer;timer.setInterval(thermalOnly||requestedSeconds>0?1000:10000);QObject::connect(&timer,&QTimer::timeout,&context,pulse);
         if(ready){progress({{"phase","measuring"},{"scheme",scheme},{"seconds",seconds},{"generation",generation}});timer.start();waitFor([&]{return invalid||s->userStopped();},seconds*1000);timer.stop();pulse();}
         measuring=false;const double elapsed=clock.nsecsElapsed()/1e9;
         const bool geometry=onHost||(canvas->property("depthWidth").toInt()==width&&canvas->property("depthHeight").toInt()==height&&canvas->presentationSize()==QSizeF(32,48));
@@ -303,6 +314,8 @@ static int runHostLiveValidation(SensorMainWindow &window,const QString &path,bo
         result["camera_dock_policy"]=cameraVisibility;result["camera_disabled"]=depthOnly;
         result["imaging_switch"]=s->imagingSwitchDiagnostics();
         if(onHost){result["inference"]=stats(inference);result["host_total"]=stats(total);result["paired_frames"]=paired;result["reused_native_frames"]=reused;result["dtof_corrected_frames"]=corrected;result["unpaired_frames"]=unpaired;result["historical_scale_frames"]=historical;result["maximum_pair_delta_ms"]=maximumPairDelta;result["backend"]=last["assist_backend"];result["host_model"]=last["assist_host_model"];result["graph_sha256"]=last["assist_graph_sha256"];result["tof_calibration"]=last["tof_calibration"];result["camera_mount_rotation_degrees"]=last["camera_mount_rotation_degrees"];result["input_rotation_degrees"]=last["assist_input_rotation_degrees"];}
+        QJsonObject timing;for(auto it=performance.begin();it!=performance.end();++it)timing[it.key()]=stats(it.value());
+        result["performance"]=timing;
         result["board_compute"]=stats(compute);result["source_to_publish"]=stats(sourcePublish);result["info10_outputs"]=info10;result["windows"]=windows;
         result["board_publish_fps"]=(lastPublish>firstPublish)?1000.*(lastCount-firstCount)/(lastPublish-firstPublish):0.;
         runs.append(result);report["runs"]=runs;save(path,report);progress({{"phase","mode_finished"},{"passed",pass},{"scheme",scheme}});

@@ -10,6 +10,7 @@
 #include "../sensors/RvCameraView.h"
 #include "../sensors/RtspCameraPage.h"
 #include "../sensors/RvDepthDiagnostic.h"
+#include "../sensors/RvDepthCoverage.h"
 #include "../sensors/RvDepthView.h"
 #include "../sensors/RvDeviceManagerDialog.h"
 #include "../sensors/RvUsbEnrollment.h"
@@ -47,6 +48,32 @@ int runPortSmokeTests(SensorMainWindow &window,LanguageManager &language,const Q
     QFile file(path);if(!file.open(QIODevice::WriteOnly|QIODevice::Text))return 3;
     QTextStream out(&file);bool pass=true;
     const auto check=[&](const QString &name,bool ok){out<<name<<' '<<(ok?"PASS":"FAIL")<<Qt::endl;pass&=ok;};
+    {
+        // Compare with the original public Qt conversion, especially around
+        // every hue rounding boundary and the user range/invalid-value rules.
+        bool hues=true,ranges=true;quint32 random=0x2834af17;
+        for(int i=0;i<=24000;++i)for(float offset:{-.501f,-.5f,-.499f,0.f,.499f,.5f,.501f}){
+            const float hue=std::clamp((float(i)+offset)/36000.f,0.f,2.f/3);
+            hues&=DepthColorScale::hueColor(hue)==QColor::fromHsvF(hue,1,1).rgb();
+        }
+        const auto reference=[](float metres,double lo,double hi,bool valid,bool black){
+            if(!valid||!std::isfinite(metres)||metres<=0||!std::isfinite(lo)||!std::isfinite(hi)||hi<=lo)return qRgb(0,0,0);
+            if(black&&(metres<float(lo)||metres>float(hi)))return qRgb(0,0,0);
+            return QColor::fromHsvF((1-std::clamp((double(metres)-lo)/(hi-lo),0.,1.))*2/3,1,1).rgb();
+        };
+        for(const auto range:{std::pair<double,double>{.01,3},{.01,11},{.37,2.19},{1,1},{3,1}}){
+            for(int i=0;i<100000;++i){
+                random=random*1664525u+1013904223u;
+                const float metres=(int(random>>8)-0x400000)/float(0x800000)*12;
+                for(bool black:{false,true})ranges&=DepthColorScale::color(metres,range.first,range.second,true,black)==reference(metres,range.first,range.second,true,black);
+            }
+            for(float metres:{0.f,-1.f,float(range.first),float(range.second),std::numeric_limits<float>::infinity(),std::numeric_limits<float>::quiet_NaN()})
+                for(bool valid:{false,true})for(bool black:{false,true})
+                    ranges&=DepthColorScale::color(metres,range.first,range.second,valid,black)==reference(metres,range.first,range.second,valid,black);
+        }
+        check("PALETTE_ALL_HUE_BOUNDARIES_MATCH_QT",hues);
+        check("PALETTE_RANGE_AND_INVALID_PIXELS_MATCH_QT",ranges);
+    }
     settle(900);
     const auto docks=window.findChildren<QDockWidget *>(QString(),Qt::FindDirectChildrenOnly);
     check("EXACTLY_THREE_MODULES",docks.size()==3);
@@ -296,7 +323,7 @@ int runPortSmokeTests(SensorMainWindow &window,LanguageManager &language,const Q
             for(const QPoint index:{QPoint(5,7),QPoint(39,21)}){
                 const QPointF source(index.x()+.5-24,index.y()+.5-16);
                 const QPointF point=area.center()+QPointF(-(c*source.x()-s*source.y()),s*source.x()+c*source.y())*scale;
-                geometry&=rendered.pixelColor(point.toPoint())==QColor(native->colorAt(index.x(),index.y()));
+                geometry&=rendered.pixelColor((point*rendered.devicePixelRatio()).toPoint())==QColor(native->colorAt(index.x(),index.y()));
                 QMouseEvent hover(QEvent::MouseMove,point,native->mapToGlobal(point.toPoint()),Qt::NoButton,Qt::NoButton,Qt::NoModifier);
                 QApplication::sendEvent(native,&hover);
                 const float expected=.2f+.001f*(index.y()*48+index.x());
@@ -411,6 +438,18 @@ int runPortSmokeTests(SensorMainWindow &window,LanguageManager &language,const Q
             {"assist_output_policy",policy},{"assist_camera_profile","wide"},{"assist_output_restored_to_calibrated_grid",true},
             {"assist_input_rotation_degrees",0},{"dtof_fov_correction",1},{"rectify_map_sha256",profile.mapSha},
             {"assist_graph_sha256",profile.graphSha},{"depth_K",RvCameraView::intrinsics(profile)},{"assist_fusion",fit}};
+        {
+            std::vector<float> decoded;RvDepthCoverage::DepthField field;
+            check("FUSED_DEPTH_SCAN_PRESERVES_GRID",RvDepthCoverage::decodeDepth(metres,metadata,decoded,field)
+                &&field.sourceRect==QRect(0,0,width,height)&&decoded.size()==size_t(pixels)
+                &&decoded[0]==0&&decoded[size_t(width/2)]==2);
+            auto mismatch=metadata;auto wrongFit=fit;wrongFit["fov_pixels"]=pixels/2+1;mismatch["assist_fusion"]=wrongFit;
+            check("FUSED_DEPTH_SCAN_REJECTS_MASK_COUNT",RvDepthCoverage::decodeDepth(metres,mismatch,decoded,field)&&!field.valid());
+            auto invalid=metres;qToLittleEndian<quint32>(0x7fc00000,invalid.data());
+            check("FUSED_DEPTH_SCAN_REJECTS_NONFINITE",!RvDepthCoverage::decodeDepth(invalid,metadata,decoded,field)&&decoded.empty());
+            auto wrongIdentity=metadata;wrongIdentity["assist_graph_sha256"]="wrong";
+            check("FUSED_DEPTH_SCAN_REJECTS_GRAPH_FIELD",RvDepthCoverage::decodeDepth(metres,wrongIdentity,decoded,field)&&!field.valid());
+        }
         const auto priorColoredFrames=canvas->property("coloredFrames").toULongLong();
         window.depth()->acceptAssistSnapshot(metres,metadata,{},RvTofFrame{},diagnostic);
         QElapsedTimer colorWait;
@@ -466,8 +505,8 @@ int runPortSmokeTests(SensorMainWindow &window,LanguageManager &language,const Q
             const auto rendered=canvas->grab().toImage();
             const auto area=canvas->property("presentationRect").toRectF();
             check("UNIDEPTH_DISPLAY_REMAINS_UNMIRRORED",!area.isEmpty()
-                &&rendered.pixelColor(QPointF(area.left()+area.width()/4,area.center().y()).toPoint())==QColor(canvas->colorAt(160,240))
-                &&rendered.pixelColor(QPointF(area.left()+area.width()*3/4,area.center().y()).toPoint())==QColor(canvas->colorAt(480,240))
+                &&rendered.pixelColor((QPointF(area.left()+area.width()/4,area.center().y())*rendered.devicePixelRatio()).toPoint())==QColor(canvas->colorAt(160,240))
+                &&rendered.pixelColor((QPointF(area.left()+area.width()*3/4,area.center().y())*rendered.devicePixelRatio()).toPoint())==QColor(canvas->colorAt(480,240))
                 &&!snapshot.metadata.contains("native_tof_display_mirror_horizontal"));
             const auto hasAspect=[&](int degrees,int width,int height){
                 canvas->setDisplayRotationDegrees(degrees);

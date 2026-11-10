@@ -19,7 +19,9 @@ public:
     void setEnabled(bool enabled);
     void cancel(const QString &reason);
     void submit(const QImage &camera,const RvTofFrame &tof,quint64 epoch);
-    void submitHd(const QImage &rectifiedPreview,const QJsonObject &source,quint64 epoch,const QByteArray &nativeSamples={});
+    void submitHd(const QImage &rectifiedPreview,const QJsonObject &source,quint64 epoch,const QByteArray &nativeSamples={},const QByteArray &planarInput={});
+    // Pure conversion; safe on the bounded RGB preparation worker.
+    static QByteArray preparePlanarInput(const QImage &image);
     void setInputRotationDegrees(int degrees);
     bool setHostModel(const QString &model);
     QString hostModel() const { return m_hostModel; }
@@ -46,7 +48,7 @@ signals:
     void frameRejected(const QJsonObject &metadata,const QString &reason);
 private:
     friend int runRvAssistDepthTests(const QString &reportPath);
-    struct Input {QImage camera;RvTofFrame tof;quint64 epoch=0,request=0;qint64 receivedMs=0;double serializeMs=0;};
+    struct Input {QImage camera;RvTofFrame tof;quint64 epoch=0,request=0;qint64 receivedMs=0;double serializeMs=0;QByteArray planarInput;};
     void startWorker(bool forceStaging = false);
     bool takePending();
     void sendLatest();

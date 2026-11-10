@@ -134,19 +134,16 @@ bool RvDepthView::setDepth(const QByteArray &bytes,const QJsonObject &metadata,c
         &&metadata["assist_diagnostic_payload"]=="mono_reasons_v1"&&diagnostic.size()==view.depthBytes()+2*RvDepthDiagnostic::ReasonBytes
         &&(mode=="global_scale"||mode=="held_scale"||mode=="monocular")&&fit["local_factor_limit"]==1
         &&std::isfinite(scale)&&scale>0;
-    auto values=std::make_shared<std::vector<float>>(width*height);int outside=0;
-    for(int i=0;i<width*height;++i){
-        const quint32 bits=qFromLittleEndian<quint32>(bytes.constData()+i*4);
-        std::memcpy(&(*values)[i],&bits,4);
-        if(!std::isfinite((*values)[i])){clear();return false;}
-        if(allowSides){
-            const float mono=monoPrediction(diagnostic,i,1),prediction=monoPrediction(diagnostic,i,scale);
-            if(!std::isfinite(mono)||mono<=0||!std::isfinite(prediction)||prediction<=0)allowSides=false;
-            else outside+=(*values)[i]==0;
-        }
+    auto values=std::make_shared<std::vector<float>>();int outside=0;
+    RvDepthCoverage::DepthField field;
+    if(!RvDepthCoverage::decodeDepth(bytes,metadata,*values,field)){clear();return false;}
+    for(int i=0;allowSides&&i<width*height;++i){
+        const float mono=monoPrediction(diagnostic,i,1),prediction=monoPrediction(diagnostic,i,scale);
+        if(!std::isfinite(mono)||mono<=0||!std::isfinite(prediction)||prediction<=0)allowSides=false;
+        else outside+=(*values)[i]==0;
     }
     depth=std::move(values);depthSize=QSize(width,height);held=false;coverage.clear();depthMetadata=metadata;
-    const auto field=radial?RvDepthCoverage::DepthField():RvDepthCoverage::depthField(bytes,metadata);
+    if(radial)field={};
     if(allowSides&&field.valid()&&outside){
         for(int i=view.depthBytes();i<diagnostic.size();++i)
             if(quint8(diagnostic[i])>quint8(RvAssistFusion::AlreadySupported)){allowSides=false;break;}

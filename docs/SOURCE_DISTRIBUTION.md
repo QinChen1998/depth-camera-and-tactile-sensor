@@ -1,5 +1,7 @@
 # 公开源码备份范围
 
+2026-11-10 按用户明确要求，仅将 GUI 减载与显示性能优化的脱敏源码、测试及文档提交至 `main`。本次不创建安装包、标签或 Release；已有 v1.1.7 安装包保留其原内容。模型权重和精度保持，实机对照及回归范围见 [测试记录](TESTING.md#gui-减载与实机延迟对照2026-11-10)。本地设备原件、其他未关联改动及私有运行材料继续保留在本地。
+
 公开仓库为 [QinChen1998/depth-camera-and-tactile-sensor](https://github.com/QinChen1998/depth-camera-and-tactile-sensor)。2026-11-09 按用户本次明确要求，当前脱敏源码更新到 `main`；对应 v1.1.7 发布包含 UniDepth 多后端选择、混合 INT8、当前 F6 标定与原生 ToF 两档、USB 接入修复和旧板端模型退役。安装与验证见 [v1.1.7 记录](INSTALLER_1_1_7.md)。
 
 历史 v1.1.6 源码保留在 `backup/release-v1.1.6-20261106`；已有安装包位于 [v1.1.6 Release](https://github.com/QinChen1998/depth-camera-and-tactile-sensor/releases/tag/v1.1.6)，不包含本次后续源码改动。

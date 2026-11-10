@@ -10,6 +10,7 @@
 #include <QtCore/QString>
 #include <QtGui/QImage>
 #include <deque>
+#include <memory>
 #include "RvTofFrame.h"
 #include "RvPhotonFrame.h"
 #include "RvDtofCandidates.h"
@@ -158,6 +159,8 @@ private:
     void resetQtPlayer();
     bool startVlc(const QUrl &source);
     void presentHostHdVideo();
+    void prepareHostHdFrame(const QImage&,const QJsonObject&,quint64,const QByteArray&);
+    void takeHostHdPrepared();
     void observeHostHdClock(const QJsonObject& metadata);
     void dispatchHostHdMeasurement();
     int nearestHostHdRgb(const RvTofFrame &frame,qint64 nowNs) const;
@@ -207,6 +210,8 @@ private:
     RtspVlcBackend *m_vlc = nullptr;
     RvCameraStream *m_nv12 = nullptr;
     RvHdVideoStream *m_hdVideo = nullptr;
+    struct HdPreparer;
+    std::unique_ptr<HdPreparer> m_hdPreparer;
     quint64 m_hdVideoSequence=0,m_hdOutputSequence=0;
     std::deque<RvTofFrame> m_hdNativeFrames;
     struct HdRgb {QImage image;QJsonObject source;qint64 boardNs=0;};

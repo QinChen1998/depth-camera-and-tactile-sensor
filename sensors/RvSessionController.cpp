@@ -37,6 +37,9 @@
 #include <cstring>
 #include <algorithm>
 #include <chrono>
+#include <condition_variable>
+#include <optional>
+#include <thread>
 #include <limits>
 
 namespace {
@@ -267,6 +270,52 @@ QJsonObject RvSessionController::videoDiagnostics(bool counters) const
     }
     return result;
 }
+
+// Immutable, capture-paired inputs; one pending frame and one GUI notification.
+// Slow CPU preprocessing cannot accumulate a queue or change native pairing.
+struct RvSessionController::HdPreparer {
+    struct Job {QImage image;QJsonObject source;QByteArray native;quint64 epoch=0;qint64 queuedNs=0;quint64 cancellation=0;};
+    struct Result {Job input;QImage preview;QByteArray planar;QString error;};
+    explicit HdPreparer(RvSessionController *value):owner(value),worker([this]{run();}){}
+    ~HdPreparer(){
+        {std::lock_guard<std::mutex> lock(mutex);stopping=true;pending.reset();}
+        wake.notify_one();worker.join();
+    }
+    void submit(Job job){{std::lock_guard<std::mutex> lock(mutex);job.cancellation=cancellation;pending=std::move(job);}wake.notify_one();}
+    void cancel(){std::lock_guard<std::mutex> lock(mutex);++cancellation;pending.reset();completed.reset();}
+    std::optional<Result> take(){
+        std::lock_guard<std::mutex> lock(mutex);notificationQueued=false;
+        auto result=std::move(completed);completed.reset();return result;
+    }
+    void run(){
+        for(;;){
+            Job job;
+            {std::unique_lock<std::mutex> lock(mutex);wake.wait(lock,[this]{return stopping||pending.has_value();});
+             if(stopping)return;job=std::move(*pending);pending.reset();}
+            Result result;result.input=std::move(job);
+            try{
+                result.input.source["host_hd_prepare_queue_ms"]=(RvHdVideoStream::nowNs()-result.input.queuedNs)/1e6;
+                QElapsedTimer clock;clock.start();
+                result.preview=RvCameraStream::prepareHd(result.input.image,RvCameraStream::hdVgaCalibration());
+                result.input.source["host_hd_prepare_ms"]=clock.nsecsElapsed()/1e6;
+                clock.restart();result.planar=RvAssistDepth::preparePlanarInput(result.preview);
+                result.input.source["assist_input_prepare_ms"]=clock.nsecsElapsed()/1e6;
+            }catch(const std::exception &error){result.error=QString::fromUtf8(error.what());}
+            result.input.image={};
+            bool notify=false;
+            {std::lock_guard<std::mutex> lock(mutex);if(stopping)return;
+             if(result.input.cancellation!=cancellation)continue;
+             completed=std::move(result);notify=!notificationQueued;notificationQueued=true;}
+            if(notify)QMetaObject::invokeMethod(owner,[view=owner]{view->takeHostHdPrepared();},Qt::QueuedConnection);
+        }
+    }
+    RvSessionController *owner;
+    std::mutex mutex;std::condition_variable wake;
+    std::optional<Job> pending;std::optional<Result> completed;
+    bool stopping=false,notificationQueued=false;
+    quint64 cancellation=0;
+    std::thread worker;
+};
 
 RvSessionController::RvSessionController(QObject *parent,const QString &deviceStorePath)
     : QObject(parent)
@@ -586,6 +635,7 @@ RvSessionController::~RvSessionController()
     // QObject destroys children after member timers. Tear down every callback
     // source first so process/media/network completion cannot enter dead timers.
     m_destroying = true;
+    m_hdPreparer.reset();
     delete m_tuner;m_tuner=nullptr;
     m_recoveryDisplayTimer.stop(); m_recoveryDisplayTimer.disconnect(this);
     m_nativeDepthExpiry.stop();m_assistExpiry.stop();m_assistExpiry.disconnect(this);
@@ -1591,6 +1641,7 @@ void RvSessionController::stopVlc(bool retainBoardReceiver)
 
 void RvSessionController::clearCurrentFrame(const QString &reason)
 {
+    if(m_hdPreparer)m_hdPreparer->cancel();
     m_videoFps = 0;
     m_nativeDepthExpiry.stop();m_assistExpiry.stop();
     if(m_assist)m_assist->cancel(reason);
@@ -1704,6 +1755,25 @@ void RvSessionController::dispatchHostHdMeasurement()
     m_assist->submitHd(nearest->image,source,m_presentationEpoch,raw.samples);
 }
 
+void RvSessionController::prepareHostHdFrame(const QImage &image,const QJsonObject &source,quint64 epoch,const QByteArray &native)
+{
+    if(!m_hdPreparer)m_hdPreparer=std::make_unique<HdPreparer>(this);
+    const auto now=RvHdVideoStream::nowNs();auto paired=source;
+    paired["host_pair_enqueued_ms"]=double(now/1000000);
+    m_hdPreparer->submit({image,paired,native,epoch,now});
+}
+void RvSessionController::takeHostHdPrepared()
+{
+    if(!m_hdPreparer)return;
+    auto result=m_hdPreparer->take();
+    if(!result||m_destroying||m_userStopped||m_controlPending||m_transitioning||!m_assist
+        ||!assistDepthEnabled()||!hostHdAssist()||result->input.epoch!=m_presentationEpoch
+        ||result->input.source["source_generation"]!=m_dtofToken
+        ||result->input.source["boot_id"]!=m_dtofReceipt["boot_id"]
+        ||!RvCameraView::isUniDepthVga(assistHostModel()))return;
+    if(!result->error.isEmpty()){failPreviewControl(result->error);return;}
+    m_assist->submitHd(result->preview,result->input.source,result->input.epoch,result->input.native,result->planar);
+}
 void RvSessionController::presentHostHdVideo()
 {
     if(!m_hdVideo||!m_dtofStream||m_userStopped||m_controlPending||m_transitioning)return;
@@ -1741,7 +1811,8 @@ void RvSessionController::presentHostHdVideo()
         const auto &calibration=RvCameraView::isUniDepthVga(model)?RvCameraStream::hdVgaCalibration():RvCameraStream::hdCalibration(wide);
         if(RvCameraView::isUniDepthVga(model))
             RvCameraStream::require(calibration.sha256()==view.mapSha,"HD model calibration fingerprint mismatch");
-        QElapsedTimer prepare;prepare.start();const auto preview=RvCameraStream::prepareHd(s.image,calibration);
+        const bool background=m_assist->reusesNativeMeasurements()&&RvCameraView::isUniDepthVga(model);
+        QElapsedTimer prepare;prepare.start();const auto preview=background?QImage():RvCameraStream::prepareHd(s.image,calibration);
         QJsonObject source{{"source_protocol","HDA1"},{"source_transport","rtsp_h265"},
             {"source_rgb_width",2304},{"source_rgb_height",1296},{"rgb_width",view.inputWidth},{"rgb_height",view.inputHeight},
             {"camera_mount_rotation_degrees",m_device.cameraMountRotation},{"camera_coordinate_frame","calibrated_reference"},
@@ -1791,7 +1862,8 @@ void RvSessionController::presentHostHdVideo()
                 samples=latest->samples;
             }
             m_currentMetadata=source;setProperty("rvFrameId",sourceSequence);
-            m_assist->submitHd(preview,source,epoch,samples);
+            if(background)prepareHostHdFrame(s.image,source,epoch,samples);
+            else m_assist->submitHd(preview,source,epoch,samples);
         }else{
         // RTCP supplies the reference for the decoded packet, rather than PC
         // arrival. One frame interval (35 ms) is reserved for timestamp/exposure
@@ -1830,8 +1902,8 @@ void RvSessionController::presentHostHdVideo()
 
 void RvSessionController::presentVlcFrame()
 {
-    // Poll the opt-in RGB576 latest-frame mailbox promptly. A sequence is
-    // still consumed once; no duplicated input or catch-up queue is created.
+    // Poll the bounded latest-frame mailbox promptly without duplicating
+    // inputs or creating a catch-up queue.
     const int pollMs=(hostHdAssist()&&assistDepthEnabled()&&RvCameraView::profile(assistHostModel()).networkProfile?5:15);
     if(m_frameTimer.interval()!=pollMs)m_frameTimer.setInterval(pollMs);
     if (m_userStopped || m_controlPending || m_transitioning) return;
