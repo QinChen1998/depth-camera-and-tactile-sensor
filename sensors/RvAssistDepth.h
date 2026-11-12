@@ -36,7 +36,7 @@ public:
 signals:
     void inferenceUnavailable(const QString &explanation,const QString &detail);
     void loadingStateChanged(int state); // 0 stopped/failed, 1 loading, 2 ready
-    void resultReady(const QByteArray &depth,const QJsonObject &metadata,const QImage &camera,quint64 epoch,const RvTofFrame &tof=RvTofFrame(),const QByteArray &diagnostic=QByteArray(),const QImage &inferenceInput=QImage());
+    void resultReady(const QByteArray &depth,const QJsonObject &metadata,const QImage &camera,quint64 epoch,const QByteArray &diagnostic={});
     void cleared(const QString &reason);
     void statusChanged(const QString &status);
     void frameRejected(const QJsonObject &metadata,const QString &reason);

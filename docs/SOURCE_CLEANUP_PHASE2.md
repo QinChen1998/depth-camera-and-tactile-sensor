@@ -28,7 +28,7 @@
 
 `tools/litesr_board/native/runtime/Contour512.h` 是冻结板端采集源码的内部编译依赖，继续保留；它不恢复主机 512 方案。
 
-板端 28 份副本的原路径与唯一来源见 [移动对应表](../../dToF/output/litesr_depth_only_20261106_v1/retired_host_assets/x64/validation/source_cleanup_phase2_20261105/board-source-moves.json)。新增公共目录 `tools/litesr_board/common/`，现有根目录 `Contour.h`、`ContourGrid.inc` 复用为唯一来源。统一入口和四个目标的参数见 [板端构建](../tools/litesr_board/README.md)。
+板端 28 份副本的原路径与唯一来源见 [移动对应表](../../dToF/output/litesr_depth_only_20261106_v1/retired_host_assets/x64/validation/source_cleanup_phase2_20261105/board-source-moves.json)。新增公共目录 `tools/litesr_board/common/`，现有根目录 `Contour.h`、`ContourGrid.inc` 复用为唯一来源。历史四个构建目标对应本节记录。现行入口见 [原生采集与构建](../tools/rv_capture/README.md)。
 
 三份 STEP 的原/新路径与哈希见 [CAD 移动记录](../../dToF/output/litesr_depth_only_20261106_v1/retired_host_assets/x64/validation/source_cleanup_phase2_20261105/cad-moves.json)。来源入口为 [CAD 说明](../archives/cad/tactile/README.md) 和 [布局来源索引](../models/tactile/surface_layouts.json)，目录相对 JSON 所在目录解析。
 

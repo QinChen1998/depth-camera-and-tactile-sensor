@@ -187,10 +187,6 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="tools\rv_capture\build.sh" />
-    <None Include="tools\rv_capture\pack_litesr.py" />
-    <None Include="tools\rv_capture\payload\model-switch.sh" />
-    <ClInclude Include="tools\litesr_board\Contour.h" />
-    <None Include="tools\litesr_board\ContourGrid.inc" />
   </ItemGroup>
   <ItemGroup>
     <None Include="tools\rv_capture\StatusPolicy.h" />

@@ -1,4 +1,4 @@
-"""Frozen G parity and B ToF reuse tests without device or network access."""
+"""B model parity and ToF reuse tests without device or network access."""
 import argparse
 import hashlib
 import json
@@ -46,19 +46,13 @@ def build_cases(root, profile):
         for variant,z in enumerate((.25,.6,1.2)):
             add(f'f6_r{rotation}_image{variant}',rotation,native_plane(root,cols,rows,6,z),images[variant])
     for delta in (165.,-165.,165.001,-165.001):
-        m=add(f'G_pair_delta_{delta}',accepted=abs(delta)<=165.)['metadata']
+        m=add(f'B_pair_delta_{delta}',accepted=abs(delta)<=165.)['metadata']
         m.update(pair_delta_ms=delta,rgb_timestamp_ns=m['tof_timestamp_ns']-round(delta*1e6))
 
-    first=add('G_fresh_native',epoch=100)['metadata']
-    for explicit_reuse in (False,True):
-        m=add(f'G_duplicate_native_rejected_{explicit_reuse}',epoch=100,accepted=False)['metadata']
-        for key in ('tof_sequence','tof_timestamp_ns','rgb_timestamp_ns'):
-            m[key]=first[key]
-        m['tof_reused']=explicit_reuse
-
-    remove_native(add('G_rgb_only_uses_last_scale',native=b'',epoch=100,uncorrected=True,
+    first=add('B_fresh_native',epoch=100)['metadata']
+    remove_native(add('B_rgb_only_uses_last_scale',native=b'',epoch=100,uncorrected=True,
                       held_scale=True,reference_frame=first['frame_id'])['metadata'])
-    remove_native(add('G_rgb_only_new_epoch',native=b'',uncorrected=True)['metadata'])
+    remove_native(add('B_rgb_only_new_epoch',native=b'',uncorrected=True)['metadata'])
 
     for fault in ('wrong_grid','missing_fov','conflicting_fov','bad_rotation','invalid_bit','warning','low_snr'):
         case=add(fault,accepted=fault=='low_snr',uncorrected=fault=='low_snr')
@@ -76,16 +70,16 @@ def build_cases(root, profile):
     return cases
 
 
-def build_reuse_cases(profile, g_cases):
-    first_rgb, next_rgb = (case['rgb'] for case in g_cases[:2])
-    native = g_cases[0]['native']
+def build_reuse_cases(profile, base_cases):
+    first_rgb, next_rgb = (case['rgb'] for case in base_cases[:2])
+    native = base_cases[0]['native']
     cases = []
 
     def add(name, *, sequence=1, reused=True, delta=-33., epoch=1, rgb=next_rgb,
             samples=native, timestamp_shift=0, accepted=True, **expectations):
         m = metadata(len(cases)+1, 6, 0, profile, epoch)
         tof_ns = 1_000_000_000 + sequence*67_000_000 + timestamp_shift
-        m.update(assist_experiment='B', tof_sequence=sequence, tof_reused=reused,
+        m.update(tof_sequence=sequence, tof_reused=reused,
                  tof_timestamp_ns=tof_ns, rgb_timestamp_ns=tof_ns-round(delta*1e6), pair_delta_ms=delta)
         cases.append(dict(name=name,metadata=m,native=samples,rgb=rgb,accepted=accepted,epoch=epoch,**expectations))
         return m
@@ -171,7 +165,7 @@ def main():
         assert code!=0 and not packets,('Removed worker model accepted',retired_model)
     removed=[dict(cases[0],name=f'{experiment}_removed',
                   metadata=dict(cases[0]['metadata'],assist_experiment=experiment),accepted=False)
-             for experiment in ('A','H','I')]
+             for experiment in ('A','G','H','I')]
     code,packets,_=exchange(args.executable,root,candidate_runtime,model,removed,env)
     assert code==0 and len(packets)==len(removed)+1
     assert all(header.get('error') and not depth and not diagnostic for header,depth,diagnostic in packets[1:]), \
@@ -180,7 +174,7 @@ def main():
     reuse_cases=build_reuse_cases(profile,cases)
     reuse,b_hashes=check_batch(args.executable,root,candidate_runtime,model,reuse_cases,env,args.output/'reuse_b')
     first_b=b_hashes['B_first_measurement']
-    assert first_b==hashes[cases[0]['name']], 'B first pair differs from G for the same input'
+    assert first_b==hashes[cases[0]['name']], 'B first pair differs from the independent B case'
     assert first_b==b_hashes['B_new_epoch_starts_fresh'], 'B reused the previous epoch scale'
     assert first_b['model_mono']!=b_hashes['B_reuse_for_new_rgb']['model_mono'], 'B replayed the previous RGB'
     fits={result['case']:result.get('measured_scale') for result in reuse['cases'] if result['accepted']}

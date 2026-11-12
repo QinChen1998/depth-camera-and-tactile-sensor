@@ -6,7 +6,7 @@ param(
     [string]$VlcRoot='',
     [string]$TensorRtRuntime='',
     [string]$CompatibleRuntime='',
-    [string]$Version='1.1.7',
+    [string]$Version='1.1.8',
     [switch]$StageOnly,
     [string]$Iscc='',
     [string]$ChineseMessages='',
@@ -25,6 +25,8 @@ $payload=Join-Path $work 'payload'
 $exe='触想工作台.exe'
 $desktopFiles=@($exe,'DctsInferenceWorker.exe')
 $imagingSchemes=(Get-Content -LiteralPath (Join-Path $project 'DCTS_APP.json') -Raw | ConvertFrom-Json).imaging_schemes
+$expectedImagingSchemes='host_unidepth_rgb672_vga_fp16_tof48_b','board_native_tof48','board_native_tof48_high_accuracy'
+if(($imagingSchemes -join ',') -cne ($expectedImagingSchemes -join ',')){throw 'Unsupported desktop imaging menu.'}
 $desktopReceipt=Join-Path $work 'desktop-imaging.json'
 
 function Invoke-Native([string]$Program,[string[]]$Arguments){
@@ -46,6 +48,31 @@ function Write-Json([string]$Path,$Value){
     $Value | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $Path -Encoding utf8NoBOM
 }
 
+function Assert-BoardCapturePayload([string]$Worker,$WorkerManifest){
+    $boardImport=Get-Content -LiteralPath (Join-Path $Worker 'board-import.json') -Raw | ConvertFrom-Json -AsHashtable
+    $expectedCapture=@('rv_capture/dtof-host.sh','rv_capture/native_gui.sh','rv_capture/native-fov6.bin')
+    $captureFiles=@($WorkerManifest.payload_files.Keys | Where-Object {$_ -like 'rv_capture/*'})
+    if($WorkerManifest.transport_test_fixture -or ($boardImport.supported_capture_modes -join ',') -ne '14,24,25' -or
+       $boardImport.models_required -ne $false -or $captureFiles.Count -ne $expectedCapture.Count -or
+       @($expectedCapture | Where-Object {$captureFiles -cnotcontains $_}).Count){
+        throw 'The board capture payload does not match the desktop imaging menu.'
+    }
+    $boardFiles=@($WorkerManifest.payload_files.Keys | Where-Object {$_ -match '^(rv_capture|rv1103_bootstrap|dtof_tuner)/'})
+    if($boardImport.files.Count -ne $boardFiles.Count){throw 'The board import file list is incomplete.'}
+    foreach($name in $boardFiles){
+        $file=Join-Path $Worker $name
+        if($boardImport.files[$name] -cne $WorkerManifest.payload_files[$name] -or
+           !(Test-Path -LiteralPath $file -PathType Leaf) -or (Digest $file) -cne $boardImport.files[$name]){
+            throw "Board import fingerprint mismatch: $name"
+        }
+    }
+    $captureRoot=Join-Path $Worker 'rv_capture'
+    foreach($file in Get-ChildItem -LiteralPath $captureRoot -File -Recurse){
+        $relative=[IO.Path]::GetRelativePath($Worker,$file.FullName).Replace('\','/')
+        if($expectedCapture -cnotcontains $relative){throw "Unexpected capture payload: $relative"}
+    }
+}
+
 if($UseStagedPayload){
     if(-not (Test-Path -LiteralPath $desktopReceipt -PathType Leaf)){
         throw 'Stage the desktop from current source before reusing this payload.'
@@ -60,6 +87,9 @@ if($UseStagedPayload){
             throw "Staged desktop fingerprint mismatch: $name"
         }
     }
+    $stagedWorker=Join-Path $payload 'rv_control'
+    $stagedWorkerManifest=Get-Content -LiteralPath (Join-Path $stagedWorker 'implementation.json') -Raw | ConvertFrom-Json -AsHashtable
+    Assert-BoardCapturePayload $stagedWorker $stagedWorkerManifest
 }
 
 if(-not $UseStagedPayload){
@@ -101,7 +131,7 @@ if(-not $UseStagedPayload){
     foreach($table in $workerManifest.dependencies,$workerManifest.payload_files){
         foreach($name in $table.Keys){$workerFiles[$name]=$table[$name]}
     }
-    if($workerManifest.transport_test_fixture){throw 'Refusing a test fixture as the runtime worker.'}
+    Assert-BoardCapturePayload $worker $workerManifest
     foreach($name in $workerFiles.Keys){
         Copy-Relative $worker $workerPayload $name
         if((Digest (Join-Path $workerPayload $name)) -ne $workerFiles[$name]){throw "Worker fingerprint mismatch: $name"}

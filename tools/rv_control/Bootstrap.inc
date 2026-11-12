@@ -94,9 +94,6 @@ UsbRuntimePlan usbRuntimePlan(Connection &connection, const QDir &runtime)
     files.append({"depth/spi_native16.enabled",device.serial.toLatin1()+"\n",false});
     files.append({"candidate/native_hd_gui",capture.nativeCapture,true});
     files.append({"candidate/native_gui.sh",capture.launcher,true});
-    files.append({"candidate/model-switch.sh",capture.switcher,true});
-    if(bundledLiteSr)for(const auto &asset:liteSrAssets)
-        files.append({QString("candidate/")+asset.boardName,boardPayload(QString("litesr/")+asset.name),asset.executable});
     for(const auto &name:{"session.sh","tmf8829_tuner","bounded_log.awk","LICENSE-MIT.TXT","provenance.json"})
         files.append({QString("tuner/")+name,readFile(runtime.filePath(QString("dtof_tuner/")+name)),QString(name)=="session.sh"||QString(name)=="tmf8829_tuner"});
     const auto boardPath=[](const QString &relative){
@@ -110,6 +107,7 @@ UsbRuntimePlan usbRuntimePlan(Connection &connection, const QDir &runtime)
     for(const auto &file:files)checks+=QString("check %1 %2 %3\n").arg(shellQuote(boardPath(file.relative)),tunerHash(file.bytes),file.executable?"1":"0");
     checks+=QString("if [ -e /root/rv1103_mw_spi/bin/tof_driver ] || [ -L /root/rv1103_mw_spi/bin/tof_driver ]; then check /root/rv1103_mw_spi/bin/tof_driver %1 1; fi\n").arg(capture.driverSha);
     checks+="for path in /root/r144_depth /root/dtof_candidates_20261009 /root/dtof_tuner /root/rv1103_mw_spi /root/rv1103_mw_spi/bin; do [ ! -L \"$path\" ] || ready=0; done\n"
+        "for name in model-switch.sh litesr_near_gui litesr-near-256.dctsm librknnmrt.so libcrypto.so.1.1; do path=/root/dtof_candidates_20261009/$name; { [ ! -e \"$path\" ] && [ ! -L \"$path\" ]; } || ready=0; done\n"
         "grep -q '^[[:space:]]*\\[ ! -f /root/r144_depth/spi_native16.enabled \\] || return 0$' /oem/usr/bin/RkLunch.sh || ready=0\nprintf '%s\\n' \"$ready\"\n";
     return plan;
 }
@@ -161,7 +159,7 @@ bool ensureUsbRuntime(Ssh &connection, const QDir &runtime, const QString &boot)
             manifest+=tunerHash(file.bytes).toLatin1()+"  "+file.relative.toLatin1()+"\n";
         }
         upload("files.sha256",manifest,false);
-        phase="board preflight, capture and LiteSR verification, activation";
+        phase="board preflight, native capture verification and activation";
         const auto capabilities=QJsonDocument::fromJson(connection.execute(command("activate"),75000,setup)).object();
         require(nativeCaptureCapabilities(capabilities,device.fov()),
             "Installed board capture capabilities differ from the bundled runtime");
@@ -221,13 +219,8 @@ QJsonArray usbRuntimeInspectionSelfTest()
     check("usb_inspection_checks_every_installation_asset",hashes&&total==paths.size()&&total>=20);
     for(const auto &path:QStringList{"S99zdepth","depth/service.sh","depth/M48_geometry.bin",
             "candidate/session.sh","candidate/native_hd_gui","candidate/native_gui.sh",
-            "candidate/model-switch.sh",
             "tuner/session.sh","tuner/tmf8829_tuner","tuner/provenance.json"})
         check("usb_inspection_covers_"+path,paths.contains(path));
-    for(const auto &asset:liteSrAssets){
-        const auto path=QString("candidate/")+asset.boardName;
-        check("usb_model_plan_"+path,paths.contains(path)==bundledLiteSr);
-    }
     check("usb_inspection_preserves_saved_sensor_settings",preserved);
     check("usb_inspection_checks_factory_startup_and_symlinks",plan.checks.contains("RkLunch.sh")&&plan.checks.contains("[ ! -L"));
     check("usb_inspection_issues_no_installation_commands",!fixture.checks.contains("mkdir ")

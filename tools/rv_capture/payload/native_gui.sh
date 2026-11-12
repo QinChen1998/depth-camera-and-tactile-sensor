@@ -13,4 +13,4 @@ for file in /root/r144_depth/camera_rtsp_config.awk /root/r144_depth/no_route_mo
  [ -s "$file" ] || { echo 'Missing managed H.265 asset' >&2; exit 2; }
 done
 [ "$action" = serve ] || exit 0
-exec "$binary" gui '' "$@"
+exec "$binary" gui "$@"

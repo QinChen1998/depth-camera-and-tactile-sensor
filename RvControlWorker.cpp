@@ -46,7 +46,6 @@ bool factoryLogin = false;
 bool pinSelectedProfile = false;
 bool automaticCameraStart = false;
 bool unattendedUsbLogin = false;
-bool bundledLiteSr = false;
 QByteArray observedKey;
 #ifdef RV_CONTROL_TRANSPORT_TEST
 // Compiled only into the isolated formal localhost test image. Its manifest
@@ -99,25 +98,14 @@ constexpr struct BootstrapAsset { const char *name; const char *destination; boo
     {"tof_driver", "depth/tmf8829_ext", true},
     {"S99zdepth", "S99zdepth", true},
 };
-constexpr struct LiteSrAsset { const char *name; const char *boardName; bool executable; } liteSrAssets[] = {
-    {"litesr-fov6.bin", "litesr_near_gui", true},
-    {"litesr-near-256.dctsm", "litesr-near-256.dctsm", false},
-    {"librknnmrt.so", "librknnmrt.so", false},
-    {"libcrypto.so.1.1", "libcrypto.so.1.1", false},
-};
 void resources(const QDir &root) {
     const auto info = QJsonDocument::fromJson(readFile(root.filePath("implementation.json"))).object();
     require(info["implementation"] == Implementation && info["executable"] == "RvControlWorker.exe"
         && info["executable_sha256"].toString() == sha(QCoreApplication::applicationFilePath()), "Native RV implementation fingerprint mismatch");
     const auto dlls = info["dependencies"].toObject(), files = info["payload_files"].toObject();
     require(dlls.contains("libssh2.dll") && dlls.contains("libcrypto-3-x64.dll") && files.contains("known_hosts"), "Native SSH closure missing");
-    for(const auto *name:{"native_gui.sh","dtof-host.sh","model-switch.sh","native-fov6.bin"})
+    for(const auto *name:{"native_gui.sh","dtof-host.sh","native-fov6.bin"})
         require(files.contains(QString("rv_capture/")+name),"Native capture payload missing from the runtime manifest");
-    size_t liteSrFiles=0;
-    for(const auto &asset:liteSrAssets)liteSrFiles+=files.contains(QString("rv_capture/litesr/")+asset.name);
-    require(!liteSrFiles||liteSrFiles==std::size(liteSrAssets),"Incomplete LiteSR payload in the runtime manifest");
-    bundledLiteSr=liteSrFiles!=0;
-
     for(const auto *name:{"calibration.json","intrinsics.json","extrinsics.json","projection.bin","M48_geometry.bin","manifest.json","host_contract.json"})
         require(files.contains(QString("rv1103_bootstrap/calibration/")+name),"Calibration import payload missing");
     require(files.contains("rv1103_bootstrap/install.sh"), "RV1103 setup script missing from the runtime manifest");
@@ -380,13 +368,6 @@ Configuration coordinatorConfiguration(Configuration c,bool legacy) {
     }
     return c;
 }
-QString coordinatorCandidateAction(const QString &flag,bool legacy) {
-    if(legacy) {
-        require(flag!="--recover-stream-fault","Old RV has no automatic fault recovery; fault and ownership locks are preserved");
-        return "candidate";
-    }
-    return flag.isEmpty()?"candidate":flag=="--recover-fault"?"recover-candidate":"auto-candidate";
-}
 QByteArray withAutomaticTof(QByteArray session);
 QJsonArray boardPreparationSelfTest();
 QJsonArray usbRuntimeInspectionSelfTest();
@@ -430,10 +411,8 @@ QJsonObject selfTest(const QByteArray &known) {
         &&!command(coordinatorConfiguration(oldStart,true)).contains("recover-legacy"));
     auto oldAuto=c;oldAuto.recoverStreamFault=true;
     check("old_profile_automatic_recovery_fails_closed",rejects([&]{coordinatorConfiguration(oldAuto,true);}));
-    check("old_profile_candidate_manual_uses_guarded_candidate",coordinatorCandidateAction("--recover-fault",true)=="candidate");
-    check("old_profile_candidate_auto_recovery_fails_closed",rejects([&]{coordinatorCandidateAction("--recover-stream-fault",true);}));
     check("new_profile_retains_manual_and_automatic_recovery",coordinatorConfiguration(oldStart,false).recoverFault
-        &&coordinatorConfiguration(oldAuto,false).recoverStreamFault&&coordinatorCandidateAction("--recover-fault",false)=="recover-candidate");
+        &&coordinatorConfiguration(oldAuto,false).recoverStreamFault);
     check("configuration_validated_before_io", rejects([&] { auto bad = c; bad.method = "none; reboot"; command(bad); }));
     check("ordinary_configure_never_recovers_fault", !command(c).contains("recover-legacy"));
     auto recovering = c; recovering.recoverFault = true;
@@ -601,11 +580,11 @@ int run(const QStringList &input) {
         const bool checkOnly=args[1]=="--check-usb-enrollment";
         require(qEnvironmentVariable("RV_TEST_OFFLINE_ONLY")!="1","USB enrollment is unavailable in offline mode");
         const auto requested=RvDeviceProfile::fromJson(QJsonDocument::fromJson(args[2].toUtf8()).object());
-        require(requested.host=="172.32.0.93"&&requested.sshPort==22&&requested.ready()&&requested.legacyCoordinator,"Invalid USB enrollment profile");
+        require(requested.host=="172.32.0.93"&&requested.sshPort==22&&requested.ready(),"Invalid USB enrollment profile");
         if(deviceStore) {
             auto saved=device;saved.host=requested.host;saved.sshPort=requested.sshPort;
-            if(saved.fov()==0)saved.calibration=requested.calibration;
-            if(saved.inputRotation<0) { saved.inputRotation=0;saved.cameraMountRotation=180; }
+            saved.calibration=QLatin1String(RvCalibration::Id);saved.temporaryFovCalibration=false;
+            if(saved.inputRotation<0) { saved.inputRotation=0;saved.cameraMountRotation=0; }
             require(saved.json()==requested.json(),"USB identity or saved calibration changed before connection");
             pinSelectedProfile=true;
             unattendedUsbLogin=true;
@@ -625,7 +604,7 @@ int run(const QStringList &input) {
                 "USB and SSH identify different board sessions");
             if(checkOnly) {
                 bool matches=false;
-                try { matches=usbRuntimeMatches(connection,root); }
+                try { if(usbRuntimeMatches(connection,root)){candidateRecoveryCapability(connection);matches=true;} }
                 catch(const std::exception &) { /* An incomplete payload requires the setup path. */ }
                 const auto receipt=QJsonDocument(QJsonObject{{"verified",true},{"runtime_matches",matches},
                     {"serial",device.serial},{"boot_id",boot}}).toJson(QJsonDocument::Compact);
@@ -644,6 +623,7 @@ int run(const QStringList &input) {
             require(modelState=="ready"&&tofState=="ready","USB runtime did not pass verification");
             if(readingSerial)connection.rememberSerialLogin(device.serial);
             const auto receipt=QJsonDocument(QJsonObject{{"verified",true},{"capture_runtime",modelState},{"automatic_tof",tofState},
+                {"serial",device.serial},{"boot_id",boot},{"candidate_stream_recovery",candidateRecoveryCapability(connection)},
                 {"factory_camera_helpers_released",cameraHelpersReleased},{"inspection_runtime","ready"},{"runtime_replaced",installed}}).toJson(QJsonDocument::Compact);
             std::fwrite(receipt.constData(),1,size_t(receipt.size()),stdout);
             return 0;
@@ -733,27 +713,42 @@ int run(const QStringList &input) {
     }
     if(args.size()>=2&&args[1]=="--dtof") {
         require(args.size()>=5,"Incomplete candidate request");
-        QString recovery;
+        QString recovery,expectedBoot,previousGeneration;
         bool automaticStart=false;
         for(int i=5;i<args.size();++i){
             if(args[i]=="--automatic-start"){
                 require(!automaticStart,"Duplicate automatic start option");
                 automaticStart=true;
             }
-            else {require(recovery.isEmpty()&&(args[i]=="--recover-fault"||args[i]=="--recover-stream-fault"),"Unknown candidate option");recovery=args[i];}
+            else if(args[i]=="--expected-boot"||args[i]=="--previous-generation"){
+                auto &value=args[i]=="--expected-boot"?expectedBoot:previousGeneration;
+                require(value.isEmpty()&&i+1<args.size()&&!args[i+1].isEmpty(),"Incomplete candidate recovery identity");
+                value=args[++i];
+            }else{
+                require(recovery.isEmpty()&&(args[i]=="--recover-fault"||args[i]=="--recover-stream-fault"),"Unknown candidate option");
+                recovery=args[i];
+            }
         }
         bool ok=false;const int mode=args[2].toInt(&ok);const auto token=args[3],csv=args[4];
         require(ok&&RvCaptureContract::supports(mode)&&token.size()==32&&token.toLatin1().toHex().size()==64,"Invalid candidate selection");
         for(auto ch:token)require(QStringLiteral("0123456789abcdef").contains(ch),"Invalid candidate generation");
         RvCaptureContract::validate(mode,token.toStdString(),csv.toStdString());
-        const bool liteSr=RvCaptureContract::isLiteSr(mode);
-        require(!liteSr||bundledLiteSr,"This desktop build is missing the board LiteSR payload");
         require(!automaticStart||(bool(deviceStore)&&recovery.isEmpty()&&qEnvironmentVariable("RV_TEST_OFFLINE_ONLY")!="1"),
                 "Automatic start requires an online trusted device");
-        if(automaticStart){pinSelectedProfile=true;automaticCameraStart=true;}
+        const bool streamRecovery=recovery=="--recover-stream-fault";
+        require(expectedBoot.isEmpty()? !streamRecovery : (automaticStart||streamRecovery)
+                    &&QRegularExpression("^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$").match(expectedBoot).hasMatch(),
+                "Invalid expected boot identity for candidate start");
+        require(streamRecovery?bool(deviceStore)&&qEnvironmentVariable("RV_TEST_OFFLINE_ONLY")!="1"
+                    &&previousGeneration!=token&&QRegularExpression("^[0-9a-f]{32}$").match(previousGeneration).hasMatch()
+                    :previousGeneration.isEmpty(),"Stream recovery requires the previous trusted capture generation");
+        if(automaticStart||streamRecovery){pinSelectedProfile=true;automaticCameraStart=true;}
         Ssh connection(known);
         verifyDevice(connection);
-        const auto modelState=captureRuntimeState(connection,liteSr);
+        if(!expectedBoot.isEmpty())
+            require(connection.execute("cat /proc/sys/kernel/random/boot_id").trimmed()==expectedBoot.toLatin1(),
+                    "Board boot identity changed before imaging could resume");
+        const auto modelState=captureRuntimeState(connection);
         const auto tofState=automaticTofState(connection);
         if(modelState!="ready"||tofState!="ready"){
             const auto response=QJsonDocument(withDevice({{"state","board_files_unavailable"},{"generation",token},
@@ -768,20 +763,23 @@ int run(const QStringList &input) {
         auto effective=saved;
         effective.mode=RvCaptureContract::sensorMode(mode);
         effective.objects=1;
-        effective.signal=liteSr;
+        effective.signal=false;
         effective.noise=false;
         require(mode==RvCaptureContract::NativeHd?effective.fp16Native16Compatible():effective.nativeCompatible(),
                 "Automatic dToF preset is incompatible with the requested imaging mode");
-        if(!liteSr){
+        {
             QJsonParseError parse;const auto capabilities=QJsonDocument::fromJson(connection.execute("LD_LIBRARY_PATH=/root/r144_depth:/oem/usr/lib /root/dtof_candidates_20261009/native_hd_gui --native-capabilities"),&parse).object();
             require(parse.error==QJsonParseError::NoError&&nativeCaptureCapabilities(capabilities,deviceStore?device.fov():RvCalibration::Fov),
                 "Native capture runtime or calibration differs from the bundled version");
         }
-        const auto action=coordinatorCandidateAction(recovery,legacyCoordinatorProfile());
+        const auto recoveryProtocol=candidateRecoveryCapability(connection);
+        const auto action=streamRecovery?QStringLiteral("auto-candidate"):QStringLiteral("candidate");
+        const auto priorOwner=streamRecovery?QString(" %1 %2").arg(previousGeneration,expectedBoot):QString();
         const int sessionFov=deviceStore?device.fov():RvCalibration::Fov;
         require(sessionFov==RvCalibration::Fov,"The current F6 calibration is required before capture");
         const auto output=connection.execute(QStringLiteral("DCTS_PROCESSING_FOV=%6 DCTS_DTOF_PRESET=%1 /root/dtof_candidates_20261009/control.sh %2 %3 %4 %5")
-                                              .arg(effective.size().width()).arg(action).arg(mode).arg(token,csv).arg(sessionFov));
+                                              .arg(effective.size().width()).arg(action).arg(mode).arg(token,csv).arg(sessionFov)+priorOwner,
+                                              streamRecovery?40000:0);
         QJsonParseError error;const auto doc=QJsonDocument::fromJson(output,&error);auto r=doc.object();
         require(error.error==QJsonParseError::NoError&&doc.isObject()&&dtofBoardReceipt(r,mode,token,csv),"Candidate receipt mismatch");
         {
@@ -789,8 +787,10 @@ int run(const QStringList &input) {
             require(error.error==QJsonParseError::NoError&&RvCaptureCalibration::valid(calibration,token,sessionFov,true),"Default FOV calibration receipt mismatch");
             r["tof_calibration"]=calibration;
         }
-        require(nativeCaptureGrid(r)==effective.size()&&(liteSr||r["native_hole_fill_protocol"]==RvCaptureContract::NativeHoleFillProtocol),
+        require(nativeCaptureGrid(r)==effective.size()&&r["native_hole_fill_protocol"]==RvCaptureContract::NativeHoleFillProtocol,
                 "Board imaging receipt differs from the automatic preset");
+        require(expectedBoot.isEmpty()||r["boot_id"]==expectedBoot,"Candidate boot changed during start");
+        r["candidate_stream_recovery"]=recoveryProtocol;
         r["capture_settings"]=effective.json();r["saved_capture_settings"]=saved.json();
 
         const auto response=QJsonDocument(withDevice(r)).toJson(QJsonDocument::Compact);std::fwrite(response.constData(),1,size_t(response.size()),stdout);return 0;

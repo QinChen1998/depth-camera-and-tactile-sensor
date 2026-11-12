@@ -133,19 +133,11 @@ QJsonObject identity(const QString &id){
 }
 bool validGraphMetadata(const QJsonObject &m){
     const auto graph=m["assist_graph_sha256"];
-    // Preserve original schema 1/2 diagnostics. New derived graphs must carry
-    // their explicit backend, source identity and precision contract.
+    // Derived graphs carry their backend, source identity and precision.
     if(graph==QLatin1String(RvCameraView::Rgb672VgaFp16.graphSha)&&!m.contains("assist_execution_device"))return true;
     const auto id=m["assist_execution_device"].toString();
     if(!validBackend(id)||m["assist_backend"]!=backendName(id))return false;
-    auto expected=identity(id);
-    // Diagnostics recorded during the confidence trial still contain G depth
-    // and the original monocular tensor. Accept their saved graph identity.
-    if(id=="tensorrt"&&graph=="34c123a60912769fd161300b5302948fa5f3b068628cd02bba46bad5b215cad9"){
-        expected["graph_sha256"]=graph;
-        expected["source_graph_sha256"]="3c2f99b9fda0fa5e0efe815c5d57f5eed8b8a24a227961a8d11dc531806f8d64";
-        expected["conversion"]="ort-rgb672-vga-frozen-depth-confidence-fp32-v1";
-    }
+    const auto expected=identity(id);
     for(auto it=expected.begin();it!=expected.end();++it)if(m["assist_"+it.key()]!=it.value())return false;
     return true;
 }

@@ -71,15 +71,13 @@ public:
     QString depthInfoText() const { return m_depthInfoText; }
     quint64 presentationEpoch() const {return m_presentationEpoch;}
     bool assistDepthEnabled() const;
-    bool hostHdAssist() const {return !m_hostScheme.isEmpty()&&m_dtofMode==RvDtofCandidates::Native48&&m_config.cameraWidth==2304;}
+    bool hostHdAssist() const {return m_hostAssistSelected&&m_dtofMode==RvDtofCandidates::Native48&&m_config.cameraWidth==2304;}
     int assistInputRotationDegrees() const;
     QString assistHostModel() const;
     QString currentImagingScheme() const;
-    static constexpr char GlobalRgbImagingScheme[]="host_unidepth_rgb672_vga_fp16_tof48_g";
     static constexpr char ReuseLatestTofImagingScheme[]="host_unidepth_rgb672_vga_fp16_tof48_b";
     static QString imagingHostModel(const QString &scheme);
     QString hostInferencePreflightError() const;
-    QString assistExperiment() const;
     QString assistDepthInfoText() const {return m_assistInfo;}
     int assistLoadingState() const {return m_assistLoadingState;}
     bool imagingSwitchActive() const {return m_imagingSwitchActive;}
@@ -106,7 +104,7 @@ public slots:
     void setConfiguration(int cameraWidth, const QString &model, int depthWidth,
                           const QString &location, const QString &method);
     void start();
-    void startAutomatically(bool verifiedUsbAttachment = false);
+    void startAutomatically(bool verifiedUsbAttachment = false,const QString &expectedBoot = QString());
     bool automaticStartAllowed(const QString &deviceId) const;
     quint64 stopRevision() const { return m_stopRevision; }
     void deviceUnreachable(const QString &deviceId);
@@ -124,14 +122,14 @@ signals:
     void cameraFrameReady(const QImage &image);
     void streamCleared();
     void recoveryDisplayExpired();
-    void depthSnapshotReady(const QByteArray &depth, const QJsonObject &metadata, const QImage &camera, const QByteArray &coverage={});
+    void depthSnapshotReady(const QByteArray &depth, const QJsonObject &metadata, const QImage &camera);
     void depthFrameReady(const QByteArray &depth, const QJsonObject &metadata);
     void tofFrameReady(const RvTofFrame &frame);
     void photonFrameReady(const RvPhotonFrame &frame);
     void photonStreamCleared(const QString &reason);
     void depthStreamCleared(const QString &reason);
     void assistStateChanged();
-    void assistDepthSnapshotReady(const QByteArray &depth,const QJsonObject &metadata,const QImage &camera,const RvTofFrame &tof=RvTofFrame(),const QByteArray &diagnostic=QByteArray(),const QImage &inferenceInput=QImage());
+    void assistDepthSnapshotReady(const QByteArray &depth,const QJsonObject &metadata,const QImage &camera,const QByteArray &diagnostic={});
     void assistDepthStreamCleared(const QString &reason);
     void imagingSwitchStarted(const QString &scheme,int estimatedMs);
     void imagingSwitchFinished(const QString &scheme,qint64 elapsedMs);
@@ -142,6 +140,7 @@ private:
     bool testHostHdPreparation();
     friend class RvTunerController;
     friend class RvUsbEnrollment;
+    friend int runUsbEnrollmentLiveValidation(SensorMainWindow &,const QString &);
     friend int runRvTunerTests(const QString &);
     friend int runPortSmokeTests(SensorMainWindow &, LanguageManager &, const QString &);
     RvTunerController *m_tuner=nullptr;
@@ -161,9 +160,9 @@ private:
     Configuration withCameraWidth(int width) const;
     Configuration withDepthWidth(int width) const;
     void setAutomaticConnectionStage(AutomaticConnectionStage stage);
-    void startImaging(bool automatic);
+    void startImaging(bool automatic,const QString &expectedBoot = QString());
     void submitConfiguration(const Configuration &candidate, bool previewChange, bool modelChange,
-                             bool startAfter = false, bool reconnecting = false, bool automatic = false);
+                             bool startAfter = false, bool reconnecting = false, bool automatic = false,const QString &expectedBoot = QString());
     void syncConfiguration(const QJsonObject &metadata);
     void updateState();
     void rejectConfiguration();
@@ -246,7 +245,7 @@ private:
     quint64 m_presentationEpoch = 0;
     bool m_transitioning = false;
     bool m_imagingSwitchActive=false,m_imagingSwitchBoardRestart=false;
-    QString m_hostScheme;
+    bool m_hostAssistSelected=false;
     int m_imagingSwitchEstimateMs=0;
     QString m_imagingSwitchScheme;
     QElapsedTimer m_imagingSwitchClock;

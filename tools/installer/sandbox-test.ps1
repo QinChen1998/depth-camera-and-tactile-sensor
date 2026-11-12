@@ -77,7 +77,9 @@ try {
     Remove-Item Env:RV_INFERENCE_BACKEND
     $boardRoot=Join-Path $app 'rv_control'
     $boardManifest=Get-Content -LiteralPath (Join-Path $boardRoot 'implementation.json') -Raw | ConvertFrom-Json
-    Check 'capture_has_no_board_model' (-not (Test-Path -LiteralPath (Join-Path $boardRoot 'litesr_board')))
+    $boardImport=Get-Content -LiteralPath (Join-Path $boardRoot 'board-import.json') -Raw | ConvertFrom-Json
+    Check 'capture_has_only_native_modes' (($boardImport.supported_capture_modes -join ',') -eq '14,24,25' -and $boardImport.models_required -eq $false)
+    Check 'capture_has_no_board_model' (@($boardManifest.payload_files.PSObject.Properties.Name | Where-Object {$_ -match 'litesr|\.dctsm$|model-switch'}).Count -eq 0)
     foreach($name in @('native_gui.sh','dtof-host.sh','native-fov6.bin')){
         $relative="rv_capture/$name"
         Check "capture_asset_$name" ((Get-FileHash -LiteralPath (Join-Path $boardRoot $relative) -Algorithm SHA256).Hash -eq $boardManifest.payload_files.$relative)
@@ -92,7 +94,8 @@ try {
         $checks["${flag}_assertions"]=$assertions.Count
     }
     $ui=Get-Content -LiteralPath "$logs\port-ui-smoke-test.txt" -Raw
-    foreach($name in 'EXACT_IMAGING_SCHEMES','OTHER_IMAGING_SCHEMES_ABSENT','INFERENCE_DEVICE_IN_SETTINGS'){
+    foreach($name in 'EXACT_IMAGING_SCHEMES','CHINESE_IMAGING_SCHEMES','ENGLISH_IMAGING_SCHEMES',
+        'REMOVED_IMAGING_ACTIONS','INFERENCE_DEVICE_IN_SETTINGS'){
         Check $name ($ui -match "(?m)^$name PASS\s*$")
     }
     $adb=Join-Path $app 'platform-tools\adb.exe'
@@ -130,7 +133,7 @@ try {
         $prefs=Join-Path $env:LOCALAPPDATA 'DepthCameraAndTactileSensor\config\preferences\DepthCameraAndTactileSensor\DepthCameraAndTactileSensor.ini'
         Check 'preferences_in_local_appdata' (Test-Path -LiteralPath $prefs)
         Check 'first_run_zh_cn' ([bool](Select-String -LiteralPath $prefs -SimpleMatch 'language=zh_CN'))
-        Check 'first_run_host_assist' ([bool](Select-String -LiteralPath $prefs -SimpleMatch 'imagingScheme=host_unidepth_rgb672_vga_fp16_tof48_g'))
+        Check 'first_run_host_assist' ([bool](Select-String -LiteralPath $prefs -SimpleMatch 'imagingScheme=host_unidepth_rgb672_vga_fp16_tof48_b'))
         Check 'config_outside_install_directory' (-not (Test-Path (Join-Path $app 'config')))
         Check 'close_main_window' ($process.CloseMainWindow())
         Check 'ordinary_exit_0' ($process.WaitForExit(30000) -and $process.ExitCode -eq 0)

@@ -53,10 +53,8 @@ NativeProjector nativeProjector(const RvTofFrame &tof);
 // An explicit RGB-only estimate has no fabricated native measurement identity.
 Result monocular(const std::vector<float> &monocularZ, const char *reason,QSize size);
 // Retained consensus is rechecked after outlier rejection.
-enum class GlobalScaleFit { Extended, SourceG };
 Result fuseGlobalScale(const std::vector<float> &monocularZ,const RvTofFrame &tof,
-                       const Calibration &calibration,const RvCameraView::Profile &view,
-                       const QJsonArray &preferredNativeIndices={},GlobalScaleFit fit=GlobalScaleFit::Extended);
+                       const Calibration &calibration,const RvCameraView::Profile &view);
 // Scalar agreement diagnostics against this measurement, not independent GT.
 // Does not retain/export images, tensors, or individual measured distances.
 QJsonObject agreement(const std::vector<float> &monocularZ,const Result &output,
@@ -65,20 +63,13 @@ QJsonObject agreement(const std::vector<float> &monocularZ,const Result &output,
 // Geometric outer field only. Uses the calibrated sensor cone and current Z
 // for parallax; validity/SNR/selected anchors never carve holes in the image.
 Result limitTofFieldOfView(Result output,const Calibration &calibration,const RvCameraView::Profile &view);
-inline constexpr char LegacyGlobalRgbRevision[]="global_scale_fresh_rgb_portrait_v1";
-inline constexpr char GlobalRgbRevision[]="global_scale_fresh_rgb_portrait_v2";
 inline constexpr char ReuseRgbRevision[]="global_scale_reuse_latest_rgb_portrait_v1";
-inline const char *currentGlobalRgbRevision(const QJsonValue &experiment) {
-    return experiment=="B"?ReuseRgbRevision:GlobalRgbRevision;
-}
-inline bool isGlobalRgbRevision(const QJsonObject &metadata) {
-    const auto experiment=metadata["assist_experiment"];
-    const auto revision=metadata["assist_fusion_revision"];
-    return (experiment=="G"&&revision==QLatin1String(LegacyGlobalRgbRevision))
-        ||(RvTofFrame::isHostFusionExperiment(experiment)&&revision==QLatin1String(currentGlobalRgbRevision(experiment)));
+inline bool isReuseRgbRevision(const QJsonObject &metadata) {
+    return RvTofFrame::isHostFusionExperiment(metadata["assist_experiment"])
+        &&metadata["assist_fusion_revision"]==QLatin1String(ReuseRgbRevision);
 }
 
-// G stores the last applied scalar and its reference identity for the session.
+// Retain the last applied scalar and its reference identity for the session.
 class GlobalRgbContinuity {
 public:
     Result apply(Result result,qint64 nowMs,qint64 epoch,qint64 generation,qint64 frameId);

@@ -6,7 +6,6 @@
 #include "sensors/RvAssistDepth.h"
 #include "sensors/RvInferenceSettings.h"
 #include "sensors/RvInferenceRuntime.h"
-#include "sensors/RvDepthDiagnostic.h"
 #include "sensors/RvDeviceStore.h"
 #include "sensors/RvSessionController.h"
 #include "sensors/RvUsbEnrollment.h"
@@ -106,10 +105,6 @@ int main(int argc,char **argv)
         if(args.size()!=5||!RvAssistDepth::supportsHostModel(args[4]))return 3;
         return runRvAssistWorker(args[2],args[3],args[4]);
     }
-    if(argc>1&&std::strcmp(argv[1],"--rv-depth-diagnostic-replay")==0){
-        QCoreApplication app(argc,argv);const auto args=app.arguments();if(args.size()<4)return 3;
-        return RvDepthDiagnostic::replay(args[2],args[3],args.value(4));
-    }
     if(argc>1&&std::strcmp(argv[1],"--import-settings")==0){
         QCoreApplication app(argc,argv);configureSettings(configurationDirectory(),true,true);return 0;
     }
@@ -152,7 +147,7 @@ int main(int argc,char **argv)
     }
     configureSettings(testing?temporary->path():configurationDirectory(),
         !testing||flag=="--port-ui-smoke-test"||flag=="--inference-ui-test");
-    if(usbEnrollmentLive)QSettings().setValue("depth/imagingScheme",RvSessionController::GlobalRgbImagingScheme);
+    if(usbEnrollmentLive)QSettings().setValue("depth/imagingScheme",RvSessionController::ReuseLatestTofImagingScheme);
     LanguageManager language;
     if(flag=="--tactile-3d-test")return runTactile3DTests(report);
     if(flag=="--tactile-render-test")return runTactileRenderSmoke(report);

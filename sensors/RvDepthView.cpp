@@ -31,18 +31,15 @@ struct RvDepthView::Colorizer {
     struct Job {
         std::shared_ptr<const std::vector<float>> values;
         QSize size;
-        QByteArray coverage;
         double minimum=0,maximum=3,frameId=-1,generation=-1;
         bool blackOutside=false;
         quint64 revision=0;
         QRect sourceRect;
-        bool rawPreview=false;
         QJsonObject performance;
         qint64 queuedNs=0;
         QByteArray diagnostic;
         double sideScale=1;
         int sidePixels=0;
-        bool monocular=false;
     };
     struct Result { QImage image; double frameId=-1,generation=-1; quint64 revision=0; QRect sourceRect; QJsonObject performance; int sidePixels=0; };
 
@@ -62,37 +59,23 @@ struct RvDepthView::Colorizer {
         auto result=std::move(completed);completed.reset();return result;
     }
     static Job forView(const RvDepthView &view,bool presentation=true){
-        Job job{view.depth,view.depthSize,view.coverage,view.rangeMinimum,view.rangeMaximum,
+        Job job{view.depth,view.depthSize,view.rangeMinimum,view.rangeMaximum,
             view.property("frameId").toDouble(),view.property("generation").toDouble(),view.blackOutside,
             view.colorRevision,view.depthSourceRect};
-        job.monocular=presentation&&view.showMonocular;
-        job.rawPreview=!job.monocular&&view.depthMetadata.value("color_raw_preview")==true;
-        if(presentation&&!job.monocular){
-            job.sideScale=view.sideScale;job.sidePixels=view.sidePixels;
+        if(presentation&&view.sidePixels>0){
+            job.sideScale=view.sideScale;job.sidePixels=view.sidePixels;job.diagnostic=view.monocularDiagnostic;
         }
-        if(job.monocular||job.sidePixels>0)job.diagnostic=view.monocularDiagnostic;
         return job;
     }
     static void render(const Job &job,QImage &buffer){
-        if(job.monocular&&job.diagnostic.isEmpty()){buffer={};return;}
         if(buffer.size()!=job.size||buffer.format()!=QImage::Format_RGB32)buffer=QImage(job.size,QImage::Format_RGB32);
         // bits() detaches once if an explicit snapshot still owns this buffer.
         auto *pixels=reinterpret_cast<QRgb *>(buffer.bits());
         const int count=job.size.width()*job.size.height();
         for(int i=0;i<count;++i){
             const float original=(*job.values)[i];
-            const float display=job.monocular?monoPrediction(job.diagnostic,i,1.)
-                :original==0&&job.sidePixels>0?monoPrediction(job.diagnostic,i,job.sideScale):original;
-            auto color=DepthColorScale::color(display,job.minimum,job.maximum,true,job.blackOutside);
-            if(job.rawPreview){
-                const float v=(*job.values)[i];
-                color=std::isfinite(v)?QColor::fromHsvF((1-std::clamp((double(v)-job.minimum)/(job.maximum-job.minimum),0.0,1.0))*2/3,1,1).rgb():qRgb(255,0,255);
-            }
-            if(!job.coverage.isEmpty()){
-                const int alpha=quint8(job.coverage[i]);
-                color=qRgb((qRed(color)*alpha+127)/255,(qGreen(color)*alpha+127)/255,(qBlue(color)*alpha+127)/255);
-            }
-            pixels[i]=color;
+            const float display=original==0&&job.sidePixels>0?monoPrediction(job.diagnostic,i,job.sideScale):original;
+            pixels[i]=DepthColorScale::color(display,job.minimum,job.maximum,true,job.blackOutside);
         }
     }
     void run(){
@@ -130,8 +113,7 @@ RvDepthView::RvDepthView(QWidget *parent):QWidget(parent),hoverTip(this){
 }
 RvDepthView::~RvDepthView(){colorizer.reset();}
 
-bool RvDepthView::setDepth(const QByteArray &bytes,const QJsonObject &metadata,const QByteArray &diagnostic,const RvTofFrame &tof,
-                          const QImage &pairedCamera,const QByteArray &depthCoverage){
+bool RvDepthView::setDepth(const QByteArray &bytes,const QJsonObject &metadata,const QByteArray &diagnostic){
     QElapsedTimer setTimer;if(performanceFramePainted)setTimer.start();
     depthMetadata={};
     monocularDiagnostic.clear();sidePixels=0;sideScale=1;
@@ -141,15 +123,14 @@ bool RvDepthView::setDepth(const QByteArray &bytes,const QJsonObject &metadata,c
     const auto &view=RvCameraView::Portrait;
     if(metadata.contains("assist_output_grid")&&!RvCameraView::validOutputGrid(metadata)){clear();return false;}
     const bool hostGrid=RvCameraView::isUniDepth(model)&&RvCameraView::validOutputGrid(metadata);
-    if(!((width==144&&height==81)||(width==288&&height==162)||(width==384&&height==256)||(width==576&&height==324)||hostGrid||(radial&&((width==48&&height==32)||(width==128&&height==128)||(width==256&&height==256))))
-        ||bytes.size()!=width*height*4||metadata["depth_unit"]!=(radial?"sensor_radial_m_float32":"camera-Z_m_float32")
-        ||(!depthCoverage.isEmpty()&&(!radial||depthCoverage.size()!=width*height))){
+    if(!((width==144&&height==81)||(width==288&&height==162)||(width==384&&height==256)||(width==576&&height==324)||hostGrid||(radial&&width==48&&height==32))
+        ||bytes.size()!=width*height*4||metadata["depth_unit"]!=(radial?"sensor_radial_m_float32":"camera-Z_m_float32")){
         clear();return false;
     }
     const auto fit=metadata["assist_fusion"].toObject();
     const auto mode=fit["fusion_mode"].toString();
     const double scale=fit["scale"].toDouble(0);
-    const bool hostExperiment=RvAssistFusion::isGlobalRgbRevision(metadata);
+    const bool hostExperiment=RvAssistFusion::isReuseRgbRevision(metadata);
     bool validMonocular=!radial&&hostGrid&&RvCameraView::isWide(model)
         &&hostExperiment
         &&metadata["assist_input_orientation_checked"]==true&&metadata["assist_diagnostic_capture"]==true
@@ -172,15 +153,7 @@ bool RvDepthView::setDepth(const QByteArray &bytes,const QJsonObject &metadata,c
             else outside+=(*values)[i]==0;
         }
     }
-    depth=std::move(values);depthSize=QSize(width,height);held=false;coverage=depthCoverage;depthMetadata=metadata;
-    depthTof={};
-    depthCamera=hostGrid&&!radial&&pairedCamera.size()==depthSize?pairedCamera:QImage();
-    if(!radial&&hostGrid&&hostExperiment&&metadata["dtof_present"]==true
-        &&metadata["assist_output_restored_to_calibrated_grid"]==true&&metadata["depth_K"].toArray()==RvCameraView::intrinsics(view)
-        &&metadata["rectify_map_sha256"]==QLatin1String(view.mapSha)&&RvDepthDiagnostic::matchesPairedNative(metadata,tof)){
-        const auto selected=fit["dtof_corrected"]==true?fit["used_native_indices"].toArray():QJsonArray{};
-        depthTof={tof,&view,selected};
-    }
+    depth=std::move(values);depthSize=QSize(width,height);held=false;depthMetadata=metadata;
     if(validMonocular){
         for(int i=view.depthBytes();i<diagnostic.size();++i)
             if(quint8(diagnostic[i])>quint8(RvAssistFusion::AlreadySupported)){validMonocular=false;break;}
@@ -188,7 +161,7 @@ bool RvDepthView::setDepth(const QByteArray &bytes,const QJsonObject &metadata,c
     }
     if(validMonocular&&allowSides&&field.valid()&&outside){
         sideScale=scale;sidePixels=outside;
-        setProperty("sidePredictionActive",!showMonocular);setProperty("sidePredictionPixels",showMonocular?0:sidePixels);
+        setProperty("sidePredictionActive",true);setProperty("sidePredictionPixels",sidePixels);
     }
     depthSourceRect=field.valid()?field.sourceRect:QRect(QPoint(),depthSize);
     if(image.size()!=depthSize)image={};
@@ -197,28 +170,9 @@ bool RvDepthView::setDepth(const QByteArray &bytes,const QJsonObject &metadata,c
     if(performanceFramePainted)guiSetDepthMs=setTimer.nsecsElapsed()/1e6;
     recolor();return true;
 }
-void RvDepthView::setMonocularVisible(bool visible){
-    if(radial||showMonocular==visible)return;
-    showMonocular=visible;
-    if(held){clear();return;}
-    setProperty("sidePredictionActive",!visible&&sidePixels>0);
-    setProperty("sidePredictionPixels",visible?0:sidePixels);
-    if(depth){
-        ++colorRevision;
-        if(colorizer)colorizer->cancel();
-        // A deliberate comparison repaints the current frame immediately.
-        presentationImage();
-    }
-    refreshHover();update();
-}
-bool RvDepthView::setCoverage(const QByteArray &values){
-    if(!radial||!depth||values.size()!=depthSize.width()*depthSize.height()){clear();return false;}
-    coverage=values;recolor();return true;
-}
 void RvDepthView::holdFrame(){
     if(!hasFrame()||held)return;
-    held=true;depth.reset();coverage.clear();depthMetadata={};
-    depthTof={};depthCamera={};syncImageTof();
+    held=true;depth.reset();depthMetadata={};
     monocularDiagnostic.clear();sidePixels=0;setProperty("sidePredictionActive",false);setProperty("sidePredictionPixels",0);
     refreshHover();update();
     // An already submitted image may finish, but can only restore pixels.
@@ -228,9 +182,8 @@ void RvDepthView::clear(const QString &reason){
     fpsTimes.clear();fpsClock.invalidate();paintedId=paintedGeneration=-1;
     ++colorRevision;if(colorizer)colorizer->cancel();
     loadingVisible=false;loadingTimer.stop();emptyReason=reason;held=false;
-    depth.reset();depthSize={};coverage.clear();image={};depthSourceRect={};imageSourceRect={};depthMetadata={};imagePerformance={};
-    depthTof={};depthCamera={};syncImageTof();
-    monocularDiagnostic.clear();sidePixels=imageSidePixels=0;sideScale=1;imageMonocular=false;
+    depth.reset();depthSize={};image={};depthSourceRect={};imageSourceRect={};depthMetadata={};imagePerformance={};
+    monocularDiagnostic.clear();sidePixels=imageSidePixels=0;sideScale=1;
     setProperty("sidePredictionActive",false);setProperty("sidePredictionPixels",0);
     setProperty("frameId",QVariant());setProperty("generation",QVariant());
     setProperty("displaySourceRect",QVariant());
@@ -258,77 +211,11 @@ void RvDepthView::takeColoredFrame(){
     imageFrameId=result->frameId;imageGeneration=result->generation;
     imagePerformance=std::move(result->performance);
     imageSidePixels=result->sidePixels;
-    imageMonocular=showMonocular;
-    syncImageTof();
     setProperty("coloredFrameId",imageFrameId);
     setProperty("coloredFrames",property("coloredFrames").toULongLong()+1);refreshHover();update();
 }
-void RvDepthView::syncImageTof()const{
-    // A pending depth frame may already have a different paired measurement.
-    // Keep the overlay with the image that actually made it to the viewport.
-    imageTof=depthTof;
-    imageCamera=depthCamera;
-    imageTofPoints.reset();
-    imageRangeMinimum=rangeMinimum;
-    imageRangeMaximum=rangeMaximum;
-    imageBlackOutside=blackOutside;
-}
-
-std::vector<RvDepthView::TofPoint> RvDepthView::projectImageTof()const{
-    const auto &frame=imageTof.frame;
-    const auto &view=*imageTof.profile;
-    const int fov=frame.metadata.value("dtof_fov_correction").toInt(frame.metadata.value("tof_fov_correction").toInt(-1));
-    const auto &cal=RvAssistFusion::calibrationForNativeGrid(fov,frame.columns(),frame.rows());
-    if(!cal.valid||cal.nativeCount()!=frame.sampleCount())return {};
-
-    std::array<bool,RvDepthDiagnostic::ReasonBytes> adopted{};
-    for(const auto id:imageTof.adopted){
-        const int index=id.toInt(-1);
-        if(index>=0&&index<frame.sampleCount())adopted[index]=true;
-    }
-    std::vector<TofPoint> points;
-    points.reserve(frame.sampleCount());
-    const QRectF source(imageSourceRect);
-    const auto project=RvAssistFusion::nativeProjector(frame);
-    for(int id=0;id<frame.sampleCount();++id){
-        if(!frame.valid(id)||frame.rangeUq2(id)==0)continue;
-        const auto point=project(frame.rangeUq2(id)*.00025,id,cal,view);
-        const QPointF pixel=point.pixel+QPointF(.5,.5);
-        if(point.cameraZ>0&&source.contains(pixel))points.push_back({pixel,float(point.cameraZ),adopted[id]});
-    }
-    return points;
-}
-
-void RvDepthView::paintTofPoints(QPainter &painter)const{
-    if((!showTofPoints&&!showPairedRgb)||held||!imageTof.profile||target.isEmpty()||imageSourceRect.isEmpty())return;
-    if(!imageTofPoints)imageTofPoints=projectImageTof();
-    const auto viewport=ImagePresentation::unrotatedRect(target,rotation);
-    constexpr double radius=2.;
-    const QColor outline("#11161d"),blackPointOutline("#8491a0");
-    painter.save();
-    painter.setClipRect(target);
-    painter.translate(target.center());
-    painter.rotate(rotation);
-    painter.setRenderHint(QPainter::Antialiasing);
-    for(const auto &point:*imageTofPoints){
-        const QPointF center(viewport.left()+(point.pixel.x()-imageSourceRect.x())*viewport.width()/imageSourceRect.width(),
-                             viewport.top()+(point.pixel.y()-imageSourceRect.y())*viewport.height()/imageSourceRect.height());
-        const QRgb color=DepthColorScale::color(point.cameraZ,imageRangeMinimum,imageRangeMaximum,true,imageBlackOutside);
-        painter.setPen(QPen(color==qRgb(0,0,0)?blackPointOutline:outline,1.4));
-        painter.setBrush(QColor::fromRgb(color));
-        painter.drawEllipse(center,radius,radius);
-        if(point.adopted&&(!imageMonocular||showPairedRgb)){
-            painter.setPen(QPen(Qt::white,1.));
-            painter.setBrush(Qt::NoBrush);
-            painter.drawEllipse(center,radius+1.,radius+1.);
-        }
-    }
-    painter.restore();
-}
-
 void RvDepthView::refreshHover(){
     if(!hoverTip.tracking())return;
-    if(showPairedRgb){hoverTip.hideText();return;}
     const auto position=hoverTip.position();
     target=nativeRotationEnabled?nativePresentationTransform().mapRect(QRectF(QPointF(),presentationSize()))
         :ImagePresentation::fittedRect(QRectF(rect()).adjusted(8,8,-8,-8),presentationSize(),rotation);
@@ -347,22 +234,15 @@ void RvDepthView::refreshHover(){
     // Keep the readout in place while the next image is being colored. Update
     // its value only when that image is ready; never query expired held depth.
     if(!held&&imageRevision!=colorRevision)return;
-    const QPointF source=nativeRadial?QPointF(1-f.y(),1-f.x()):f;
-    const auto sourceRect=nativeRadial?image.rect():imageSourceRect;
-    const int x=std::clamp(sourceRect.x()+int(source.x()*sourceRect.width()),sourceRect.left(),sourceRect.right());
-    const int y=std::clamp(sourceRect.y()+int(source.y()*sourceRect.height()),sourceRect.top(),sourceRect.bottom());
-    if(!held&&imageMonocular){
-        const float prediction=monoPrediction(monocularDiagnostic,y*depthSize.width()+x,1.);
-        hoverTip.showText(tr("(%1, %2) monocular: %3 m camera-Z").arg(x).arg(y).arg(prediction,0,'f',4));
-        return;
-    }
+    const auto sourceRect=imageSourceRect;
+    const int x=std::clamp(sourceRect.x()+int(f.x()*sourceRect.width()),sourceRect.left(),sourceRect.right());
+    const int y=std::clamp(sourceRect.y()+int(f.y()*sourceRect.height()),sourceRect.top(),sourceRect.bottom());
     const float z=depthAt(x,y);
     if(!held&&z==0&&sidePixels>0){
         const float prediction=monoPrediction(monocularDiagnostic,y*depthSize.width()+x,sideScale);
         hoverTip.showText(tr("(%1, %2) prediction: %3 m camera-Z").arg(x).arg(y).arg(prediction,0,'f',4));
         return;
     }
-    if(!held&&depthMetadata.value("color_raw_preview")==true){hoverTip.showText(tr("(%1, %2) raw prediction: %3 m (radial, unfiltered)").arg(x).arg(y).arg(z,0,'f',4));return;}
     if(!held&&radial&&depthMetadata["native_hole_fill_indices"].toArray().contains(y*depthSize.width()+x)){
         hoverTip.showText(tr("(%1, %2) dToF estimate: %3 m").arg(x).arg(y).arg(z,0,'f',4));
         return;
@@ -375,18 +255,17 @@ QImage RvDepthView::presentationImage()const{
     // Only that demand generates an image synchronously; receipt never does.
     if(depth&&!held&&imageRevision!=colorRevision){
         const auto job=Colorizer::forView(*this);
-        Colorizer::render(job,image);imageSidePixels=job.sidePixels;imageMonocular=job.monocular;
+        Colorizer::render(job,image);imageSidePixels=job.sidePixels;
         imageRevision=colorRevision;imageSourceRect=depthSourceRect;imageFrameId=property("frameId").toDouble();imageGeneration=property("generation").toDouble();
-        syncImageTof();
     }
     return image;
 }
 QImage RvDepthView::snapshotImage()const{
-    // Monocular and expired side predictions belong only to the viewport.
-    if(held)return imageMonocular||imageSidePixels||image.hasAlphaChannel()?QImage():image;
+    // Side predictions belong only to the viewport.
+    if(held)return imageSidePixels||image.hasAlphaChannel()?QImage():image;
     if(!depth)return {};
     const auto displayed=presentationImage();
-    if(!showMonocular&&sidePixels==0&&!displayed.hasAlphaChannel())return displayed;
+    if(sidePixels==0&&!displayed.hasAlphaChannel())return displayed;
     QImage corrected;
     Colorizer::render(Colorizer::forView(*this,false),corrected);
     return corrected;

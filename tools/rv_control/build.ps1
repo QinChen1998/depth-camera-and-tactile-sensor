@@ -58,34 +58,28 @@ foreach($rvName in @('session.sh','tmf8829_tuner','bounded_log.awk','LICENSE-MIT
 }
 Copy-Item -LiteralPath (Join-Path $rvProject 'tools/dtof_tuner/coordinator.sh') -Destination (Join-Path $rvRuntime 'dtof_tuner/coordinator.sh') -Force
 $rvPayload['dtof_tuner/coordinator.sh']=(Get-FileHash (Join-Path $rvRuntime 'dtof_tuner/coordinator.sh') -Algorithm SHA256).Hash.ToLower()
-$retiredCapture=Join-Path $rvRuntime 'litesr_board'
-if(Test-Path -LiteralPath $retiredCapture){
- $resolvedCapture=[IO.Path]::GetFullPath($retiredCapture)
- if([IO.Path]::GetDirectoryName($resolvedCapture) -ne [IO.Path]::GetFullPath($rvRuntime)){throw 'Invalid retired capture target'}
- Remove-Item -LiteralPath $resolvedCapture -Recurse -Force
+$resolvedRuntime=(Get-Item -LiteralPath $rvRuntime).FullName
+foreach($rvRetired in @('litesr_board','rv_capture/litesr')){
+ $retiredCapture=Join-Path $resolvedRuntime $rvRetired
+ if(Test-Path -LiteralPath $retiredCapture){
+  $retiredItem=Get-Item -LiteralPath $retiredCapture -Force
+  $retiredParent=Get-Item -LiteralPath (Split-Path -Parent $retiredCapture)
+  if(!$retiredItem.PSIsContainer -or !$retiredItem.FullName.StartsWith($resolvedRuntime+[IO.Path]::DirectorySeparatorChar,[StringComparison]::OrdinalIgnoreCase) -or
+     (($retiredItem.Attributes -bor $retiredParent.Attributes) -band [IO.FileAttributes]::ReparsePoint)){throw 'Invalid retired capture target'}
+  Remove-Item -LiteralPath $retiredItem.FullName -Recurse -Force
+ }
 }
 New-Item -ItemType Directory -Force -Path (Join-Path $rvRuntime 'rv_capture') | Out-Null
-foreach($rvRetired in @('rv_capture/native-fov1.bin','rv_capture/native-fov2.bin','rv1103_bootstrap/native_hd_gui')) {
+foreach($rvRetired in @('rv_capture/native-fov1.bin','rv_capture/native-fov2.bin','rv_capture/model-switch.sh','rv1103_bootstrap/native_hd_gui')) {
  $rvRetiredPath=[IO.Path]::GetFullPath((Join-Path $rvRuntime $rvRetired))
  if(!$rvRetiredPath.StartsWith([IO.Path]::GetFullPath($rvRuntime)+[IO.Path]::DirectorySeparatorChar)){throw 'Invalid retired payload path'}
  if(Test-Path -LiteralPath $rvRetiredPath){Remove-Item -LiteralPath $rvRetiredPath -Force}
 }
-foreach($rvName in @('native_gui.sh','dtof-host.sh','model-switch.sh','native-fov6.bin')) {
+foreach($rvName in @('native_gui.sh','dtof-host.sh','native-fov6.bin')) {
  $rvRelative="rv_capture/$rvName"
  $rvSource=if($rvName.EndsWith('.bin')){"tools/rv_capture/native/payload/$rvName"}else{"tools/rv_capture/payload/$rvName"}
  Copy-Item -LiteralPath (Join-Path $rvProject $rvSource) -Destination (Join-Path $rvRuntime $rvRelative) -Force
  $rvPayload[$rvRelative]=(Get-FileHash (Join-Path $rvRuntime $rvRelative) -Algorithm SHA256).Hash.ToLower()
-}
-$rvLiteSrSource=Join-Path $rvProject 'tools/rv_capture/litesr/payload'
-$rvModelModes=@()
-if(Test-Path -LiteralPath $rvLiteSrSource -PathType Container){
- $rvLiteSr=Join-Path $rvRuntime 'rv_capture/litesr'
- New-Item -ItemType Directory -Force -Path $rvLiteSr | Out-Null
- foreach($rvName in @('litesr-fov6.bin','litesr-near-256.dctsm','librknnmrt.so','libcrypto.so.1.1')) {
-  Copy-Item -LiteralPath (Join-Path $rvLiteSrSource $rvName) -Destination $rvLiteSr -Force
-  $rvPayload["rv_capture/litesr/$rvName"]=(Get-FileHash -LiteralPath (Join-Path $rvLiteSr $rvName) -Algorithm SHA256).Hash.ToLower()
- }
- $rvModelModes=@(13)
 }
 $rvBootstrap=Join-Path $rvRuntime 'rv1103_bootstrap'
 New-Item -ItemType Directory -Force -Path $rvBootstrap | Out-Null
@@ -109,7 +103,7 @@ foreach($rvName in @('known_hosts','licenses/libssh2.txt','licenses/OpenSSL.txt'
 $rvBoardFiles=[ordered]@{}
 foreach($rvName in $rvPayload.Keys){if($rvName -match '^(rv_capture|rv1103_bootstrap|dtof_tuner)/'){$rvBoardFiles[$rvName]=$rvPayload[$rvName]}}
 [ordered]@{schema=1;calibration_release='RV1103_SC3336_TMF8829_20261109';processing_fov=6;
- supported_capture_modes=$rvModelModes+@(14,24,25);sensor_modes=@(5,11,12);models_required=($rvModelModes.Count -gt 0);model_modes=$rvModelModes;
+ supported_capture_modes=@(14,24,25);sensor_modes=@(5,11,12);models_required=$false;
  native_hole_fill_protocol='native48-hole-fill-v1';native_hole_fill_modes=@(24,25);
  replacement_policy='complete_hash_checked_transaction_with_rollback';files=$rvBoardFiles} |
  ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $rvRuntime 'board-import.json') -Encoding UTF8

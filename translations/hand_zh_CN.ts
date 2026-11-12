@@ -36,15 +36,12 @@
       <translation>RV1103 连接进度</translation>
     </message>
     <message><source>Select how the depth map is generated.</source><translation>选择深度图的生成方式。</translation></message>
-    <message><source>RGB frames trigger inference. Each fresh 48×32 ToF measurement can update the global scale once.</source><translation>由 RGB 帧触发推理。每份新的 48×32 ToF 测量最多参与一次全局尺度更新。</translation></message>
     <message><source>Input angle (%1°)</source><translation>输入角度（%1°）</translation></message>
     <message><source>Native ToF angle</source><translation>原生 ToF 角度</translation></message>
     <message><source>Clockwise angle (0–359°):</source><translation>顺时针角度（0–359°）：</translation></message>
     <message><source>Rotate both native ToF displays clockwise. UniDepth, raw measurements and saved images keep their orientation.</source><translation>顺时针旋转两档原生 ToF 显示。UniDepth、原始测量和保存图像的方向保持不变。</translation></message>
     <message><source>Board inference</source><translation>板端推理</translation></message>
     <message><source>Board inference high accuracy</source><translation>板端推理高精度</translation></message>
-    <message><source>Board LiteSR near depth (INT8, experimental)</source><translation>板端 LiteSR 近距（INT8，实验）</translation></message>
-    <message><source>RV1103 LiteSR uses same-frame ToF and Signal to produce 256 × 256 radial depth. The PC refines contours while H.265 video continues.</source><translation>RV1103 使用同帧 ToF 和 Signal 生成 256 × 256 径向深度，上位机处理轮廓，同时继续显示 H.265 视频。</translation></message>
     <message><source>Native 48×32 ToF radial depth; no neural inference.</source><translation>原生 48×32 ToF 径向深度，不执行神经网络推理。</translation></message>
     <message>
       <source>16x16 depth and same-frame photon input; 128x128 output. Camera disabled. Selecting another model restores its capture configuration.</source>
@@ -555,10 +552,6 @@
       <translation>上位机辅助推理</translation>
     </message>
     <message>
-      <source>Host-assisted inference (B, reuse ToF)</source>
-      <translation>上位机辅助推理（B，复用 ToF）</translation>
-    </message>
-    <message>
       <source>RGB frames can reuse the latest eligible 48×32 ToF measurement within the 200 ms pairing budget.</source>
       <translation>RGB 可在 200 ms 配对预算内复用最新的合格 48×32 ToF 测量。</translation>
     </message>
@@ -623,36 +616,12 @@
       <translation>A：原融合 / RGB 触发</translation>
     </message>
     <message>
-      <source>B: Current fusion / ToF</source>
-      <translation>B：原融合 / ToF 触发</translation>
-    </message>
-    <message>
-      <source>UniDepth only. A uses the original RGB inference cadence; B uses current fusion on each new ToF measurement; C adds edge-preserving residual correction. RGB preview stays independent. Switching clears old depth and waits for fresh input. C has not shown better held-out real-scene accuracy.</source>
-      <translation>仅用于 UniDepth。A 保持原 RGB 推理节奏；B 在每次新 ToF 测量时使用原融合；C 增加保边残差校正。RGB 预览保持独立。切换后清除旧深度并等待新输入。C 尚未证明实景留出点精度更好。</translation>
-    </message>
-    <message>
-      <source>B: Fusion + local recovery / ToF</source>
-      <translation>B：原融合 + 局部恢复 / ToF 触发</translation>
-    </message>
-    <message>
       <source>Host assisted depth inference (wide RGB 576, fast trial)</source>
       <translation>上位机辅助深度推理 宽视野 RGB 576（快速试验）</translation>
     </message>
     <message>
       <source>Host assisted depth inference (wide RGB 576 FP16, temporary candidate)</source>
       <translation>上位机辅助深度推理 宽视野 RGB 576 FP16（临时候选）</translation>
-    </message>
-    <message>
-      <source>UniDepth only. A uses original fusion at RGB cadence. B recovers coherent unsupported local groups on new ToF measurements. G uses global scale only at RGB cadence; it omits local corrections and can lose local metric accuracy. A fresh RGB prediction may use a clearly identified historical scale between ToF measurements. Diagnostic snapshots save one matched input only when clicked.</source>
-      <translation>仅用于 UniDepth。A 按 RGB 节奏运行原融合；B 在新 ToF 测量到达时恢复可信局部测点组；G 按 RGB 节奏只校正全局尺度，省略局部校正，局部米制精度可能降低。两次 ToF 测量之间的新 RGB 预测可能使用明确标记的历史尺度。诊断快照仅在点击时保存一份配对输入。</translation>
-    </message>
-    <message>
-      <source>UniDepth only. A uses original fusion at RGB cadence. B recovers coherent unsupported local groups on new ToF measurements. RGB preview stays independent. Diagnostic snapshots save one matched input only when clicked.</source>
-      <translation>仅用于 UniDepth。A 按 RGB 节奏运行原融合；B 在新 ToF 测量到达时恢复可信的局部测点组。RGB 预览独立。诊断快照仅在点击时保存一份配对输入。</translation>
-    </message>
-    <message>
-      <source>UniDepth only. A keeps the original fusion and RGB cadence. B keeps supported original results and recovers coherent unsupported local groups on new ToF measurements. C uses the full edge-residual experiment. RGB preview stays independent. Diagnostic snapshots save one matched input only when clicked.</source>
-      <translation>仅用于 UniDepth。A 保留旧融合与 RGB 节奏；B 保留已有支持的旧结果，在新 ToF 测量中恢复一致但缺少局部支持的区域；C 保留全分辨率残差试验。RGB 预览独立。只有点击诊断快照才保存一次配对输入。</translation>
     </message>
     <message>
       <source>Diagnostic snapshot saved to:
@@ -674,23 +643,6 @@
       <source>H uses global scale at RGB cadence and may reuse the newest dToF measurement within 100 ms. Reuse is labeled; it is not a new measurement. Without a valid pair, only the historical scale is retained.</source>
       <translation>H 按 RGB 节奏做全局尺度校正，允许复用配对时间差 100 ms 内最新的 dToF 测量。界面标注复用，不视为新测量；没有有效配对时仅沿用历史尺度。</translation>
     </message>
-    <message><source>Record diagnostic (10 s)</source><translation>录制诊断（10秒）</translation></message>
-    <message><source>Show ToF points</source><translation>显示 ToF 测点</translation></message>
-    <message><source>Hide ToF points</source><translation>隐藏 ToF 测点</translation></message>
-    <message><source>Show monocular depth only</source><translation>仅显示单目深度</translation></message>
-    <message><source>Restore corrected depth</source><translation>恢复校正深度</translation></message>
-    <message><source>Compare the same frame before ToF correction. Saved depth maps still use the corrected result.</source><translation>对比同一帧校正前的单目深度。保存深度图仍使用融合结果。</translation></message>
-    <message><source>Point centers use the measured depth color. White outlines mark points used to correct this frame.</source><translation>点中心沿用对应测量深度的颜色。白色外圈表示参与本帧校正。</translation></message>
-    <message><source>ToF / RGB alignment</source><translation>ToF / RGB 对照</translation></message>
-    <message><source>Return to depth</source><translation>返回深度图</translation></message>
-    <message><source>Show projected ToF points on the RGB image paired with this depth frame.</source><translation>在当前深度帧配对的 RGB 图像上显示 ToF 测点。</translation></message>
-    <message><source>Record synchronized RGB, native ToF, monocular and fused depth for 10 seconds (about 1 GB).</source><translation>同步录制 RGB、原生 ToF、单目和融合深度，10 秒约 1 GB。</translation></message>
-    <message><source>Open recording folder</source><translation>打开录制目录</translation></message>
-    <message><source>Select diagnostic recording folder</source><translation>选择诊断录制目录</translation></message>
-    <message><source>Recording failed: %1</source><translation>录制失败：%1</translation></message>
-    <message><source>Recording %1 s</source><translation>录制中，剩余 %1 秒</translation></message>
-    <message><source>Recording: %1 frames, %2 dropped</source><translation>录制中：%1 帧，丢帧 %2</translation></message>
-    <message><source>Saved %1 frames (%2 dropped) to %3</source><translation>已保存 %1 帧（丢帧 %2）：%3</translation></message>
 </context>
   <context>
     <name>ImagePresentation</name>
@@ -1039,14 +991,7 @@
 </context>
   <context>
     <name>RvDepthView</name>
-    <message><source>Waiting for monocular depth</source><translation>等待单目深度</translation></message>
-    <message><source>Waiting for paired RGB</source><translation>等待配对 RGB</translation></message>
-    <message><source>(%1, %2) monocular: %3 m camera-Z</source><translation>（%1，%2）单目深度：%3 m（相机 Z）</translation></message>
     <message><source>(%1, %2) dToF estimate: %3 m</source><translation>（%1，%2）dToF 补点估计 %3 m</translation></message>
-    <message>
-      <source>(%1, %2) raw prediction: %3 m (radial, unfiltered)</source>
-      <translation>(%1, %2) 原始预测：%3 m（径向，未筛选）</translation>
-    </message>
     <message>
       <source>Waiting for RV1103 depth</source>
       <translation>等待RV1103深度数据</translation>
@@ -1224,14 +1169,10 @@ Projected camera-Z %8 m</source>
       <translation>正在启动摄像头和深度采集…</translation>
     </message>
     <message><source>Native ToF depth expired</source><translation>原生 ToF 深度已过期</translation></message>
-    <message><source>LiteSR depth expired</source><translation>LiteSR 深度已过期</translation></message>
+    <message><source>The previous board capture identity is unavailable. Reconnect from Device Manager.</source><translation>无法确认上一轮板端采集的身份。请在设备管理中重新连接。</translation></message>
     <message>
       <source>The required host inference files are missing or invalid.</source>
       <translation>上位机推理所需的文件缺失或无效。</translation>
-    </message>
-    <message>
-      <source>Depth 256 | raw prediction (unfiltered, radial m) | inference %1 ms</source>
-      <translation>深度 256 | 原始预测（未筛选，径向米）| 推理 %1 ms</translation>
     </message>
     <message>
       <source>Imaging scheme switch was not accepted</source>
@@ -1485,7 +1426,6 @@ Projected camera-Z %8 m</source>
       <source>H.265 video and native 48x32 ToF</source>
       <translation>H.265 视频与 48×32 原生 ToF</translation>
     </message>
-    <message><source>H.265 video and board LiteSR</source><translation>H.265 视频与板端 LiteSR</translation></message>
     <message>
       <source>RV1103 | %1 | %2×%3 | compute %4 ms</source>
       <translation>RV1103 | %1 | %2×%3 | 计算 %4 ms</translation>
@@ -2261,7 +2201,7 @@ After reconnecting power, click 'Connect selected module' using the new values.<
   <context>
     <name>RvDeviceManagerDialog</name>
     <message><source>Connect via USB to read the public key automatically.</source><translation>点击“USB 一键连接”后会自动读取公钥。</translation></message>
-    <message><source>The RV1103 is connected. Wait for inference device detection to finish, then click Start.</source><translation>RV1103 已连接。请等待推理设备检测完成后点击“开始”。</translation></message>
+    <message><source>The RV1103 is connected. Imaging will start after inference device detection.</source><translation>RV1103 已连接，推理设备检测完成后将自动启动成像。</translation></message>
     <message><source>2026-11-09 calibration / F=6 (automatic)</source><translation>2026-11-09 标定 / F=6（自动应用）</translation></message>
     <message>
       <source>Read automatically when connecting</source>

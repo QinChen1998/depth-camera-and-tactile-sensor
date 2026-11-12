@@ -14,9 +14,7 @@ BOOT = '11111111-2222-3333-4444-555555555555'
 CAPABILITIES = ('{"native_capture_protocol":"native-m48-m16-m8-v2","fov":6,'
                 '"model_inference":false,"photon_enabled":false,"m8":false,'
                 '"m16":true,"m48":true,"native_hole_fill_protocol":"native48-hole-fill-v1"}')
-LITESR_SHA = 'a916354dce57bd4cf4559cde91270cbd50bb2b14302ed277e8653e02b525268b'
 SCRIPT = Path(__file__).resolve().parents[1] / 'tools/rv_control/bootstrap/install.sh'
-MODEL_SWITCH = SCRIPT.parents[2] / 'rv_capture/payload/model-switch.sh'
 
 
 def shell_path(path):
@@ -64,7 +62,9 @@ class BoardBootstrapTests(unittest.TestCase):
         self.write('root/rv1103_mw_spi/bin/tof_driver', self.previous_driver, True)
         self.write('oem/usr/bin/rkipc', '#!/bin/sh\nexit 0\n', True)
         (self.root / 'oem/usr/share/iqfiles').mkdir(parents=True)
-        self.write('userdata/rkipc.ini', 'original camera settings\n')
+        self.camera_ini = '# original camera settings\n[video.source]\n[video.0]\n[isp]\n'
+        self.write('userdata/rkipc.ini', self.camera_ini)
+        self.write('stage/depth/camera_rtsp_config.awk', (SCRIPT.parent / 'camera_rtsp_config.awk').read_bytes())
         camera_driver = self.root / 'sys/bus/i2c/devices/4-0030/driver'
         camera_driver.parent.mkdir(parents=True)
         if os.name == 'nt':
@@ -96,6 +96,10 @@ class BoardBootstrapTests(unittest.TestCase):
         script = SCRIPT.read_text(encoding='utf-8')
         script = re.sub(r'(?<![A-Za-z0-9_./])/(?:root|oem|usr|etc|sys|run|proc|userdata)(?=/|\b)',
                         lambda match: fixture_root + match[0], script)
+        # The runtime value is written into an INI and is never opened.
+        # Keep a board path here, including when the fixture uses DOS short paths.
+        script = script.replace('runtime=' + fixture_root + '/run/dtof_candidates/hd_setup_check',
+                                'runtime=/run/dtof_candidates/hd_setup_check')
         if os.name == 'nt':
             # Represent the sysfs binding without requiring Windows symlink
             # privileges. Ordinary deployment paths retain all original checks.
@@ -133,44 +137,10 @@ class BoardBootstrapTests(unittest.TestCase):
         self.assertEqual(backup.read_bytes(), self.previous_driver)
         self.assertEqual(driver.read_bytes(), self.new_driver)
         self.assertEqual((self.root / 'root/r144_depth/spi_native16.enabled').read_text().strip(), SERIAL)
-        self.assertEqual((self.root / 'root/r144_depth/rkipc_before_setup.ini').read_text(), 'original camera settings\n')
-        self.assertEqual((self.root / 'userdata/rkipc.ini').read_text(), 'original camera settings\n')
+        self.assertEqual((self.root / 'root/r144_depth/rkipc_before_setup.ini').read_text(), self.camera_ini)
+        self.assertEqual((self.root / 'userdata/rkipc.ini').read_text(), self.camera_ini)
         self.assertEqual((self.root / 'oem/usr/bin/RkLunch.sh.dcts-before-bootstrap').read_text(), self.original_oem)
         self.assertFalse((self.root / 'run/dcts-board-install.lock').exists())
-
-    def stage_model(self, model_sha):
-        receipt = f'{{"candidate_mode":13,"fov":6,"model_sha256":"{model_sha}"}}'
-        self.write('stage/candidate/model-switch.sh', MODEL_SWITCH.read_bytes(), True)
-        self.write('stage/candidate/litesr_near_gui', '#!/bin/sh\n'
-                   '[ "$1" = --check-model ] && [ -s "$2" ] || exit 2\n'
-                   "printf '%s\\n' '" + receipt + "'\n", True)
-        for name in ('litesr-near-256.dctsm', 'librknnmrt.so', 'libcrypto.so.1.1'):
-            self.write('stage/candidate/' + name, 'simulated import asset\n')
-
-    def test_activation_imports_verified_litesr_with_switcher(self):
-        self.stage_model(LITESR_SHA)
-        code, output = self.run_setup('activate')
-        self.assertEqual(code, 0, output)
-        candidate = self.root / 'root/dtof_candidates_20261009'
-        for name in ('model-switch.sh', 'litesr_near_gui', 'litesr-near-256.dctsm', 'librknnmrt.so', 'libcrypto.so.1.1'):
-            self.assertTrue((candidate / name).is_file(), name)
-
-    def test_model_identity_failure_preserves_previous_deployment(self):
-        self.stage_model('0' * 64)
-        previous = self.write('root/dtof_candidates_20261009/session.sh', 'previous deployment\n')
-        code, output = self.run_setup('activate', mode='repair')
-        self.assertNotEqual(code, 0, output)
-        self.assertIn('LiteSR model or calibration identity differs', output)
-        self.assertEqual(previous.read_text(), 'previous deployment\n')
-        self.assertEqual((self.root / 'root/rv1103_mw_spi/bin/tof_driver').read_bytes(), self.previous_driver)
-
-    def test_missing_litesr_dependency_fails_before_activation(self):
-        self.stage_model(LITESR_SHA)
-        (self.stage / 'candidate/librknnmrt.so').unlink()
-        code, output = self.run_setup('activate')
-        self.assertNotEqual(code, 0, output)
-        self.assertIn('protected model could not be verified', output)
-        self.assertFalse((self.root / 'root/dtof_candidates_20261009').exists())
 
     def test_activation_failure_restores_driver_and_startup(self):
         code, output = self.run_setup('activate', BOOTSTRAP_FAIL_CANDIDATE_MOVE='1')
@@ -200,6 +170,7 @@ class BoardBootstrapTests(unittest.TestCase):
         self.write('root/r144_depth/service.sh', 'saved sensor arguments\n')
         self.write('root/dtof_candidates_20261009/session.sh', 'saved candidate arguments\n')
         self.write('root/dtof_candidates_20261009/old-model.dctsm', 'obsolete active payload\n')
+        self.write('root/dtof_candidates_20261009/model-switch.sh', 'obsolete launcher\n', True)
         self.write('root/dtof_tuner/persistence/record.json', 'saved engineering history\n')
         self.write('etc/init.d/S99zdepth', 'old startup\n')
         self.write('stage/tuner/session.sh', '#!/bin/sh\nexit 0\n', True)
@@ -207,11 +178,15 @@ class BoardBootstrapTests(unittest.TestCase):
 
     def test_usb_repair_replaces_different_files_and_installs_complete_runtime(self):
         self.existing_runtime()
+        staging_residue = self.write('oem/usr/bin/.RkLunch.dcts-bootstrap', 'interrupted older update\n')
         code, output = self.run_setup('activate', mode='repair')
         self.assertEqual(code, 0, output)
+        self.assertTrue(staging_residue.is_file())
+        self.assertIn('init_form_ini = 0', (self.stage / 'camera-check.ini').read_text())
         self.assertEqual((self.root/'root/r144_depth/tmf8829_ext').read_bytes(), self.new_driver)
         self.assertEqual((self.root/'root/rv1103_mw_spi/bin/tof_driver').read_bytes(), self.new_driver)
         self.assertFalse((self.root/'root/dtof_candidates_20261009/old-model.dctsm').exists())
+        self.assertFalse((self.root/'root/dtof_candidates_20261009/model-switch.sh').exists())
         self.assertEqual((self.root/'root/dtof_tuner/persistence/record.json').read_text(), 'saved engineering history\n')
         self.assertEqual((self.root/'stage.before/depth/service.sh').read_text(), 'saved sensor arguments\n')
         self.assertFalse((self.root/'run/dtof_switch.lock').exists())
@@ -286,6 +261,82 @@ class BoardBootstrapTests(unittest.TestCase):
         self.assertEqual(code, 0, output)
         self.assertEqual(backup.read_text(), 'earlier factory startup\n')
         self.assertEqual((self.root/'oem/usr/bin/RkLunch.sh').read_text().count(guard), 1)
+
+    def test_candidate_recovery_requires_the_released_generation_and_idle_resources(self):
+        previous, new = 'a' * 32, 'b' * 32
+        candidate = 'root/dtof_candidates_20261009'
+        state = 'run/dtof_candidates'
+        root = shell_path(self.root)
+        self.write(candidate + '/native_gui.sh', '#!/bin/sh\n[ "$1" = validate ]\n', True)
+        self.write(candidate + '/session.sh',
+                   '#!/bin/sh\nprintf \'{"generation":"%s"}\\n\' "$2" > ' + root + '/' + state + '/ready.json\n', True)
+        start = self.write('root/r144_depth/ensure-spi.sh',
+                           '#!/bin/sh\ntouch ' + root + '/start-checked\n', True)
+        receipt = self.write(state + '/released', BOOT + ' ' + previous + '\n')
+        script = (SCRIPT.parent / 'candidate-control.sh').read_text(encoding='utf-8')
+        script = script.replace('/proc/[0-9]*/fd/*', root + '/proc/[0-9]*/fd/*')
+        script = re.sub(r'(?<![A-Za-z0-9_./])(/root/|/run/|/proc/sys/|/proc/net/)',
+                        lambda match: root + match[0], script)
+        path = self.write('recovery-fixture.sh',
+                          'PATH=' + root + '/commands:/usr/bin:/bin:$PATH\n' + script)
+
+        def invoke(*args, **env):
+            return subprocess.run([self.bash, '--noprofile', '--norc', shell_path(path), *args],
+                                  env=dict(os.environ, DCTS_FIXTURE_ROOT=root, **env), text=True,
+                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=20)
+
+        capability = invoke('capabilities')
+        self.assertEqual(capability.returncode, 0, capability.stdout)
+        self.assertIn('clean-candidate-restart-v1', capability.stdout)
+        args = ('auto-candidate', '24', new, '1,1', previous)
+        wrong_boot = invoke(*args, '22222222-2222-3333-4444-555555555555')
+        self.assertNotEqual(wrong_boot.returncode, 0, wrong_boot.stdout)
+        self.assertIn('DTOF_ERROR: Board boot changed', wrong_boot.stdout)
+        switch_lock = self.root / 'run/dtof_switch.lock'
+        switch_lock.mkdir()
+        occupied = invoke(*args, BOOT)
+        self.assertNotEqual(occupied.returncode, 0, occupied.stdout)
+        self.assertIn('DTOF_ERROR: Another board capture transition', occupied.stdout)
+        switch_lock.rmdir()
+        for file, body, message in (
+            (state + '/fault', 'readback failure', 'fault is latched'),
+            (state + '/fault', 'sensor-readback\n', 'Native ToF sensor readback failed'),
+            ('run/r144_fusion_20260923/session.generation', new, 'different capture generation'),
+            ('proc/net/tcp', '0: 00000000:2280 00000000:0000 0A 0 0 0 0 0 1234\n', 'owns the RTSP or ToF stream listener'),
+            ('proc/net/tcp6', '0: 00000000000000000000000000000000:022A 0:0000 0A\n', 'owns the RTSP or ToF stream listener'),
+        ):
+            with self.subTest(file=file):
+                fixture = self.write(file, body)
+                rejected = invoke(*args, BOOT)
+                self.assertNotEqual(rejected.returncode, 0, rejected.stdout)
+                self.assertIn('DTOF_ERROR: ', rejected.stdout)
+                self.assertIn(message, rejected.stdout)
+                if file.startswith('run/r144_fusion_20260923/'):
+                    fixture.unlink()
+                    fixture.parent.rmdir()
+                elif file.startswith('proc/'):
+                    fixture.write_text('')
+                else:
+                    fixture.unlink()
+        self.write('commands/readlink', '#!/bin/sh\n'
+                   'case "$1" in "$DCTS_FIXTURE_ROOT"/proc/4711/fd/8) echo /dev/i2c-3;;\n'
+                   '*) exec /usr/bin/readlink "$@";; esac\n', True)
+        descriptor = self.write('proc/4711/fd/8', '')
+        occupied = invoke(*args, BOOT)
+        self.assertNotEqual(occupied.returncode, 0, occupied.stdout)
+        self.assertIn('DTOF_ERROR: An unrecognized process retains camera or ToF descriptors', occupied.stdout)
+        descriptor.unlink()
+        rejected = invoke('auto-candidate', '24', new, '1,1', 'c' * 32, BOOT)
+        self.assertNotEqual(rejected.returncode, 0, rejected.stdout)
+        self.assertIn('DTOF_ERROR: Previous capture has no clean-release receipt', rejected.stdout)
+        self.assertFalse((self.root / 'start-checked').exists())
+        self.assertTrue(start.is_file())
+
+        accepted = invoke(*args, BOOT)
+        self.assertEqual(accepted.returncode, 0, accepted.stdout)
+        self.assertIn(new, accepted.stdout)
+        self.assertTrue((self.root / 'start-checked').is_file())
+        self.assertFalse(receipt.exists())
 
     def test_wrong_device_is_rejected(self):
         code, output = self.run_setup(serial='0000000000000000')

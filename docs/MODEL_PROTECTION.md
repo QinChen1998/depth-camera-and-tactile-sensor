@@ -1,6 +1,6 @@
 # 模型保护与安装包约定
 
-当前开发版的上位机辅助推理使用 G。未来安装构建从主工程编译程序，收集 UniDepth 运行时和板端原生采集支持。I 方案封存在本地 `archives/`，该目录位于安装载荷之外。保护实现使用原生 DLL、AES-256-GCM 加密和 ORT 内存加载。
+上位机辅助推理使用 UniDepth 和 ToF 全局尺度校正。安装构建从主工程编译程序，收集 UniDepth 运行时和板端原生采集支持。I 方案封存在本地 `archives/`，该目录位于安装载荷之外。保护实现使用原生 DLL、AES-256-GCM 加密和 ORT 内存加载。
 
 用户已于 2026 年 11 月 2 日确认：未来制作客户安装包时采用原生 DLL、AES-256-GCM 加密模型和 ORT 内存加载。目标是防止客户从安装目录直接复制得到可用的明文模型，模型随上位机提供使用。防蒸馏和强对抗内存提取不属于本次目标，设备授权、TPM 或云端服务也不是当前既定前提。
 
@@ -123,14 +123,14 @@ Release/Debug 各通过 28 个合成场景，其中 19 份有效深度、单目�
 
 ## RV1103 原生采集和 LiteSR
 
-`tools/rv_capture/` 提供 Native48/Native16 测量、H.265 进度及会话预设。LiteSR mode13 使用私有 F6 程序，先认证 AES-256-GCM 密文和原模型 SHA256，再在内存中初始化 RKNN 并清零临时明文。导入阶段认证密文和 F6 版本，运行阶段初始化 NPU。纯采集程序使用独立构建。文件和导入入口见 [板端源码与构建](../tools/rv_capture/README.md)。
+`tools/rv_capture/` 提供 Native48/Native16 测量、H.265 进度及会话预设。板端导入使用纯采集载荷，UniDepth 由主机运行包加载。构建和导入入口见 [板端源码与构建](../tools/rv_capture/README.md)。
 
 ## 安装包构建
 
 在 PowerShell 7 中执行，使用 VS 2022 v143、Qt 6.11.1 MSVC x64、匹配的 Qt 源码/许可材料及 Inno Setup 6.7.3。默认读取已部署到 `x64/Release/platform-tools` 的 ADB，也可通过 `-PlatformTools` 指定来源。通过 `-VlcRoot` 指定已校验的 VideoLAN VLC 3 x64 解压目录，托管 H.265 使用其中的 libVLC 和插件。构建目录使用 `x64/validation/` 下的新子目录。
 
 ```powershell
-./tools/installer/build.ps1 -BuildDirectory (Join-Path $PWD 'x64/validation/installer_release') -QtRoot E:/Qt/6.11.1/msvc2022_64 -VlcRoot C:/path/to/vlc-3.0.24 -TensorRtRuntime ./UniDepthRuntimeRgb672VgaFP16RTX -CompatibleRuntime ./UniDepthRuntimeCompatible -Version 1.1.7 -Iscc 'C:/path/to/ISCC.exe' -ChineseMessages 'C:/path/to/Languages/ChineseSimplified.isl'
+./tools/installer/build.ps1 -BuildDirectory (Join-Path $PWD 'x64/validation/installer_release') -QtRoot E:/Qt/6.11.1/msvc2022_64 -VlcRoot C:/path/to/vlc-3.0.24 -TensorRtRuntime ./UniDepthRuntimeRgb672VgaFP16RTX -CompatibleRuntime ./UniDepthRuntimeCompatible -Version 1.1.8 -Iscc 'C:/path/to/ISCC.exe' -ChineseMessages 'C:/path/to/Languages/ChineseSimplified.isl'
 ./tools/installer/prepare-sandbox.ps1 -BuildDirectory (Join-Path $PWD 'x64/validation/installer_release')
 ```
 

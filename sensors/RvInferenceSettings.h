@@ -8,6 +8,7 @@
 #include <memory>
 class QWidget;
 class QDialog;
+class SensorMainWindow;
 
 // Startup detects candidates. Model benchmarks run only on an explicit request.
 class RvInferenceSettings final:public QObject {
@@ -37,6 +38,7 @@ signals:
     void finished();
 private:
     friend int runRvInferenceDiscoveryTest(const QString &reportPath);
+    friend int runUsbEnrollmentLiveValidation(SensorMainWindow &,const QString &);
     void startDetection(bool benchmark);
     void startBenchmark();
     void next();

@@ -13,7 +13,7 @@ tuner=/root/dtof_tuner
 init=/etc/init.d/S99zdepth
 oem=/oem/usr/bin/RkLunch.sh
 backup=/oem/usr/bin/RkLunch.sh.dcts-before-bootstrap
-oem_new=/oem/usr/bin/.RkLunch.dcts-bootstrap
+oem_new=
 driver=/root/rv1103_mw_spi/bin/tof_driver
 fail(){ printf 'DTOF_ERROR: %s\n' "$*"; exit 2; }
 exists(){ [ -e "$1" ] || [ -L "$1" ]; }
@@ -81,7 +81,7 @@ fi
 tr '\000' '\n' </proc/device-tree/compatible | grep -qx 'rockchip,rv1103' ||
  fail 'Unsupported board firmware.'
 if [ "$mode" = fresh ]; then
- for path in "$depth" "$candidate" "$init" "$backup" "$oem_new"; do
+ for path in "$depth" "$candidate" "$init" "$backup"; do
   ! exists "$path" || fail 'A previous or partial board deployment exists. Review it before setup.'
  done
 else
@@ -91,7 +91,6 @@ else
  for path in "$init" "$backup"; do
   ! exists "$path" || { [ -f "$path" ] && [ ! -L "$path" ]; } || fail 'Managed startup file is not a regular file.'
  done
- ! exists "$oem_new" || fail 'Factory startup staging file already exists.'
 fi
 for path in /run/r144_depth /run/dtof_candidates /run/dtof_tuner; do
  ! exists "$path" || { [ -d "$path" ] && [ ! -L "$path" ]; } || fail 'Runtime state directory is not a regular directory.'
@@ -148,7 +147,7 @@ chmod 755 "$stage/depth/tmf8829_ext"
 printf '%s\n' "$serial" > "$stage/depth/spi_native16.enabled"
 for file in "$stage/depth/"*.sh "$stage/candidate/"*.sh "$stage/S99zdepth"; do sh -n "$file"; done
 oem_sha=$(digest "$oem")
-(set -C; : > "$oem_new") || fail 'The factory startup staging file already exists.'
+oem_new=$(mktemp /oem/usr/bin/.RkLunch.dcts.XXXXXX) || fail 'Cannot stage the factory startup update.'
 prepared_oem=1
 if grep -q '^[[:space:]]*\[ ! -f /root/r144_depth/spi_native16.enabled \] || return 0$' "$oem"; then
  cp -p "$oem" "$oem_new"
@@ -172,6 +171,8 @@ if [ "$mode" = repair ] && [ -f "$depth/rkipc_before_setup.ini" ] && [ ! -L "$de
 fi
 cp -p /userdata/rkipc.ini "$stage/camera-before.ini"
 camera_config_sha=$(digest "$stage/camera-before.ini")
+awk -v runtime=/run/dtof_candidates/hd_setup_check -f "$stage/depth/camera_rtsp_config.awk" "$stage/camera-before.ini" > "$stage/camera-check.ini" ||
+ fail 'The managed H.265 and ISP settings could not be generated from the camera configuration.'
 if [ -n "$camera" ]; then
  born=$(starttime "$camera")
  [ -n "$born" ] && [ "$(pidof rkipc)" = "$camera" ] &&
@@ -204,12 +205,6 @@ export LD_LIBRARY_PATH="$stage/depth:/oem/usr/lib:/usr/lib"
  fail 'The Native16 capture program could not start on this firmware.'
 grep -qx "{\"native_capture_protocol\":\"native-m48-m16-m8-v2\",\"fov\":$fov,\"model_inference\":false,\"photon_enabled\":false,\"m8\":false,\"m16\":true,\"m48\":true,\"native_hole_fill_protocol\":\"native48-hole-fill-v1\"}" "$stage/native.json" ||
  fail 'The native capture program did not report the expected calibration and hole-fill capabilities.'
-if [ -e "$stage/candidate/litesr_near_gui" ]; then
- "$stage/candidate/model-switch.sh" check-litesr > "$stage/litesr.json" ||
-  fail 'The F6 LiteSR program or protected model could not be verified on this firmware.'
- grep -qx "{\"candidate_mode\":13,\"fov\":$fov,\"model_sha256\":\"a916354dce57bd4cf4559cde91270cbd50bb2b14302ed277e8653e02b525268b\"}" "$stage/litesr.json" ||
-  fail 'The installed LiteSR model or calibration identity differs from the expected payload.'
-fi
 [ "$(digest "$oem")" = "$oem_sha" ] || fail 'The factory startup script changed during setup.'
 if ! exists "$backup"; then ln "$oem" "$backup";saved_oem=1; fi
 cp -p "$oem" "$stage/oem-before"

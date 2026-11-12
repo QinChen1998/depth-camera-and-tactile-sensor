@@ -187,7 +187,7 @@ def main():
     gui = next(p for p in folder.glob('*.exe') if not p.name.isascii())
     target = args.output.resolve();target.mkdir(parents=True, exist_ok=False)
     manifest = {'serial': args.serial, 'started_utc': datetime.now(timezone.utc).isoformat(),
-                'mode':args.mode,'model': 'host_unidepth_rgb672_vga_fp16_tof48_g', 'camera_enabled': args.mode=='host',
+                'mode':args.mode,'model': 'host_unidepth_rgb672_vga_fp16_tof48_b', 'camera_enabled': args.mode=='host',
                 'idle_seconds': 30, 'inference_seconds': 600, 'cooldown_seconds': 60,
                 'sensor_saved_parameters_written': False, 'governor_or_thermal_controls_written': False,
                 'environment_note': args.environment_note}

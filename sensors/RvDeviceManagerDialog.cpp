@@ -1,6 +1,5 @@
 #include "RvDeviceManagerDialog.h"
 #include "RvImportDiagnostics.h"
-#include "RvInferenceSettings.h"
 #include "RvSessionController.h"
 #include "RvTunerController.h"
 #include "../RuntimeDiscovery.h"
@@ -179,8 +178,8 @@ void RvDeviceManagerDialog::finishUsbEnrollment(bool added)
     m_usbEnrollmentPending = false;
     if (added) {
         reload();
-        if (m_store) message(m_session && m_session->assistDepthEnabled() && RvInferenceSettings::instance()->detecting()
-            ? tr("The RV1103 is connected. Wait for inference device detection to finish, then click Start.")
+        if (m_store) message(m_session && m_session->automaticConnectionStage()==RvSessionController::AutomaticConnectionStage::PreparingInference
+            ? tr("The RV1103 is connected. Imaging will start after inference device detection.")
             : tr("The RV1103 was verified and selected for imaging."));
     } else {
         busy(false);

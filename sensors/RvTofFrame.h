@@ -12,13 +12,10 @@
 namespace RvCaptureContract {
 inline bool boardImagingIdentity(const QJsonObject& m){
     const int mode=m["candidate_mode"].toInt(-1);
-    const bool liteSr=isLiteSr(mode);
-    return supports(mode)&&m["engine"]==engine(mode)&&m["model_sha256"]==modelSha(mode)
-        &&m["capture_only"]==!liteSr&&m["inference_location"]==(liteSr?"board":"none")
-        &&m["depth_present"]==liteSr&&m["photon_enabled"]==liteSr
-        &&m["width"]==Width&&m["height"]==Height&&m["fresh_ms"]==FreshMs
-        &&(!liteSr||(m["checkpoint_sha256"]==LiteSrCheckpointSha&&m["training_minimum_m"]==0.01
-            &&m["input_rotation_degrees"]==0&&m["intensity_white_counts"]==LiteSrWhiteCounts));
+    return supports(mode)&&m["engine"]==NativeEngine&&m["model_sha256"]==""
+        &&m["capture_only"]==true&&m["inference_location"]=="none"
+        &&m["depth_present"]==false&&m["photon_enabled"]==false
+        &&m["width"]==ReceiptWidth&&m["height"]==ReceiptHeight&&m["fresh_ms"]==FreshMs;
 }
 }
 
@@ -43,9 +40,8 @@ private:
         const int mode=metadata["candidate_mode"].toInt(-1);
         const bool protocol=(metadata["protocol"]=="DTF3"&&mode>=0&&mode<10)
             ||((metadata["protocol"]==RvCaptureContract::Protocol||metadata["protocol"]==RvCaptureContract::PairedProtocol)
-                &&((RvCaptureContract::captureOnly(mode)&&metadata["engine"]==RvCaptureContract::engine(mode)
-                    &&metadata["model_sha256"]==""&&metadata["capture_only"]==true&&metadata["depth_present"]==false&&metadata["photon_enabled"]==false)
-                   ||(RvCaptureContract::isLiteSr(mode)&&RvCaptureContract::boardImagingIdentity(metadata))));
+                &&RvCaptureContract::supports(mode)&&metadata["engine"]==RvCaptureContract::NativeEngine
+                &&metadata["model_sha256"]==""&&metadata["capture_only"]==true&&metadata["depth_present"]==false&&metadata["photon_enabled"]==false);
         const bool candidate = metadata["work_mode"]=="dtof_candidate" && protocol
             && QRegularExpression("^[0-9a-f]{32}$").match(metadata["generation"].toString()).hasMatch()
             && QRegularExpression("^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$").match(metadata["boot_id"].toString()).hasMatch()
@@ -72,7 +68,7 @@ public:
     static constexpr double FreshRgbPairBudgetMs=200.;
     static constexpr double PairClockUncertaintyMs=35.;
     static constexpr const char *FreshRgbPairPolicy="bounded_software_time_pair_not_hardware_sync";
-    static bool isHostFusionExperiment(const QJsonValue &experiment) {return experiment=="G"||experiment=="B";}
+    static bool isHostFusionExperiment(const QJsonValue &experiment) {return experiment=="B";}
     bool isValidForHostFusion() const {
         const auto fov=metadata.contains("dtof_fov_correction")?metadata["dtof_fov_correction"]:metadata["tof_fov_correction"];
         const double delta=metadata["pair_delta_ms"].toDouble(1000),uncertainty=metadata["pair_clock_uncertainty_ms"].toDouble(-1);

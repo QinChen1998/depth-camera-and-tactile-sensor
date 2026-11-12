@@ -7,11 +7,9 @@
     "camera"
   ],
   "imaging_schemes": [
-    "host_unidepth_rgb672_vga_fp16_tof48_g",
     "host_unidepth_rgb672_vga_fp16_tof48_b",
     "board_native_tof48",
-    "board_native_tof48_high_accuracy",
-    "board_litesr_near_256"
+    "board_native_tof48_high_accuracy"
   ],
-  "unidepth_correction": "G"
+  "unidepth_correction": "B"
 }

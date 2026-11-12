@@ -130,16 +130,14 @@ Result monocular(const std::vector<float> &mono,const char *reason,QSize size) {
 }
 
 Result fuseGlobalScale(const std::vector<float> &mono,const RvTofFrame &tof,
-            const Calibration &cal,const RvCameraView::Profile &view,const QJsonArray &preferredNativeIndices,GlobalScaleFit fit) {
+            const Calibration &cal,const RvCameraView::Profile &view) {
     const auto cameraSize=view.outputSize();
     const int nativeCount=cal.nativeCount();
     const int width=view.outputWidth,height=view.outputHeight;
     Result result;result.size=cameraSize;
     result.globalReasons=result.localReasons=QByteArray(nativeCount,Invalid);
     const auto fail=[&](const char *message) {result.depth.clear();result.error=QString::fromLatin1(message);return result;};
-    const bool sourceG=fit==GlobalScaleFit::SourceG;
-    if(sourceG&&(!RvTofFrame::isHostFusionExperiment(tof.metadata["assist_experiment"])
-        ||tof.metadata["tof_warning_flags"]!=0||!preferredNativeIndices.isEmpty()))
+    if(!RvTofFrame::isHostFusionExperiment(tof.metadata["assist_experiment"])||tof.metadata["tof_warning_flags"]!=0)
         return fail("Unmatched RGB/dToF frame or calibration");
     const auto projection=tof.metadata.value(NativeProjectionField);
     if(!projection.isUndefined()&&(projection!=defaultNativeProjection(tof)||view.outputSize()!=QSize(480,640)))
@@ -166,12 +164,6 @@ Result fuseGlobalScale(const std::vector<float> &mono,const RvTofFrame &tof,
     };
     std::vector<Anchor> anchors;
     anchors.reserve(nativeCount);
-    std::set<int> preferred;
-    for(const auto &id:preferredNativeIndices){
-        if(!id.isDouble()||id.toDouble()!=id.toInt(-1)||id.toInt(-1)<0||id.toInt(-1)>=nativeCount)
-            return fail("Invalid stable native point selection");
-        preferred.insert(id.toInt());
-    }
     int good=0,edgeRejected=0,projected=0;
     const auto project=nativeProjector(tof);
     for(int i=0;i<nativeCount;++i) {
@@ -191,12 +183,10 @@ Result fuseGlobalScale(const std::vector<float> &mono,const RvTofFrame &tof,
         }
         if(high>1.4*low) {result.globalReasons[i]=result.localReasons[i]=Boundary;++edgeRejected;continue;}
         result.globalReasons[i]=result.localReasons[i]=GlobalRejected;
-        if(!preferred.empty()&&!preferred.count(i))continue;
         anchors.push_back({u,v,z,std::log(z/sample(mono,width,height,u,v)),i});
     }
     result.diagnostics={{"tof_total_zones",nativeCount},{"tof_good_zones",good},{"tof_projected_in_view",projected},
         {"anchors_projected",int(anchors.size())},{"anchors_edge_rejected",edgeRejected}};
-    if(!sourceG)result.diagnostics["preferred_native_indices"]=preferredNativeIndices;
     if(anchors.size()<MinimumAnchors)return monocular("Too few reliable dToF anchors in the camera field of view");
     std::vector<double> ratios;for(const auto &a:anchors)ratios.push_back(a.ratio);
     // Estimate the common scale before rejecting discrepancies. Large uniform
@@ -227,8 +217,8 @@ Result fuseGlobalScale(const std::vector<float> &mono,const RvTofFrame &tof,
     if(supported&&mad>std::log(1.3)){
         // Outliers and duplicate projections already cannot constrain scale.
         // They must not be the sole reason to discard a coherent retained
-        // majority. Keep the original gate, count/coverage checks, point IDs,
-        // and fitting arithmetic; do not retry legacy A/B or an accepted fit.
+        // majority. The recheck retains the existing gate, spatial coverage,
+        // point IDs, and fitting arithmetic.
         const double retainedCentre=median(accepted);
         std::vector<double> retainedDeviations;retainedDeviations.reserve(accepted.size());
         for(double ratio:accepted)retainedDeviations.push_back(std::abs(ratio-retainedCentre));
@@ -241,9 +231,7 @@ Result fuseGlobalScale(const std::vector<float> &mono,const RvTofFrame &tof,
     if(!supported||fitMad>std::log(1.3))
         return monocular("dToF anchors are inconsistent or have insufficient spatial coverage");
     const double logScale=median(accepted),scale=std::exp(logScale);
-    // Earlier G recordings used wider gain limits. Replay uses their recorded fit policy.
-    const double minimumScale=sourceG?.02:1e-6,maximumScale=sourceG?50.:1e6;
-    if(!std::isfinite(scale) || scale<minimumScale || scale>maximumScale)return monocular("Unstable monocular scale fit");
+    if(!std::isfinite(scale)||scale<.02||scale>50.)return monocular("Unstable monocular scale fit");
     result.depth.resize(width*height*4);
     auto *depth=result.depth.data();
     for(int i=0;i<width*height;++i){const float z=float(mono[i]*scale);

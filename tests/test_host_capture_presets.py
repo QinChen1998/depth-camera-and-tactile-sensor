@@ -51,22 +51,11 @@ class HostCapturePresets(unittest.TestCase):
             self.assertEqual(self.run_preset(mode, ['-d', '5'], 16).returncode, 2)
 
     def test_all_retired_modes_and_wrong_grids_are_refused(self):
-        for mode, grid in [(m, g) for m in (10, 11, 12, 15, 16, 17, 18, 19, 20, 21, 22) for g in (16, 48)] + [(13, 16), (14, 48), (14, '')]:
+        for mode, grid in [(m, g) for m in (10, 11, 12, 13, 15, 16, 17, 18, 19, 20, 21, 22) for g in (16, 48)] + [(14, 48), (14, '')]:
             with self.subTest(mode=mode, grid=grid):
                 result = self.run_preset(mode, ['-m', '-d', '11'], grid)
                 self.assertEqual(result.returncode, 2)
                 self.assertEqual(result.stdout, '')
-
-    def test_litesr_switch_enables_same_frame_signal_and_keeps_saved_timing(self):
-        for flags in ([], ['-g', '-n']):
-            result = self.run_preset(13, ['-m', '-d', '12', '-o', '2', '-p', '91', '-i', '1234', '-r', '9', *flags], 48)
-            self.assertEqual(result.returncode, 0, result.stderr)
-            args = result.stdout.splitlines()[2:]
-            self.assertEqual(args.count('-g'), 1)
-            self.assertNotIn('-n', args)
-            for flag, value in [('-d', 11), ('-o', 1), ('-t', 0), ('-p', 91), ('-i', 1234), ('-r', 9)]:
-                self.assertEqual(args.count(flag), 1)
-                self.assertEqual(args[args.index(flag)+1], str(value))
 
     def test_incomplete_numeric_override_is_refused(self):
         for flag in ('-d', '-o', '-t'):
@@ -77,17 +66,16 @@ class HostCapturePresets(unittest.TestCase):
     def test_board_launchers_reject_retired_models_before_accessing_hardware(self):
         token = 'a' * 32
         for script, prefix in [('tools/rv_capture/payload/native_gui.sh', ['validate']),
-                               ('tools/rv_capture/payload/model-switch.sh', ['validate']),
                                ('tools/rv_control/bootstrap/candidate-control.sh', ['candidate']),
                                ('tools/rv_control/bootstrap/session.sh', [])]:
-            for mode in (16, 22):
+            for mode in (13, 16, 22):
                 # session.sh checks serial before the mode guard, so test that
                 # guard in isolation; the full session is syntax-checked below.
                 if not prefix:
                     continue
                 result = subprocess.run([self.shell, str(ROOT / script), *prefix, str(mode), token, '1,1'], capture_output=True)
                 self.assertEqual(result.returncode, 2)
-        for script in ('tools/rv_capture/payload/native_gui.sh', 'tools/rv_capture/payload/dtof-host.sh', 'tools/rv_capture/payload/model-switch.sh',
+        for script in ('tools/rv_capture/payload/native_gui.sh', 'tools/rv_capture/payload/dtof-host.sh',
                        'tools/rv_control/bootstrap/session.sh', 'tools/rv_control/bootstrap/candidate-control.sh'):
             result = subprocess.run([self.shell, '-n', str(ROOT / script)], capture_output=True)
             self.assertEqual(result.returncode, 0, result.stderr)

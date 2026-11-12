@@ -15,13 +15,9 @@ function Assert-RvBuildInputs {
         }
     }
     $entries=@($manifest.files.PSObject.Properties)
-    if(Test-Path -LiteralPath (Join-Path $ProjectRoot 'tools/rv_capture/litesr/payload')){
-        if(!$manifest.litesr_files){throw 'LiteSR payload requires matching build input fingerprints.'}
-        $entries+=@($manifest.litesr_files.PSObject.Properties)
-    }
     foreach($entry in $entries){
         $name=$entry.Name
-        if($name -notmatch '^tools/(rv_capture/(native|litesr)/payload|rv_control/bootstrap)/[a-zA-Z0-9_.-]+$' -or
+        if($name -notmatch '^tools/(rv_capture/native/payload|rv_control/bootstrap)/[a-zA-Z0-9_.-]+$' -or
            $entry.Value -notmatch '^[0-9a-f]{64}$'){throw 'Invalid RV build input path or hash.'}
         $path=Join-Path $ProjectRoot $name
         if(-not (Test-Path -LiteralPath $path -PathType Leaf)){

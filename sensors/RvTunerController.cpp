@@ -53,7 +53,7 @@ void RvTunerController::read(){
         if(!device.ready())throw std::runtime_error("Select and verify a trusted RV device in Device Manager");
         const auto runtime=RuntimeDiscovery::rvControlForLaunch();if(runtime.executable.isEmpty())throw std::runtime_error(runtime.error.toStdString());
         m_worker=runtime.executable;m_deviceId=device.id;m_revision=store.revision();m_host=device.host;
-        m_cancel=false;m_readOnly=true;m_sessionEpoch=m_session->presentationEpoch();setState(Reading,tr("Reading current Native and LiteSR settings..."));launch("inspect",request());
+        m_cancel=false;m_readOnly=true;m_sessionEpoch=m_session->presentationEpoch();setState(Reading,tr("Reading current native capture settings..."));launch("inspect",request());
     }catch(const std::exception &e){setState(Fault,QString::fromUtf8(e.what()));}
 }
 void RvTunerController::start(const RvTuner::Settings &s){

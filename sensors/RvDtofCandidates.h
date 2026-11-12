@@ -3,7 +3,6 @@
 #include "../tools/rv_capture/Contract.h"
 
 namespace RvDtofCandidates {
-constexpr int LiteSrNear=RvCaptureContract::LiteSrNear;
 constexpr int NativeHd=RvCaptureContract::NativeHd;
 constexpr int Native48=RvCaptureContract::Native48;
 constexpr int Native48HighAccuracy=RvCaptureContract::Native48HighAccuracy;

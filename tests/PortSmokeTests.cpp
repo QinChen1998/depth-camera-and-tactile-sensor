@@ -98,35 +98,26 @@ int runPortSmokeTests(SensorMainWindow &window,LanguageManager &language,const Q
     for(const auto *name:{"tactileDock","depthMapDock","rtspCameraDock"})
         check(QString("DOCK_")+name,window.findChild<QDockWidget *>(name)!=nullptr);
     auto *models=window.findChild<QComboBox *>("rvDepthModel");
-    auto *tofPointsButton=window.depth()->findChild<QPushButton *>("depthPairedTofPoints");
-    auto *monocularButton=window.depth()->findChild<QPushButton *>("depthMonocularOnly");
-    auto *pairedRgbButton=window.depth()->findChild<QPushButton *>("depthPairedRgb");
     const auto visibleHostModel=QString::fromLatin1(RvCameraView::UniDepthVgaNative48);
-    const auto visibleHostScheme=QString::fromLatin1(RvSessionController::GlobalRgbImagingScheme);
-    const auto reuseScheme=QString::fromLatin1(RvSessionController::ReuseLatestTofImagingScheme);
-    const QString liteSrScheme="board_litesr_near_256";
-    check("EXACT_IMAGING_SCHEMES",models&&models->count()==5&&models->itemData(0)==visibleHostScheme
-        &&models->itemData(1)==reuseScheme&&models->itemData(2)=="board_native_tof48"
-        &&models->itemData(3)=="board_native_tof48_high_accuracy"&&models->itemData(4)==liteSrScheme);
-    check("OTHER_IMAGING_SCHEMES_ABSENT",models
-        &&models->findData("host_unidepth_wide_576_fp16_tof16")==-1
-        &&models->findData("board_litesr_near_full_host_contour_hd")==-1
-        &&models->findData("board_litesr_near_128x128_depth_only")==-1);
+    const auto visibleHostScheme=QString::fromLatin1(RvSessionController::ReuseLatestTofImagingScheme);
+    const auto noDiagnosticControls=[&]{
+        for(const auto *name:{"depthDiagnosticControls","depthDiagnosticStatus","depthDiagnosticRecord",
+                             "depthDiagnosticOpen","depthPairedTofPoints","depthMonocularOnly","depthPairedRgb"})
+            if(window.depth()->findChild<QWidget *>(name))return false;
+        return true;
+    };
+    check("EXACT_IMAGING_SCHEMES",models&&models->count()==3&&models->itemData(0)==visibleHostScheme
+        &&models->itemData(1)=="board_native_tof48"&&models->itemData(2)=="board_native_tof48_high_accuracy");
     check("NO_HOST_DIRECTION_OR_CORRECTION_SELECTORS",
           !window.depth()->findChild<QComboBox *>("rvAssistInputRotation")
           &&!window.depth()->findChild<QComboBox *>("rvUniDepthExperiment"));
     auto *session=window.session();
     check("HOST_RGB_PREPARATION_KEEPS_NEW_PAIR_AFTER_CANCELLATION",session->testHostHdPreparation());
-    check("DEFAULT_HOST_G_USES_NATIVE48",session->assistHostModel()==visibleHostModel&&session->assistExperiment()=="G"&&session->dtofCandidateMode()==24);
+    check("DEFAULT_HOST_B_USES_NATIVE48",session->assistHostModel()==visibleHostModel&&session->dtofCandidateMode()==24);
     check("FIRST_RUN_VISIBLE_HOST_SCHEME",session->currentImagingScheme()==visibleHostScheme
         &&models&&models->currentData()==session->currentImagingScheme()&&session->assistDepthEnabled());
-    check("PAIRED_TOF_BUTTON_DEFAULT_OFF",tofPointsButton&&!tofPointsButton->isHidden()&&tofPointsButton->isCheckable()
-        &&!tofPointsButton->isChecked());
-    check("MONOCULAR_BUTTON_DEFAULT_OFF",monocularButton&&!monocularButton->isHidden()&&monocularButton->isCheckable()
-        &&!monocularButton->isChecked());
+    check("NO_HOST_DIAGNOSTIC_ROW",noDiagnosticControls());
     check("NO_EXPERIMENTAL_REGIONAL_CORRECTION_BUTTON",!window.depth()->findChild<QPushButton *>("rvRegionalCorrection"));
-    check("PAIRED_RGB_BUTTON_DEFAULT_OFF",pairedRgbButton&&!pairedRgbButton->isHidden()
-        &&pairedRgbButton->isCheckable()&&!pairedRgbButton->isChecked());
     const QSettings firstRun;
     const auto initialPresentation=ImageDisplaySettings::shared();
     check("FIRST_RUN_PROFILE",firstRun.value("tactile/display/arrowGain").toDouble()==25
@@ -148,7 +139,8 @@ int runPortSmokeTests(SensorMainWindow &window,LanguageManager &language,const Q
     initialDevices.save({fixture},fixture.id);
     session->reloadDeviceProfiles();
     for(const auto* retired:{"host_unidepth_rgb672_vga_fp16_tof16","host_unidepth_rgb672_vga_fp16_tof48",
-        "host_unidepth_rgb672_vga_fp16_tof48_i","board_litesr_near_384x256_host_contour_hd","board_litesr_near_384x256_high_accuracy_host_contour_hd","board_litesr_near_full_host_contour_hd","board_litesr_near_128x128_depth_only","board_litesr_384x256_contour_relative","board_tiny_nv12_128x80","unknown"}){
+        "host_unidepth_rgb672_vga_fp16_tof48_g","host_unidepth_rgb672_vga_fp16_tof48_i",
+        "board_litesr_near_256","board_litesr_near_384x256_host_contour_hd","board_litesr_near_384x256_high_accuracy_host_contour_hd","board_litesr_near_full_host_contour_hd","board_litesr_near_128x128_depth_only","board_litesr_384x256_contour_relative","board_tiny_nv12_128x80","unknown"}){
         check(QString("RETIRED_SCHEME_ABSENT_")+retired,models->findData(retired)==-1);
         session->selectImagingScheme(retired,{});
         check(QString("RETIRED_SCHEME_API_REJECTED_")+retired,session->currentImagingScheme()==visibleHostScheme&&session->userStopped());
@@ -158,7 +150,7 @@ int runPortSmokeTests(SensorMainWindow &window,LanguageManager &language,const Q
         QSettings().setValue("depth/hostModel","unidepth_rgb672_vga_fp16_tof16");
         RvSessionController reopened;
         const QSettings migrated;
-        check(QString("RETIRED_SCHEME_MIGRATES_TO_G_")+retired,reopened.currentImagingScheme()==visibleHostScheme
+        check(QString("RETIRED_SCHEME_MIGRATES_TO_B_")+retired,reopened.currentImagingScheme()==visibleHostScheme
             &&reopened.userStopped()&&reopened.assistDepthEnabled()&&reopened.dtofCandidateMode()==24
             &&migrated.value("depth/imagingScheme")==visibleHostScheme&&!migrated.contains("depth/boardLiteSrHostHoleMode")
             &&!migrated.contains("depth/uniDepthExperiment")&&!migrated.contains("depth/hostModel"));
@@ -167,45 +159,23 @@ int runPortSmokeTests(SensorMainWindow &window,LanguageManager &language,const Q
         session->selectImagingScheme(scheme,{});
         check(QString("NATIVE_MODE_SELECTS_WHILE_STOPPED_")+scheme,session->userStopped()&&!session->busy()&&!session->assistDepthEnabled()
             &&session->currentImagingScheme()==scheme&&window.depth()->selectedWidth()==48&&window.depth()->selectedHeight()==32);
-        check(QString("PAIRED_TOF_BUTTON_HIDDEN_")+scheme,tofPointsButton&&tofPointsButton->isHidden());
-        check(QString("MONOCULAR_BUTTON_HIDDEN_")+scheme,monocularButton&&monocularButton->isHidden());
-        check(QString("PAIRED_RGB_BUTTON_HIDDEN_")+scheme,pairedRgbButton&&pairedRgbButton->isHidden());
+        check(QString("NO_NATIVE_DIAGNOSTIC_ROW_")+scheme,noDiagnosticControls());
         RvSessionController reopened;
         check(QString("NATIVE_MODE_PERSISTS_")+scheme,reopened.currentImagingScheme()==scheme&&!reopened.assistDepthEnabled()&&reopened.userStopped());
     }
-    session->selectImagingScheme(liteSrScheme,{});
-    check("LITESR_MODE_SELECTS_WHILE_STOPPED",session->userStopped()&&!session->busy()&&!session->assistDepthEnabled()
-        &&session->currentImagingScheme()==liteSrScheme&&session->dtofCandidateMode()==13
-        &&session->cameraWidth()==2304&&window.depth()->selectedWidth()==256&&window.depth()->selectedHeight()==256);
-    {
-        RvSessionController reopened;
-        check("LITESR_MODE_PERSISTS",reopened.currentImagingScheme()==liteSrScheme&&reopened.userStopped()
-            &&!reopened.assistDepthEnabled()&&reopened.dtofCandidateMode()==13);
-    }
-    session->selectImagingScheme(visibleHostScheme,{});
-    check("G48_OPTION_SELECTS_SHARED_MODEL_AND_CAPTURE_PRESET",
-        session->currentImagingScheme()==visibleHostScheme&&models->currentData()==visibleHostScheme
-        &&session->assistHostModel()==QLatin1String(RvCameraView::UniDepthVgaNative48)
-        &&session->assistExperiment()=="G"&&session->dtofCandidateMode()==24
-        &&session->assistDepthEnabled()&&session->userStopped()&&!session->busy());
-    {
-        RvSessionController reopened;
-        check("G48_SELECTION_PERSISTS_WITHOUT_STARTING",reopened.currentImagingScheme()==visibleHostScheme
-            &&reopened.assistExperiment()=="G"&&reopened.dtofCandidateMode()==24&&reopened.userStopped());
-    }
     {
         const auto captureOptions=session->m_dtofOptions;
-        const int index=models->findData(reuseScheme);
+        const int index=models->findData(visibleHostScheme);
         models->setCurrentIndex(index);
         if(index>=0)QMetaObject::invokeMethod(models,"activated",Qt::DirectConnection,Q_ARG(int,index));
-        check("B_SELECTION_USES_SAME_MODEL_AND_CAPTURE_PRESET",
-            session->currentImagingScheme()==reuseScheme&&models->currentData()==reuseScheme
-            &&session->assistExperiment()=="B"&&session->assistHostModel()==visibleHostModel
+        check("B_SELECTION_USES_UNIDEPTH_AND_NATIVE48_PRESET",
+            session->currentImagingScheme()==visibleHostScheme&&models->currentData()==visibleHostScheme
+            &&session->assistHostModel()==visibleHostModel
             &&session->dtofCandidateMode()==24&&session->m_dtofOptions==captureOptions
-            &&session->assistDepthEnabled()&&session->userStopped()&&!session->busy());
+            &&session->assistDepthEnabled()&&session->userStopped()&&!session->busy()&&noDiagnosticControls());
         RvSessionController reopened;
-        check("B_SELECTION_PERSISTS_WITHOUT_STARTING",reopened.currentImagingScheme()==reuseScheme
-            &&reopened.assistExperiment()=="B"&&reopened.dtofCandidateMode()==24&&reopened.userStopped());
+        check("B_SELECTION_PERSISTS_WITHOUT_STARTING",reopened.currentImagingScheme()==visibleHostScheme
+            &&reopened.dtofCandidateMode()==24&&reopened.userStopped());
 
         const QString boot="11111111-2222-3333-4444-555555555555",token(32,'a');
         reopened.m_dtofToken=token;
@@ -213,7 +183,7 @@ int runPortSmokeTests(SensorMainWindow &window,LanguageManager &language,const Q
         const qint64 rgbNs=1000000000;
         const auto native=[&](qint64 id,qint64 deltaNs,int warning=0){
             return RvTofFrame{QByteArray(6144,0),{
-                {"protocol",RvCaptureContract::PairedProtocol},{"candidate_mode",24},{"engine",RvCaptureContract::engine(24)},
+                {"protocol",RvCaptureContract::PairedProtocol},{"candidate_mode",24},{"engine",RvCaptureContract::NativeEngine},
                 {"model_sha256",""},{"capture_only",true},{"depth_present",false},{"photon_enabled",false},
                 {"work_mode","dtof_candidate"},{"boot_id",boot},{"generation",token},{"frame_id",id},
                 {"tof_sequence",id},{"tof_timestamp_ns",rgbNs+deltaNs},{"tof_reused",false},{"tof_warning_flags",warning},
@@ -230,16 +200,10 @@ int runPortSmokeTests(SensorMainWindow &window,LanguageManager &language,const Q
             return paired?paired->metadata["tof_sequence"].toInteger():0;
         };
         check("B_SELECTS_LATEST_ELIGIBLE_TOF",pairedSequence()==2);
-        reopened.m_hostScheme=visibleHostScheme;
-        check("G_STILL_SELECTS_NEAREST_TOF",pairedSequence()==1);
-        reopened.m_hostScheme=reuseScheme;
         reopened.m_hdNativeFrames={native(6,-165000000)};
         const bool atLimit=pairedSequence()==6;
         reopened.m_hdNativeFrames={native(7,-165000001)};
         check("B_USES_THE_SAME_TIMESTAMP_BUDGET",atLimit&&pairedSequence()==0);
-        session->selectImagingScheme(visibleHostScheme,{});
-        check("B_SWITCH_BACK_TO_G_WITHOUT_STARTING",session->currentImagingScheme()==visibleHostScheme
-            &&session->assistExperiment()=="G"&&session->m_dtofOptions==captureOptions&&session->userStopped());
     }
     check("NO_BOARD_DEPTH_OR_REPAIR_UI",!window.depth()->findChild<QWidget*>("rvDtofFastDepthCanvas")&&!window.depth()->findChild<QWidget*>("rvLiteSrRepairSettings")&&!window.depth()->findChild<QWidget*>("rvBoardLiteSrHostContour"));
     auto *depthStart=window.findChild<QPushButton *>("rvDepthStart");
@@ -337,7 +301,7 @@ int runPortSmokeTests(SensorMainWindow &window,LanguageManager &language,const Q
                 emit session->cameraFrameReady(camera);
                 const auto &profile = RvCameraView::outputProfile(session->assistHostModel());
                 QJsonObject metadata{{"generation", double(epoch)}, {"boot_id", "offline-rv1103"}, {"frame_id", 1},
-                    {"assist_host_model", session->assistHostModel()}, {"assist_experiment", session->assistExperiment()},
+                    {"assist_host_model", session->assistHostModel()}, {"assist_experiment", "B"},
                     {"assist_input_rotation_degrees", session->assistInputRotationDegrees()},
                     {"width", profile.outputWidth}, {"height", profile.outputHeight}, {"depth_unit", "camera-Z_m_float32"},
                     {"assist_output_grid", RvCameraView::PortraitGrid}, {"assist_model_depth_size", QJsonArray{640,480}},
@@ -345,10 +309,10 @@ int runPortSmokeTests(SensorMainWindow &window,LanguageManager &language,const Q
                 session->m_currentMetadata = metadata;
                 QByteArray depth(profile.depthBytes(), '\0');
                 qToLittleEndian<quint32>(0x3f800000, depth.data());
-                emit session->m_assist->resultReady(depth, metadata, camera, epoch-1, {}, {}, {});
+                emit session->m_assist->resultReady(depth, metadata, camera, epoch-1, {});
                 check("AUTO_CONNECT_WAITS_FOR_CURRENT_DEPTH",session->automaticConnecting() && overlay->isVisible());
                 overlay->grab().save(path+".auto-connect.png");
-                emit session->m_assist->resultReady(depth, metadata, camera, epoch, {}, {}, {});
+                emit session->m_assist->resultReady(depth, metadata, camera, epoch, {});
                 auto *canvas = static_cast<RvDepthView *>(window.findChild<QWidget *>("rvAssistDepthCanvas"));
                 QElapsedTimer renderWait;
                 renderWait.start();
@@ -368,7 +332,7 @@ int runPortSmokeTests(SensorMainWindow &window,LanguageManager &language,const Q
     session->selectImagingScheme("board_litesr_near_high_resolution",{});
     check("REMOVED_SCHEME_API_REJECTED",session->dtofCandidateMode()==original&&session->assistHostModel()==visibleHostModel);
     check("REMOVED_BOARD_MODE_REJECTED",!session->setDtofCandidate(15,{}));
-    check("FP16_SELECTION_STOPPED",session->dtofCandidateMode()==24&&session->userStopped()&&session->assistDepthEnabled()&&session->assistExperiment()=="G");
+    check("FP16_SELECTION_STOPPED",session->dtofCandidateMode()==24&&session->userStopped()&&session->assistDepthEnabled());
     bool idle=true;for(auto *process:window.findChildren<QProcess *>())idle&=process->state()==QProcess::NotRunning;
     check("NO_WORKER_OR_HARDWARE_STARTED",idle);
     const auto worker=RuntimeDiscovery::rvControlForLaunch();
@@ -400,12 +364,10 @@ int runPortSmokeTests(SensorMainWindow &window,LanguageManager &language,const Q
     check("ABOUT_BRANDING",aboutDialog && aboutDialog->windowTitle()==QStringLiteral("关于")
         && aboutName && aboutVersion && aboutLogo && !window.windowIcon().isNull());
     if(aboutDialog)aboutDialog->reject();
-    check("CHINESE_IMAGING_SCHEMES",models&&models->count()==5
+    check("CHINESE_IMAGING_SCHEMES",models&&models->count()==3
         &&models->itemText(0)==QStringLiteral("上位机辅助推理")
-        &&models->itemText(1)==QStringLiteral("上位机辅助推理（B，复用 ToF）")
-        &&models->itemText(2)==QStringLiteral("板端推理")
-        &&models->itemText(3)==QStringLiteral("板端推理高精度")
-        &&models->itemText(4)==QStringLiteral("板端 LiteSR 近距（INT8，实验）"));
+        &&models->itemText(1)==QStringLiteral("板端推理")
+        &&models->itemText(2)==QStringLiteral("板端推理高精度"));
     check("CHINESE_SHARED_CONTROL_LABELS",controlsPresent&&depthStart->text()==cameraStart->text()
         &&depthStop->text()==cameraStop->text()&&depthReconnect->text()==cameraReconnect->text());
     check("CHINESE_IMAGING_SCHEME_TOOLTIP",models&&models->toolTip()==QStringLiteral("选择深度图的生成方式。"));
@@ -595,7 +557,7 @@ int runPortSmokeTests(SensorMainWindow &window,LanguageManager &language,const Q
         const QJsonObject fit{{"fusion_mode","global_scale"},{"scale",1},{"local_factor_limit",1},
             {"output_policy",policy},{"fov_geometry_only",true},{"fov_pixels",pixels/2}};
         const QJsonObject metadata{{"width",width},{"height",height},{"depth_unit","camera-Z_m_float32"},
-            {"assist_host_model",model},{"assist_experiment","G"},{"assist_fusion_revision",RvAssistFusion::GlobalRgbRevision},
+            {"assist_host_model",model},{"assist_experiment","B"},{"assist_fusion_revision",RvAssistFusion::ReuseRgbRevision},
             {"assist_input_orientation_checked",true},{"assist_output_grid",RvCameraView::PortraitGrid},
             {"assist_model_depth_size",QJsonArray{640,480}},{"assist_model_crop_xywh",QJsonArray{140,0,360,480}},
             {"assist_diagnostic_capture",true},{"assist_diagnostic_payload","mono_reasons_v1"},
@@ -620,7 +582,7 @@ int runPortSmokeTests(SensorMainWindow &window,LanguageManager &language,const Q
             check("FUSED_DEPTH_SCAN_REJECTS_GRAPH_FIELD",RvDepthCoverage::decodeDepth(metres,wrongIdentity,decoded,field)&&!field.valid());
         }
         const auto priorColoredFrames=canvas->property("coloredFrames").toULongLong();
-        window.depth()->acceptAssistSnapshot(metres,metadata,{},RvTofFrame{},diagnostic);
+        window.depth()->acceptAssistSnapshot(metres,metadata,{},diagnostic);
         QElapsedTimer colorWait;
         colorWait.start();
         while(canvas->property("coloredFrames").toULongLong()==priorColoredFrames && colorWait.elapsed()<2000)
@@ -648,7 +610,7 @@ int runPortSmokeTests(SensorMainWindow &window,LanguageManager &language,const Q
             if(i%480>=240)qToLittleEndian<quint32>(0x40000000,metres.data()+i*4);
             qToLittleEndian<quint32>(0x3fc00000,diagnostic.data()+i*4);
         }
-        const int adoptedId=15*48+20,otherId=17*48+28;
+        const int adoptedId=15*48+20;
         const auto policy=QString::fromLatin1(RvAssistFusion::FieldOfViewPolicy);
         const QJsonObject fit{{"fusion_mode","global_scale"},{"scale",1.25},{"local_factor_limit",1},
             {"dtof_corrected",true},{"used_native_indices",QJsonArray{adoptedId}},
@@ -656,7 +618,7 @@ int runPortSmokeTests(SensorMainWindow &window,LanguageManager &language,const Q
         const QJsonObject metadata{{"width",480},{"height",640},{"depth_unit","camera-Z_m_float32"},
             {"assist_output_grid",RvCameraView::PortraitGrid},{"assist_model_depth_size",QJsonArray{640,480}},
             {"assist_model_crop_xywh",QJsonArray{140,0,360,480}},
-            {"assist_host_model",model},{"assist_experiment","G"},{"assist_fusion_revision",RvAssistFusion::GlobalRgbRevision},
+            {"assist_host_model",model},{"assist_experiment","B"},{"assist_fusion_revision",RvAssistFusion::ReuseRgbRevision},
             {"assist_input_orientation_checked",true},{"assist_native_projection",RvAssistFusion::CloseNative48Projection},
             {"assist_diagnostic_capture",true},{"assist_diagnostic_payload","mono_reasons_v1"},
             {"assist_output_policy",policy},{"assist_camera_profile","wide"},{"assist_output_restored_to_calibrated_grid",true},
@@ -670,30 +632,14 @@ int runPortSmokeTests(SensorMainWindow &window,LanguageManager &language,const Q
             {"pair_clock_source","rtcp_prft_board_realtime_monotonic"},{"pairing_policy",RvTofFrame::FreshRgbPairPolicy},
             {"tof_reused",false},{"tof_warning_flags",0},
             {"assist_graph_sha256",vga.graphSha},{"depth_K",RvCameraView::intrinsics(vga)},{"assist_fusion",fit}};
-        RvTofFrame tof{QByteArray(6144,0),metadata};
-        for(const auto &[id,radius]:{std::pair{adoptedId,1600},std::pair{otherId,4000}}){
-            qToLittleEndian<quint16>(quint16(radius),tof.samples.data()+4*id);
-            tof.samples[4*id+2]=id==adoptedId?12:3;
-            tof.samples[4*id+3]=1;
-        }
         QImage rgb(480,640,QImage::Format_RGB888);rgb.fill(QColor(37,68,91));
-        window.depth()->acceptAssistSnapshot(metres,metadata,rgb,tof,diagnostic);
+        window.depth()->acceptAssistSnapshot(metres,metadata,rgb,diagnostic);
         auto *canvas=static_cast<RvDepthView *>(window.depth()->findChild<QWidget *>("rvAssistDepthCanvas"));
         const auto snapshot=window.depth()->snapshot();
         check("VGA_METRIC_SNAPSHOT_AND_SIDE_DISPLAY",canvas&&canvas->depthAt(120,320)==0&&canvas->depthAt(360,320)==2
             &&canvas->property("sidePredictionActive").toBool()&&snapshot.metresFloat32LE==metres
             &&snapshot.cameraImage.size()==QSize(480,640)&&snapshot.depthImage.size()==QSize(480,640));
         if(canvas){
-            // The 48×32 overlay uses a two-pixel radius. The filled pixel
-            // nearest a subpixel center can round to the neighbouring pixel.
-            const auto markerColor=[](const QImage &image,QPointF center,QRgb color){
-                const auto pixel=(center*image.devicePixelRatio()).toPoint();
-                for(int y=-1;y<=1;++y)for(int x=-1;x<=1;++x){
-                    const auto nearby=pixel+QPoint(x,y);
-                    if(image.valid(nearby)&&image.pixel(nearby)==color)return true;
-                }
-                return false;
-            };
             const int rotation=canvas->displayRotationDegrees();
             canvas->setDisplayRotationDegrees(0);
             const auto rendered=canvas->grab().toImage();
@@ -702,124 +648,10 @@ int runPortSmokeTests(SensorMainWindow &window,LanguageManager &language,const Q
                 &&rendered.pixelColor((QPointF(area.left()+area.width()/4,area.center().y())*rendered.devicePixelRatio()).toPoint())==QColor(canvas->colorAt(120,320))
                 &&rendered.pixelColor((QPointF(area.left()+area.width()*3/4,area.center().y())*rendered.devicePixelRatio()).toPoint())==QColor(canvas->colorAt(360,320))
                 &&!snapshot.metadata.contains("native_tof_display_mirror_horizontal"));
-            if(pairedRgbButton){
-                pairedRgbButton->click();
-                const auto painted=canvas->grab().toImage();
-                const double dpi=painted.devicePixelRatio();
-                const auto &cal=RvAssistFusion::calibrationForFov(6);
-                const auto point=RvAssistFusion::projectNativePoint(.4,adoptedId,cal,vga);
-                const QPointF center(area.left()+(point.pixel.x()+.5)*area.width()/480,
-                                     area.top()+(point.pixel.y()+.5)*area.height()/640);
-                const QPointF backdrop(area.left()+area.width()/4,area.top()+area.height()/4);
-                const auto color=DepthColorScale::color(point.cameraZ,canvas->displayMinimum(),canvas->displayMaximum(),
-                    true,canvas->blackOutsideRange());
-                check("PAIRED_RGB_RENDERS_SAME_FRAME_AND_TOF_DEPTH_COLOR",pairedRgbButton->isChecked()&&painted!=rendered
-                    &&markerColor(painted,center,color)&&painted.pixelColor((backdrop*dpi).toPoint())==QColor(37,68,91));
-                const auto saved=window.depth()->snapshot();
-                check("PAIRED_RGB_VIEW_PRESERVES_SNAPSHOT",saved.metresFloat32LE==snapshot.metresFloat32LE
-                    &&saved.depthImage==snapshot.depthImage&&saved.cameraImage==snapshot.cameraImage);
-                pairedRgbButton->click();
-                check("PAIRED_RGB_RETURN_TO_DEPTH",!pairedRgbButton->isChecked()&&canvas->grab().toImage()==rendered);
-            }
-            if(monocularButton){
-                const auto sampleColor=[&](float depth){return DepthColorScale::color(depth,canvas->displayMinimum(),
-                    canvas->displayMaximum(),true,canvas->blackOutsideRange());};
-                const QPointF left(area.left()+area.width()/4,area.center().y());
-                const QPointF right(area.left()+area.width()*3/4,area.center().y());
-                monocularButton->click();
-                const auto monoPainted=canvas->grab().toImage();
-                const auto dpi=monoPainted.devicePixelRatio();
-                check("MONOCULAR_TOGGLE_DISPLAYS_RAW_DEPTH_WITHOUT_MASK_OR_SCALE",monoPainted!=rendered
-                    &&monoPainted.pixel((left*dpi).toPoint())==sampleColor(1.5f)
-                    &&monoPainted.pixel((right*dpi).toPoint())==sampleColor(1.5f));
-                const auto saved=window.depth()->snapshot();
-                check("MONOCULAR_PREVIEW_PRESERVES_CORRECTED_SNAPSHOT",canvas->depthAt(120,320)==0&&canvas->depthAt(360,320)==2
-                    &&saved.metresFloat32LE==snapshot.metresFloat32LE&&saved.depthImage==snapshot.depthImage);
-                QMouseEvent move(QEvent::MouseMove,right,canvas->mapToGlobal(right.toPoint()),Qt::NoButton,Qt::NoButton,Qt::NoModifier);
-                QApplication::sendEvent(canvas,&move);
-                const auto hover=canvas->property("lastHoverText").toString();
-                const auto translated=QCoreApplication::translate("RvDepthView","(%1, %2) monocular: %3 m camera-Z");
-                check("MONOCULAR_HOVER_REPORTS_RAW_DEPTH",hover.endsWith(translated.section("%3",1).prepend("1.5000")));
-                window.depth()->grab().save(path+".monocular.png");
-
-                auto unpaired=metadata;
-                unpaired["frame_id"]=22;unpaired["dtof_present"]=false;
-                unpaired["assist_fusion"]=QJsonObject{{"fusion_mode","monocular"},{"scale",1}};
-                QByteArray nextDiagnostic=diagnostic;
-                for(int i=0;i<vga.depthBytes();i+=4)qToLittleEndian<quint32>(0x3f400000,nextDiagnostic.data()+i);
-                window.depth()->acceptAssistSnapshot(QByteArray(vga.depthBytes(),0),unpaired,rgb,{},nextDiagnostic);
-                QElapsedTimer frameWait;frameWait.start();
-                while(canvas->property("coloredFrameId").toInt()!=22&&frameWait.elapsed()<2000)settle(15);
-                const auto nextPainted=canvas->grab().toImage();
-                check("MONOCULAR_VIEW_UPDATES_WITHOUT_TOF_OR_FUSED_DEPTH",canvas->property("coloredFrameId").toInt()==22
-                    &&nextPainted.pixel((right*nextPainted.devicePixelRatio()).toPoint())==sampleColor(.75f));
-
-                window.depth()->acceptAssistSnapshot(metres,metadata,rgb,tof,{});
-                check("MONOCULAR_VIEW_WAITS_FOR_VALID_DIAGNOSTIC",canvas->presentationImage().isNull()
-                    &&window.depth()->snapshot().depthImage==snapshot.depthImage);
-                window.depth()->acceptAssistSnapshot(metres,metadata,rgb,tof,diagnostic);
-                monocularButton->click();
-                check("MONOCULAR_TOGGLE_RESTORES_CORRECTED_VIEW",!monocularButton->isChecked()
-                    &&canvas->grab().toImage()==rendered&&canvas->property("sidePredictionActive").toBool());
-            }
-            if(tofPointsButton){
-                tofPointsButton->click();
-                const auto &cal=RvAssistFusion::calibrationForFov(6);
-                const auto projected=[&](int id,int degrees,const QRectF &viewport){
-                    const auto &ray=cal.cameraRays[id];
-                    const double radius=tof.distanceMm(id)/1000.;
-                    const double z=radius*ray[2]+cal.translation[2];
-                    const double u=(vga.focal*(radius*ray[0]+cal.translation[0])/z+vga.cx()+.5)/480.;
-                    const double v=(vga.focal*(radius*ray[1]+cal.translation[1])/z+vga.cy()+.5)/640.;
-                    const QPointF f=degrees==90?QPointF(1-v,u):degrees==180?QPointF(1-u,1-v):degrees==270?QPointF(v,1-u):QPointF(u,v);
-                    const QPointF center(viewport.left()+f.x()*viewport.width(),viewport.top()+f.y()*viewport.height());
-                    const auto color=DepthColorScale::color(float(z),canvas->displayMinimum(),canvas->displayMaximum(),true,canvas->blackOutsideRange());
-                    return std::make_pair(center,color);
-                };
-                bool rotatedColors=true;
-                for(int degrees:{0,90,180,270}){
-                    canvas->setDisplayRotationDegrees(degrees);
-                    const auto overlay=canvas->grab().toImage();
-                    const auto target=canvas->property("presentationRect").toRectF();
-                    const auto [solid,solidColor]=projected(adoptedId,degrees,target);
-                    const auto [other,otherColor]=projected(otherId,degrees,target);
-                    rotatedColors&=markerColor(overlay,solid,solidColor)&&markerColor(overlay,other,otherColor)&&solidColor!=otherColor;
-                }
-                check("PAIRED_TOF_DEPTH_COLORS_AND_ROTATION",rotatedColors);
-                canvas->setDisplayRotationDegrees(0);
-                const double minimum=canvas->displayMinimum(),maximum=canvas->displayMaximum();
-                const bool blackOutside=canvas->blackOutsideRange();
-                canvas->setDisplayRange(.6,3.);
-                canvas->setBlackOutsideRange(true);
-                canvas->presentationImage();
-                const auto limited=canvas->grab().toImage();
-                const auto limitedTarget=canvas->property("presentationRect").toRectF();
-                const auto [outside,outsideColor]=projected(adoptedId,0,limitedTarget);
-                const auto [inside,insideColor]=projected(otherId,0,limitedTarget);
-                check("PAIRED_TOF_USES_DISPLAY_RANGE_AND_BLACK_OUTSIDE",outsideColor==qRgb(0,0,0)&&insideColor!=outsideColor
-                    &&markerColor(limited,outside,outsideColor)&&markerColor(limited,inside,insideColor));
-                canvas->setDisplayRange(minimum,maximum);
-                canvas->setBlackOutsideRange(blackOutside);
-                canvas->presentationImage();
-                const auto withTof=canvas->grab().toImage();
-                const auto saved=window.depth()->snapshot();
-                check("PAIRED_TOF_OVERLAY_EXCLUDED_FROM_SNAPSHOT",withTof!=rendered&&saved.metresFloat32LE==snapshot.metresFloat32LE
-                    &&saved.depthImage==snapshot.depthImage);
-                window.depth()->grab().save(path+".paired-tof.png");
-                tofPointsButton->click();
-                check("PAIRED_TOF_TOGGLE_RESTORES_VIEW",canvas->grab().toImage()==rendered);
-                tofPointsButton->click();
-                auto unmatched=metadata;
-                unmatched["frame_id"]=22;
-                window.depth()->acceptAssistSnapshot(metres,unmatched,rgb,tof,diagnostic);
-                canvas->presentationImage();
-                check("PAIRED_TOF_CANNOT_FOLLOW_WRONG_FRAME",canvas->grab().toImage()==rendered);
-                window.depth()->acceptAssistSnapshot(metres,metadata,rgb,tof,diagnostic);
-                canvas->presentationImage();
-                canvas->holdFrame();
-                check("PAIRED_TOF_CLEARED_WITH_HELD_METRIC_FRAME",canvas->grab().toImage()==rendered);
-                tofPointsButton->click();
-            }
+            check("SIDE_PREDICTION_EXCLUDED_FROM_METRIC_SAVE",
+                snapshot.depthImage.pixel(120,320)==qRgb(0,0,0)
+                &&canvas->colorAt(120,320)!=snapshot.depthImage.pixel(120,320));
+            window.depth()->grab().save(path+".depth-b.png");
             const auto hasAspect=[&](int degrees,int width,int height){
                 canvas->setDisplayRotationDegrees(degrees);
                 const auto rendered=canvas->grab();
@@ -831,47 +663,6 @@ int runPortSmokeTests(SensorMainWindow &window,LanguageManager &language,const Q
             check("VGA_RENDERED_ASPECT_RATIO",hasAspect(0,3,4)&&hasAspect(90,4,3));
             canvas->holdFrame();
             check("VGA_HELD_FRAME_RETAINS_ASPECT",hasAspect(0,3,4));
-            if(pairedRgbButton){
-                using namespace RvAssistFusion;
-                auto projected=metadata;
-                projected["frame_id"]=23;
-                const int id=15*48+23;
-                auto currentFit=fit;
-                currentFit["used_native_indices"]=QJsonArray{id};
-                projected["assist_fusion"]=currentFit;
-                RvTofFrame native{QByteArray(6144,0),projected};
-                constexpr quint16 radialUq2=620;
-                qToLittleEndian(radialUq2,native.samples.data()+4*id);
-                native.samples[4*id+2]=20;native.samples[4*id+3]=1;
-                projected.insert(NativeProjectionField,defaultNativeProjection(native));
-                native.metadata=projected;
-                window.depth()->acceptAssistSnapshot(metres,projected,rgb,native,diagnostic);
-                canvas->setDisplayRotationDegrees(0);
-                canvas->presentationImage();
-                pairedRgbButton->click();
-                const auto picture=canvas->grab().toImage();
-                const auto rect=canvas->property("presentationRect").toRectF();
-                const auto point=projectNativePoint(radialUq2*.00025,id,calibrationForNativeGrid(6,48,32),vga);
-                const auto position=[&](QPointF p){
-                    return (QPointF(rect.left()+(p.x()+.5)*rect.width()/480,rect.top()+(p.y()+.5)*rect.height()/640)
-                            *picture.devicePixelRatio()).toPoint();
-                };
-                const auto center=position(point.pixel+QPointF(.0065,.00725)*(vga.focal/point.cameraZ));
-                const auto oldCenter=position(point.pixel);
-                const auto color=DepthColorScale::color(point.cameraZ,canvas->displayMinimum(),canvas->displayMaximum(),
-                                                        true,canvas->blackOutsideRange());
-                // A subpixel ellipse centre can cover the neighbouring raster pixel.
-                bool centerColor=false;
-                for(int y=-1;y<=1;++y)for(int x=-1;x<=1;++x){
-                    const auto pixel=center+QPoint(x,y);
-                    centerColor|=picture.valid(pixel)&&picture.pixel(pixel)==color;
-                }
-                picture.save(path+".host48-projection.png");
-                check("HOST48_RGB_OVERLAY_USES_DEFAULT_CLOSE_PROJECTION",picture.valid(center)&&picture.valid(oldCenter)
-                    &&centerColor&&picture.pixelColor(oldCenter)==QColor(37,68,91));
-                pairedRgbButton->click();
-
-            }
             canvas->setDisplayRotationDegrees(rotation);
         }
         window.depth()->clearAssistDepth({});
@@ -974,12 +765,10 @@ int runPortSmokeTests(SensorMainWindow &window,LanguageManager &language,const Q
     language.setLanguage(LanguageManager::Language::English);settle(100);
     check("ENGLISH_WINDOW",window.windowTitle()==QStringLiteral("触想工作台（内测版）"));
     check("ENGLISH_ABOUT_MENU",about && about->text()=="About");
-    check("ENGLISH_IMAGING_SCHEMES",models&&models->count()==5
+    check("ENGLISH_IMAGING_SCHEMES",models&&models->count()==3
         &&models->itemText(0)==QStringLiteral("Host-assisted inference")
-        &&models->itemText(1)==QStringLiteral("Host-assisted inference (B, reuse ToF)")
-        &&models->itemText(2)==QStringLiteral("Board inference")
-        &&models->itemText(3)==QStringLiteral("Board inference high accuracy")
-        &&models->itemText(4)==QStringLiteral("Board LiteSR near depth (INT8, experimental)"));
+        &&models->itemText(1)==QStringLiteral("Board inference")
+        &&models->itemText(2)==QStringLiteral("Board inference high accuracy"));
     check("ENGLISH_IMAGING_SCHEME_TOOLTIP",models&&models->toolTip()==QStringLiteral("Select how the depth map is generated."));
     {
         QSettings settings;

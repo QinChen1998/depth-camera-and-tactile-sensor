@@ -36,23 +36,21 @@ inline bool dtofBoardReceipt(const QJsonObject& m,int mode,const QString& token,
         &&QRegularExpression("^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$").match(m["boot_id"].toString()).hasMatch();
 }
 
-// Native measurement and encoder telemetry, plus the selected board depth.
+// Native measurements, optional hole-fill estimates and encoder telemetry.
 // One asynchronous decode is pending at a time.
 class RvDtofBoardStream final:public QObject {
     Q_DECLARE_TR_FUNCTIONS(RvDtofBoardStream)
     friend struct RvDtofBoardStreamTestAccess;
     struct Identities {
         quint64 rawSequence=0,rawCapture=0,videoEncoded=0,videoRetrieved=0,videoObserved=0;
-        quint64 depthSequence=0,depthCapture=0;
     };
     struct Decoded {
         RvTofFrame native;QByteArray holeFillRanges;QJsonObject videoMeta;Identities identities;QString error;
-        QByteArray depth,coverage;QJsonObject depthMeta;
-        double rawAge=0,videoAge=0,depthAge=0;quint32 request=0;bool rawPresent=false;
+        double rawAge=0,videoAge=0;quint32 request=0;bool rawPresent=false;
     };
     struct Decoder;
     QTcpSocket socket;QTimer poll,timeout;QElapsedTimer roundtrip,progress;QByteArray buffer;
-    const QJsonObject expected;const bool liteSr,requestHoleFill;Identities identities;quint32 request=0;
+    const QJsonObject expected;const bool requestHoleFill;Identities identities;quint32 request=0;
     bool pending=false,decoding=false,failed=false;
     std::shared_ptr<Decoder> decoder;QFutureWatcher<Decoded> watcher;QThreadPool *decodePool;
     void fail(const QString&);void ask();void read();void finish();
@@ -60,7 +58,6 @@ class RvDtofBoardStream final:public QObject {
 public:
     enum class Output { RawToF, BoardDepth };
     std::function<void(const RvTofFrame&,const QByteArray& holeFillRanges)> rawFrame;
-    std::function<void(const QByteArray&,const QByteArray&,const QJsonObject&)> depthFrame;
     std::function<void(const QJsonObject&)> videoProgress;
     std::function<void(const QString&)> error;
     RvDtofBoardStream(const QJsonObject&,Output,QObject* parent=nullptr,

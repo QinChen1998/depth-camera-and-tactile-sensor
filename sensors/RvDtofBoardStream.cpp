@@ -1,5 +1,4 @@
 #include "RvDtofBoardStream.h"
-#include "../tools/litesr_board/Contour.h"
 #include <QtConcurrent/QtConcurrentRun>
 #include <atomic>
 
@@ -7,15 +6,13 @@ struct RvDtofBoardStream::Decoder {std::atomic_bool cancelled{false};};
 namespace {
 using namespace RvCaptureContract;
 constexpr int HeaderBytes=36,MaximumJsonBytes=4096,NativePacketLimit=16384;
-constexpr int LiteSrPacketLimit=HeaderBytes+MaximumJsonBytes+DepthBytes+2*Native48Bytes;
 
 RvTofFrame nativeMeasurement(const QByteArray& bytes,const QJsonObject& packet,const QSize& grid,
                              quint64 sequence,quint64 timestamp,int fov){
     RvTofFrame frame{bytes,packet};auto& m=frame.metadata;
     m["dtof_fov_correction"]=fov;m["frame_id"]=qint64(sequence);m["tof_sequence"]=qint64(sequence);m["tof_timestamp_ns"]=qint64(timestamp);
     m["tof_reused"]=false;m["work_mode"]="dtof_candidate";
-    const int mode=packet["candidate_mode"].toInt();
-    m["model"]=isLiteSr(mode)?RvDtofCandidates::name(mode):QStringLiteral("native_hd_capture");
+    m["model"]="native_hd_capture";
     m["dtof_width"]=grid.width();m["dtof_height"]=grid.height();m["dtof_bytes"]=bytes.size();
     m["dtof_format"]="range_uq2_u16le_snr_u8_valid_u8";m["dtof_range_unit"]="0.25_mm";
     m["dtof_source"]="tmf8829_ipc_first_peak";m["dtof_coordinate"]="sensor_radial_native";
@@ -31,7 +28,6 @@ QThreadPool *liveDecodePool(){
 RvDtofBoardStream::RvDtofBoardStream(const QJsonObject& receipt,Output output,
     QObject* parent,const QString& host,quint16 port,QThreadPool* pool)
     :QObject(parent),expected([&]{auto value=receipt;value["protocol"]=RvCaptureContract::PairedProtocol;return value;}()),
-     liteSr(isLiteSr(expected["candidate_mode"].toInt(-1))),
      requestHoleFill(output==Output::BoardDepth&&RvCaptureContract::supportsHoleFill(expected["candidate_mode"].toInt(-1))
         &&expected["native_hole_fill_protocol"]==RvCaptureContract::NativeHoleFillProtocol),
      decoder(std::make_shared<Decoder>()),decodePool(pool?pool:liveDecodePool()){
@@ -40,13 +36,15 @@ RvDtofBoardStream::RvDtofBoardStream(const QJsonObject& receipt,Output output,
     connect(&poll,&QTimer::timeout,this,[this]{ask();});
     connect(&socket,&QTcpSocket::connected,this,[this]{socket.setSocketOption(QAbstractSocket::LowDelayOption,1);poll.start();ask();});
     connect(&socket,&QTcpSocket::readyRead,this,[this]{read();});
-    connect(&socket,&QTcpSocket::errorOccurred,this,[this]{fail(tr("RV1103 candidate stream disconnected"));});
+    const auto disconnected=[this]{fail(tr("RV1103 candidate stream disconnected"));};
+    connect(&socket,&QTcpSocket::errorOccurred,this,disconnected);
+    connect(&socket,&QTcpSocket::disconnected,this,disconnected);
     connect(&timeout,&QTimer::timeout,this,[this]{fail(tr("RV1103 candidate stream timed out"));});
     connect(&watcher,&QFutureWatcher<Decoded>::finished,this,[this]{finish();});
     timeout.start(3000);socket.connectToHost(host,port);
 }
 RvDtofBoardStream::~RvDtofBoardStream(){
-    decoder->cancelled.store(true);rawFrame={};depthFrame={};videoProgress={};error={};
+    decoder->cancelled.store(true);rawFrame={};videoProgress={};error={};
     watcher.disconnect(this);socket.disconnect(this);socket.abort();
 }
 void RvDtofBoardStream::fail(const QString& text){
@@ -58,24 +56,23 @@ void RvDtofBoardStream::ask(){
     if(progress.elapsed()>10000){fail(tr("RV1103 candidate stream timed out"));return;}
     QByteArray bytes(32,0);qToLittleEndian<quint32>(RvCaptureContract::PairedRequestMagic,bytes.data());
     qToLittleEndian<quint32>(++request,bytes.data()+4);
-    qToLittleEndian<quint64>(identities.depthSequence,bytes.data()+8);qToLittleEndian<quint64>(identities.rawSequence,bytes.data()+16);
+    qToLittleEndian<quint64>(identities.rawSequence,bytes.data()+16);
     if(requestHoleFill)qToLittleEndian(RvCaptureContract::HoleFillRequest,bytes.data()+RvCaptureContract::HoleFillRequestOffset);
     pending=true;roundtrip.restart();timeout.start(3000);socket.write(bytes);
 }
 void RvDtofBoardStream::read(){
     if(failed)return;
-    if(!pending||decoding||socket.bytesAvailable()+buffer.size()>(liteSr?LiteSrPacketLimit:NativePacketLimit)){fail(tr("Invalid candidate stream size"));return;}
+    if(!pending||decoding||socket.bytesAvailable()+buffer.size()>NativePacketLimit){fail(tr("Invalid candidate stream size"));return;}
     buffer+=socket.readAll();if(buffer.size()<HeaderBytes)return;
     const auto u=[&](int off){return qFromLittleEndian<quint32>(buffer.constData()+off);};
-    const auto jsonSize=u(4),depthSize=u(8),rawSize=u(16),sourceSize=u(32);
+    const auto jsonSize=u(4),rawSize=u(16),sourceSize=u(32);
     const auto grid=nativeCaptureGrid(expected);
-    const bool validDepth=liteSr?(depthSize==0||depthSize==DepthBytes)&&sourceSize==(depthSize?Native48Bytes:0)
-        :!depthSize&&(!sourceSize||(requestHoleFill&&rawSize&&sourceSize==HoleFillBytes));
-    if(u(0)!=PairedResponseMagic||jsonSize==0||jsonSize>MaximumJsonBytes||!validDepth
-        ||u(12)||u(20)||u(24)||u(28)||(rawSize&&rawSize!=quint32(grid.width()*grid.height()*4))||!grid.isValid()){
+    const bool validFill=!sourceSize||(requestHoleFill&&rawSize&&sourceSize==HoleFillBytes);
+    if(u(0)!=PairedResponseMagic||jsonSize==0||jsonSize>MaximumJsonBytes||!validFill
+        ||u(8)||u(12)||u(20)||u(24)||u(28)||(rawSize&&rawSize!=quint32(grid.width()*grid.height()*4))||!grid.isValid()){
         fail(tr("Invalid candidate stream header"));return;
     }
-    const auto total=HeaderBytes+jsonSize+depthSize+rawSize+sourceSize;if(buffer.size()<total)return;
+    const auto total=HeaderBytes+jsonSize+rawSize+sourceSize;if(buffer.size()<total)return;
     if(buffer.size()!=total){fail(tr("Unexpected candidate stream payload"));return;}
     decoding=true;auto packet=std::move(buffer);buffer.clear();
     watcher.setFuture(QtConcurrent::run(decodePool,[state=decoder,packet=std::move(packet),receipt=expected,previous=identities,id=request]{
@@ -87,16 +84,15 @@ RvDtofBoardStream::Decoded RvDtofBoardStream::decode(const std::shared_ptr<Decod
     Decoded out;out.request=request;out.identities=previous;if(decoder->cancelled.load())return out;
     const auto reject=[&](const QString& message){out.error=message;return out;};
     const auto u=[&](int off){return qFromLittleEndian<quint32>(buffer.constData()+off);};
-    const auto jsonSize=u(4),depthSize=u(8),rawSize=u(16),sourceSize=u(32);QJsonParseError parse;
+    const auto jsonSize=u(4),rawSize=u(16),sourceSize=u(32);QJsonParseError parse;
     const auto doc=QJsonDocument::fromJson(buffer.mid(HeaderBytes,jsonSize),&parse);const auto m=doc.object();
-    const bool liteSr=isLiteSr(expected["candidate_mode"].toInt(-1));
     const int expectedFov=expected["expected_fov"].toInt(6);
     const auto grid=nativeCaptureGrid(expected);
     if(expectedFov!=1&&expectedFov!=2&&expectedFov!=6)return reject(tr("Unsupported device calibration"));
     if(parse.error!=QJsonParseError::NoError||!doc.isObject()||!boardImagingIdentity(m)||!nativeVideoIdentity(m)
         ||m["protocol"]!=expected["protocol"]||m["boot_id"]!=expected["boot_id"]||m["generation"]!=expected["generation"]
         ||m["candidate_mode"]!=expected["candidate_mode"]||m["options"]!=expected["options"]||m["request"].toInteger()!=request
-        ||m["data"]!=bool(depthSize)||m["photon_data"]!=false||m["rgb_data"]!=false||!m["raw_data"].isBool()
+        ||m["data"]!=false||m["photon_data"]!=false||m["rgb_data"]!=false||!m["raw_data"].isBool()
         ||m["raw_data"].toBool()!=bool(rawSize)||m["native_capture_protocol"]!=RvCaptureContract::NativeCaptureProtocolV2
         ||m["native_columns"]!=grid.width()||m["native_rows"]!=grid.height())
         return reject(tr("Candidate identity or parameters mismatch"));
@@ -118,11 +114,11 @@ RvDtofBoardStream::Decoded RvDtofBoardStream::decode(const std::shared_ptr<Decod
             ||(m["tof_warning_flags"]!=0&&m["tof_warning_flags"]!=8&&m["tof_warning_flags"]!=16))
             return reject(tr("Invalid candidate measurement identity"));
         out.identities.rawSequence=seq;out.identities.rawCapture=stamp;
-        out.native=nativeMeasurement(buffer.mid(HeaderBytes+jsonSize+depthSize,rawSize),m,grid,seq,stamp,expectedFov);
+        out.native=nativeMeasurement(buffer.mid(HeaderBytes+jsonSize,rawSize),m,grid,seq,stamp,expectedFov);
         const auto& native=out.native;
         if(!native.isValid()||(m.contains("dtof_fov_correction")&&m["dtof_fov_correction"]!=expectedFov)
             ||(m.contains("tof_fov_correction")&&m["tof_fov_correction"]!=expectedFov))return reject(tr("Invalid candidate depth values"));
-        if(!liteSr&&sourceSize){
+        if(sourceSize){
             if(m["native_hole_fill_protocol"]!=RvCaptureContract::NativeHoleFillProtocol||m["tof_warning_flags"]!=0)
                 return reject(tr("Invalid candidate depth values"));
             out.holeFillRanges=buffer.mid(HeaderBytes+jsonSize+rawSize,sourceSize);
@@ -132,48 +128,7 @@ RvDtofBoardStream::Decoded RvDtofBoardStream::decode(const std::shared_ptr<Decod
             }
         }
     }
-    if(depthSize){
-        bool seqOk=false,stampOk=false;
-        const auto seq=m["tof_sequence"].toString().toULongLong(&seqOk),stamp=m["tof_timestamp_ns"].toString().toULongLong(&stampOk);
-        const int warnings=m["depth_native_warning_flags"].toInt(-1);
-        out.depthAge=m["age_ms"].toDouble(-1);
-        const double npu=m["npu_ms"].toDouble(-1),compute=m["compute_ms"].toDouble(-1);
-        if(!liteSr||expectedFov!=6||!seqOk||!stampOk||seq<=last.depthSequence||stamp<=last.depthCapture
-            ||seq>9007199254740991ULL||stamp>9007199254740991ULL
-            ||m["depth_native_sequence"].toString()!=m["tof_sequence"].toString()
-            ||m["depth_native_timestamp_ns"].toString()!=m["tof_timestamp_ns"].toString()
-            ||m["depth_native_fov_correction"]!=expectedFov||(warnings!=0&&warnings!=8&&warnings!=16)
-            ||!std::isfinite(out.depthAge)||out.depthAge<0||!std::isfinite(npu)||!std::isfinite(compute)||npu<0||compute<npu)
-            return reject(tr("Invalid LiteSR frame identity or timing"));
-        const auto source=nativeMeasurement(buffer.mid(HeaderBytes+jsonSize+depthSize+rawSize,sourceSize),m,grid,seq,stamp,expectedFov);
-        if(!source.isValid())return reject(tr("Invalid LiteSR support grid"));
-        if(rawSize&&seq==out.identities.rawSequence&&
-            (stamp!=out.identities.rawCapture||m["tof_warning_flags"]!=warnings||source.samples!=out.native.samples))
-            return reject(tr("Invalid paired LiteSR measurement"));
 
-        std::vector<float> values(Width*Height);
-        const char* pixels=buffer.constData()+HeaderBytes+jsonSize;
-        for(int i=0;i<Width*Height;++i){
-            const auto bits=qFromLittleEndian<quint32>(pixels+4*i);std::memcpy(&values[i],&bits,4);
-            const float z=values[i];
-            if(!std::isfinite(z)||(z!=0&&(z<LiteSrMinimumM||z>LiteSrMaximumM)))return reject(tr("Invalid LiteSR depth values"));
-        }
-        if(decoder->cancelled.load())return out;
-        const auto refined=LiteSrBoardContour::refineFast(values.data(),reinterpret_cast<const uint8_t*>(source.samples.constData()),0,{1,true});
-        out.depth.resize(DepthBytes);
-        out.coverage=QByteArray(reinterpret_cast<const char*>(refined.coverage.data()),Width*Height);
-        for(int i=0;i<Width*Height;++i){
-            quint32 bits;std::memcpy(&bits,&refined.depth[i],4);qToLittleEndian(bits,out.depth.data()+4*i);
-        }
-        out.identities.depthSequence=seq;out.identities.depthCapture=stamp;
-        out.depthMeta=source.metadata;auto& metadata=out.depthMeta;
-        metadata["depth_unit"]="sensor_radial_m_float32";metadata["depth_location"]="board";
-        metadata["pairing_policy"]="same_native_measurement";metadata["native_order"]=true;metadata["tof_warning_flags"]=warnings;
-        metadata["depth_method"]="litesr_board_full_host_contour_repair_v2";
-        metadata["host_contour"]=QJsonObject{{"location","host_cpu_background"},{"postprocess_ms",refined.totalMs},
-            {"filled_native_cells",refined.repairs.filledCells},{"outlier_native_cells",refined.repairs.outlierCells},
-            {"coverage_semantics","display_opacity_only"}};
-    }
     return out;
 }
 void RvDtofBoardStream::finish(){
@@ -190,14 +145,6 @@ void RvDtofBoardStream::finish(){
     if(videoProgress){const auto callback=videoProgress;callback(out.videoMeta);}
     if(!alive())return;
     if(out.rawPresent){const double age=out.rawAge+roundtrip.nsecsElapsed()/1e6;out.native.metadata["raw_age_ms"]=age;
-        if(age<220){if(!liteSr)progress.restart();if(rawFrame){const auto callback=rawFrame;callback(out.native,out.holeFillRanges);}}}
-    if(!alive())return;
-    if(!out.depth.isEmpty()){
-        const double age=out.depthAge+roundtrip.nsecsElapsed()/1e6;
-        if(age<FreshMs){
-            progress.restart();out.depthMeta["age_ms"]=age;
-            if(depthFrame){const auto callback=depthFrame;callback(out.depth,out.coverage,out.depthMeta);}
-        }
-    }
+        if(age<220){progress.restart();if(rawFrame){const auto callback=rawFrame;callback(out.native,out.holeFillRanges);}}}
     if(!alive())return;decoding=false;pending=false;timeout.stop();
 }

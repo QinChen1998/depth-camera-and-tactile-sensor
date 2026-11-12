@@ -1,15 +1,9 @@
 {
   "schema": 1,
   "version": "1.1.7",
-  "description": "Pinned native capture and bootstrap binaries, plus optional private LiteSR payload hashes.",
-  "litesr_files": {
-    "tools/rv_capture/litesr/payload/litesr-fov6.bin": "23fd372e89cb5a7197a819b4f028c209c02d71007710d168d72455426ef46abd",
-    "tools/rv_capture/litesr/payload/litesr-near-256.dctsm": "7846389efaec74025c4559eb2d82a0ef3af98acbb0afc152a3a24747b9361851",
-    "tools/rv_capture/litesr/payload/librknnmrt.so": "5dcaf6201a019b24d99bb05560b79a1a53fdf81451b89e0ada541ccf31cd3e84",
-    "tools/rv_capture/litesr/payload/libcrypto.so.1.1": "c823a7d2ae03291a727fa9ba49c25eec583f1aececf796eeb4c5e014edb650b5"
-  },
+  "description": "Pinned F6 native capture and bootstrap binaries.",
   "files": {
-    "tools/rv_capture/native/payload/native-fov6.bin": "b3462190100480455f5313db699e1b2084664cee7edf8174649c8fcbd52d0158",
+    "tools/rv_capture/native/payload/native-fov6.bin": "5e569e5882491ce1e887afe9b55c3cdaed7c15597fd4b4031493981f0745a029",
     "tools/rv_control/bootstrap/depth_status": "53f228cb025b25b2dcf2e548d482f8a952563e349ce2b4d514090be09610fc46",
     "tools/rv_control/bootstrap/no_route_monitor.so": "0b6878aec5c17caadda53f3c4305f89a9cead84c4d4a80fd7682a568e295fb63",
     "tools/rv_control/bootstrap/tof_driver": "1742ec09a7df8e3498e45f33a2e85975ac06dba17e90f2450de557fe6c7dc0b8"

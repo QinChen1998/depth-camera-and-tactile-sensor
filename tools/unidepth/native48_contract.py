@@ -1,4 +1,4 @@
-"""Native48/G synthetic packet fixtures; run tools/verify_port.py. No devices."""
+"""Native48/B synthetic packet fixtures; run tools/verify_port.py. No devices."""
 import hashlib
 import json
 import struct
@@ -53,7 +53,7 @@ def metadata(index, fov, rotation, profile, epoch):
         dtof_source='tmf8829_ipc_first_peak', dtof_coordinate='sensor_radial_native',
         dtof_fov_correction=fov, tof_warning_flags=0, rectify_map_sha256=profile['rectify_sha256'],
         assist_camera_profile=profile.get('camera_profile', 'standard'),
-        assist_input_rotation_degrees=rotation, assist_experiment='G', assist_diagnostic_capture=True,
+        assist_input_rotation_degrees=rotation, assist_experiment='B', assist_diagnostic_capture=True,
         pairing_policy='bounded_software_time_pair_not_hardware_sync')
     if result['assist_camera_profile'] == 'wide':
         result.update(assist_output_policy='dtof_geometric_fov_v1', assist_tof_fov_correction=fov)
@@ -143,8 +143,8 @@ def check_batch(executable, root, runtime, model, cases, environment, output):
             assert np.isfinite(mono).all() and (mono > 0).all()
             assert m['assist_host_model'] == model and m['assist_graph_sha256'] == expected_graph
             experiment = case['metadata']['assist_experiment']
-            revision = {'G': 'global_scale_fresh_rgb_portrait_v2', 'B': 'global_scale_reuse_latest_rgb_portrait_v1'}
-            assert m['assist_experiment'] == experiment and m['assist_fusion_revision'] == revision[experiment]
+            assert m['assist_experiment'] == experiment == 'B'
+            assert m['assist_fusion_revision'] == 'global_scale_reuse_latest_rgb_portrait_v1'
             if 'assist_execution_device' in m:
                 assert m['assist_execution_device']==backend
             assert m['assist_input_orientation_checked'] is True and m['assist_output_restored_to_calibrated_grid'] is True
