@@ -48,7 +48,7 @@ QString applicationRoot() {
     for(int i=0;i<4;++i){if(directory.exists("Depth Camera and Tactile Sensor.vcxproj")||directory.exists("DCTS_APP.json"))return directory.absolutePath();directory.cdUp();}
     return QCoreApplication::applicationDirPath();
 }
-QString rvAssistRoot(){return rvAssistModelRoot(QLatin1String(RvCameraView::UniDepthVgaNative16));}
+QString rvAssistRoot(){return rvAssistModelRoot(QLatin1String(RvCameraView::UniDepthVgaNative48));}
 QString rvCompatibleRoot(){
     const auto path=overrideValue("RV_ASSIST_COMPAT_ROOT");
     return path.isEmpty()?QDir(applicationRoot()).filePath("UniDepthRuntimeCompatible"):path;

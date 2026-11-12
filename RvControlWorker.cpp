@@ -27,10 +27,12 @@
 #include <algorithm>
 #include <cstdio>
 #include <functional>
+#include <iterator>
 #include <memory>
 
 #include "sensors/RvDeviceStore.h"
 #include "sensors/RvCaptureCalibration.h"
+#include "sensors/RvDtofBoardStream.h"
 #include "sensors/RvTunerProtocol.h"
 #include <QtCore/QRegularExpression>
 #include <QtCore/QUuid>
@@ -44,6 +46,7 @@ bool factoryLogin = false;
 bool pinSelectedProfile = false;
 bool automaticCameraStart = false;
 bool unattendedUsbLogin = false;
+bool bundledLiteSr = false;
 QByteArray observedKey;
 #ifdef RV_CONTROL_TRANSPORT_TEST
 // Compiled only into the isolated formal localhost test image. Its manifest
@@ -96,14 +99,24 @@ constexpr struct BootstrapAsset { const char *name; const char *destination; boo
     {"tof_driver", "depth/tmf8829_ext", true},
     {"S99zdepth", "S99zdepth", true},
 };
+constexpr struct LiteSrAsset { const char *name; const char *boardName; bool executable; } liteSrAssets[] = {
+    {"litesr-fov6.bin", "litesr_near_gui", true},
+    {"litesr-near-256.dctsm", "litesr-near-256.dctsm", false},
+    {"librknnmrt.so", "librknnmrt.so", false},
+    {"libcrypto.so.1.1", "libcrypto.so.1.1", false},
+};
 void resources(const QDir &root) {
     const auto info = QJsonDocument::fromJson(readFile(root.filePath("implementation.json"))).object();
     require(info["implementation"] == Implementation && info["executable"] == "RvControlWorker.exe"
         && info["executable_sha256"].toString() == sha(QCoreApplication::applicationFilePath()), "Native RV implementation fingerprint mismatch");
     const auto dlls = info["dependencies"].toObject(), files = info["payload_files"].toObject();
     require(dlls.contains("libssh2.dll") && dlls.contains("libcrypto-3-x64.dll") && files.contains("known_hosts"), "Native SSH closure missing");
-    for(const auto *name:{"native_gui.sh","dtof-host.sh","native-fov6.bin"})
+    for(const auto *name:{"native_gui.sh","dtof-host.sh","model-switch.sh","native-fov6.bin"})
         require(files.contains(QString("rv_capture/")+name),"Native capture payload missing from the runtime manifest");
+    size_t liteSrFiles=0;
+    for(const auto &asset:liteSrAssets)liteSrFiles+=files.contains(QString("rv_capture/litesr/")+asset.name);
+    require(!liteSrFiles||liteSrFiles==std::size(liteSrAssets),"Incomplete LiteSR payload in the runtime manifest");
+    bundledLiteSr=liteSrFiles!=0;
 
     for(const auto *name:{"calibration.json","intrinsics.json","extrinsics.json","projection.bin","M48_geometry.bin","manifest.json","host_contract.json"})
         require(files.contains(QString("rv1103_bootstrap/calibration/")+name),"Calibration import payload missing");
@@ -720,14 +733,10 @@ int run(const QStringList &input) {
     }
     if(args.size()>=2&&args[1]=="--dtof") {
         require(args.size()>=5,"Incomplete candidate request");
-        QString hostModel,recovery;
+        QString recovery;
         bool automaticStart=false;
         for(int i=5;i<args.size();++i){
-            if(args[i]=="--host-model"){
-                require(hostModel.isEmpty()&&i+1<args.size(),"Invalid host model selection");hostModel=args[++i];
-                require(RvCameraView::isUniDepthNative16(hostModel),"Unsupported host model");
-            }
-            else if(args[i]=="--automatic-start"){
+            if(args[i]=="--automatic-start"){
                 require(!automaticStart,"Duplicate automatic start option");
                 automaticStart=true;
             }
@@ -737,15 +746,14 @@ int run(const QStringList &input) {
         require(ok&&RvCaptureContract::supports(mode)&&token.size()==32&&token.toLatin1().toHex().size()==64,"Invalid candidate selection");
         for(auto ch:token)require(QStringLiteral("0123456789abcdef").contains(ch),"Invalid candidate generation");
         RvCaptureContract::validate(mode,token.toStdString(),csv.toStdString());
-        const bool captureOnly=true;
-        require(captureOnly||hostModel.isEmpty(),"Host model requires capture-only mode");
-        if(mode==RvCaptureContract::NativeHd&&hostModel.isEmpty())hostModel="unidepth_rgb672_vga_fp16_tof16";
+        const bool liteSr=RvCaptureContract::isLiteSr(mode);
+        require(!liteSr||bundledLiteSr,"This desktop build is missing the board LiteSR payload");
         require(!automaticStart||(bool(deviceStore)&&recovery.isEmpty()&&qEnvironmentVariable("RV_TEST_OFFLINE_ONLY")!="1"),
                 "Automatic start requires an online trusted device");
         if(automaticStart){pinSelectedProfile=true;automaticCameraStart=true;}
         Ssh connection(known);
         verifyDevice(connection);
-        const auto modelState=captureRuntimeState(connection);
+        const auto modelState=captureRuntimeState(connection,liteSr);
         const auto tofState=automaticTofState(connection);
         if(modelState!="ready"||tofState!="ready"){
             const auto response=QJsonDocument(withDevice({{"state","board_files_unavailable"},{"generation",token},
@@ -760,15 +768,14 @@ int run(const QStringList &input) {
         auto effective=saved;
         effective.mode=RvCaptureContract::sensorMode(mode);
         effective.objects=1;
-        effective.signal=false;
+        effective.signal=liteSr;
         effective.noise=false;
         require(mode==RvCaptureContract::NativeHd?effective.fp16Native16Compatible():effective.nativeCompatible(),
                 "Automatic dToF preset is incompatible with the requested imaging mode");
-        if(captureOnly){
+        if(!liteSr){
             QJsonParseError parse;const auto capabilities=QJsonDocument::fromJson(connection.execute("LD_LIBRARY_PATH=/root/r144_depth:/oem/usr/lib /root/dtof_candidates_20261009/native_hd_gui --native-capabilities"),&parse).object();
-            require(parse.error==QJsonParseError::NoError&&capabilities["native_capture_protocol"]==RvCaptureContract::NativeCaptureProtocolV2
-                &&capabilities["m16"]==true&&capabilities["m48"]==true&&capabilities["model_inference"]==false&&capabilities["photon_enabled"]==false
-                &&capabilities["fov"]==(deviceStore?device.fov():RvCalibration::Fov),"Native16 capture runtime unavailable or calibration differs; no capture command was issued.");
+            require(parse.error==QJsonParseError::NoError&&nativeCaptureCapabilities(capabilities,deviceStore?device.fov():RvCalibration::Fov),
+                "Native capture runtime or calibration differs from the bundled version");
         }
         const auto action=coordinatorCandidateAction(recovery,legacyCoordinatorProfile());
         const int sessionFov=deviceStore?device.fov():RvCalibration::Fov;
@@ -776,20 +783,15 @@ int run(const QStringList &input) {
         const auto output=connection.execute(QStringLiteral("DCTS_PROCESSING_FOV=%6 DCTS_DTOF_PRESET=%1 /root/dtof_candidates_20261009/control.sh %2 %3 %4 %5")
                                               .arg(effective.size().width()).arg(action).arg(mode).arg(token,csv).arg(sessionFov));
         QJsonParseError error;const auto doc=QJsonDocument::fromJson(output,&error);auto r=doc.object();
-        require(error.error==QJsonParseError::NoError&&doc.isObject()&&r["state"]=="running"&&r["protocol"]==RvCaptureContract::Protocol&&r["generation"]==token&&r["candidate_mode"].toInt(-1)==mode&&r["options"]==csv&&r["boot_id"].toString().size()==36,"Candidate receipt mismatch");
+        require(error.error==QJsonParseError::NoError&&doc.isObject()&&dtofBoardReceipt(r,mode,token,csv),"Candidate receipt mismatch");
         {
             const auto calibration=QJsonDocument::fromJson(connection.execute("cat /run/dtof_candidates/sensor_readback.json.calibration.json"),&error).object();
             require(error.error==QJsonParseError::NoError&&RvCaptureCalibration::valid(calibration,token,sessionFov,true),"Default FOV calibration receipt mismatch");
             r["tof_calibration"]=calibration;
         }
-        require(r["engine"]==RvCaptureContract::engine(mode)&&r["model_sha256"]==""&&r["width"]==RvCaptureContract::Width&&r["height"]==RvCaptureContract::Height&&r["fresh_ms"]==RvCaptureContract::FreshMs,"Native capture receipt mismatch");
-        require(r["paired_depth_native_protocol"]==RvCaptureContract::PairedProtocol&&r["video_transport"]=="rtsp_h265"&&r["video_width"]==2304&&r["video_height"]==1296&&r["video_fps"]==30&&r["video_kbps"]==4096,"HD video receipt mismatch");
-        require(r["capture_only"]==true&&r["inference_location"]=="none"&&r["depth_present"]==false&&r["photon_enabled"]==false,"Capture-only receipt mismatch");
-        if(captureOnly){
-            require(r["native_capture_protocol"]==RvCaptureContract::NativeCaptureProtocolV2
-                    &&r["native_columns"]==effective.size().width()&&r["native_rows"]==effective.size().height(),"Native capture grid differs from the automatic preset");
-            r["requested_host_model"]=hostModel;r["capture_settings"]=effective.json();r["saved_capture_settings"]=saved.json();
-        }
+        require(nativeCaptureGrid(r)==effective.size()&&(liteSr||r["native_hole_fill_protocol"]==RvCaptureContract::NativeHoleFillProtocol),
+                "Board imaging receipt differs from the automatic preset");
+        r["capture_settings"]=effective.json();r["saved_capture_settings"]=saved.json();
 
         const auto response=QJsonDocument(withDevice(r)).toJson(QJsonDocument::Compact);std::fwrite(response.constData(),1,size_t(response.size()),stdout);return 0;
     }

@@ -23,6 +23,9 @@ if(-not $work.StartsWith($validation+'\',[StringComparison]::OrdinalIgnoreCase))
 if($Version -notmatch '^\d+\.\d+\.\d+(\.\d+)?$'){throw 'Invalid installer version.'}
 $payload=Join-Path $work 'payload'
 $exe='触想工作台.exe'
+$desktopFiles=@($exe,'DctsInferenceWorker.exe')
+$imagingSchemes=(Get-Content -LiteralPath (Join-Path $project 'DCTS_APP.json') -Raw | ConvertFrom-Json).imaging_schemes
+$desktopReceipt=Join-Path $work 'desktop-imaging.json'
 
 function Invoke-Native([string]$Program,[string[]]$Arguments){
     & $Program @Arguments
@@ -41,6 +44,22 @@ function Copy-Relative([string]$Source,[string]$Destination,[string]$Name){
 }
 function Write-Json([string]$Path,$Value){
     $Value | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $Path -Encoding utf8NoBOM
+}
+
+if($UseStagedPayload){
+    if(-not (Test-Path -LiteralPath $desktopReceipt -PathType Leaf)){
+        throw 'Stage the desktop from current source before reusing this payload.'
+    }
+    $receipt=Get-Content -LiteralPath $desktopReceipt -Raw | ConvertFrom-Json -AsHashtable
+    if(($receipt.imaging_schemes -join ',') -cne ($imagingSchemes -join ',')){
+        throw 'The staged desktop has a different imaging menu. Stage it again from current source.'
+    }
+    foreach($name in $desktopFiles){
+        $file=Join-Path $payload $name
+        if(-not (Test-Path -LiteralPath $file -PathType Leaf) -or (Digest $file) -ne $receipt.files[$name]){
+            throw "Staged desktop fingerprint mismatch: $name"
+        }
+    }
 }
 
 if(-not $UseStagedPayload){
@@ -219,7 +238,7 @@ foreach($name in 'libvlc.dll','libvlccore.dll','plugins/codec/libavcodec_plugin.
     }
 }
 
-foreach($name in $exe,'DctsInferenceWorker.exe'){
+foreach($name in $desktopFiles){
     if(-not (Test-Path -LiteralPath (Join-Path $payload $name) -PathType Leaf)){
         throw "Missing application executable in staged payload ($name)."
     }
@@ -253,6 +272,11 @@ $unexpected=Get-ChildItem -LiteralPath $payload -File -Recurse | Where-Object {
     $_.Extension -match '^\.(onnx|ovm|rknn|pt|pth|pdb|ilk|lib|exp|vcxproj|py)$'
 }
 if($unexpected){throw "Unexpected payload content: $($unexpected.FullName -join ', ')"}
+if(-not $UseStagedPayload){
+    $desktopHashes=@{}
+    foreach($name in $desktopFiles){$desktopHashes[$name]=Digest (Join-Path $payload $name)}
+    Write-Json $desktopReceipt @{imaging_schemes=$imagingSchemes;files=$desktopHashes}
+}
 if($StageOnly){return}
 if(-not $Iscc -or -not $ChineseMessages){throw 'Provide -Iscc and -ChineseMessages for installer compilation.'}
 $out=Join-Path $work 'delivery'

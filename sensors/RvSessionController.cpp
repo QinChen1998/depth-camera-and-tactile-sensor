@@ -271,47 +271,109 @@ QJsonObject RvSessionController::videoDiagnostics(bool counters) const
     return result;
 }
 
-// Immutable, capture-paired inputs; one pending frame and one GUI notification.
-// Slow CPU preprocessing cannot accumulate a queue or change native pairing.
+// Pairing stays on the session thread. The worker owns a frozen RGB/ToF pair
+// and can replace the pending job or completed result without a backlog.
 struct RvSessionController::HdPreparer {
-    struct Job {QImage image;QJsonObject source;QByteArray native;quint64 epoch=0;qint64 queuedNs=0;quint64 cancellation=0;};
-    struct Result {Job input;QImage preview;QByteArray planar;QString error;};
-    explicit HdPreparer(RvSessionController *value):owner(value),worker([this]{run();}){}
+    struct Job {
+        QImage image;
+        QJsonObject source;
+        QByteArray native;
+        quint64 epoch=0;
+        qint64 queuedNs=0;
+        quint64 cancellation=0;
+    };
+    struct Result {
+        QJsonObject source;
+        QByteArray native;
+        quint64 epoch=0;
+        QImage preview;
+        QByteArray planar;
+        QString error;
+    };
+
+    explicit HdPreparer(RvSessionController *session) : owner(session), worker([this]{run();}) {}
     ~HdPreparer(){
-        {std::lock_guard<std::mutex> lock(mutex);stopping=true;pending.reset();}
-        wake.notify_one();worker.join();
+        {
+            std::lock_guard lock(mutex);
+            stopping=true;
+            pending.reset();
+        }
+        wake.notify_one();
+        worker.join();
     }
-    void submit(Job job){{std::lock_guard<std::mutex> lock(mutex);job.cancellation=cancellation;pending=std::move(job);}wake.notify_one();}
-    void cancel(){std::lock_guard<std::mutex> lock(mutex);++cancellation;pending.reset();completed.reset();}
+
+    void submit(Job job){
+        {
+            std::lock_guard lock(mutex);
+            job.cancellation=cancellation;
+            pending=std::move(job);
+        }
+        wake.notify_one();
+    }
+
+    void cancel(){
+        std::lock_guard lock(mutex);
+        ++cancellation;
+        pending.reset();
+        completed.reset();
+    }
+
     std::optional<Result> take(){
-        std::lock_guard<std::mutex> lock(mutex);notificationQueued=false;
-        auto result=std::move(completed);completed.reset();return result;
+        std::lock_guard lock(mutex);
+        notificationQueued=false;
+        auto result=std::move(completed);
+        completed.reset();
+        return result;
     }
+
+private:
     void run(){
         for(;;){
             Job job;
-            {std::unique_lock<std::mutex> lock(mutex);wake.wait(lock,[this]{return stopping||pending.has_value();});
-             if(stopping)return;job=std::move(*pending);pending.reset();}
-            Result result;result.input=std::move(job);
+            {
+                std::unique_lock lock(mutex);
+                wake.wait(lock,[this]{return stopping||pending.has_value();});
+                if(stopping)return;
+                job=std::move(*pending);
+                pending.reset();
+            }
+
+            Result result{std::move(job.source),std::move(job.native),job.epoch};
             try{
-                result.input.source["host_hd_prepare_queue_ms"]=(RvHdVideoStream::nowNs()-result.input.queuedNs)/1e6;
-                QElapsedTimer clock;clock.start();
-                result.preview=RvCameraStream::prepareHd(result.input.image,RvCameraStream::hdVgaCalibration());
-                result.input.source["host_hd_prepare_ms"]=clock.nsecsElapsed()/1e6;
-                clock.restart();result.planar=RvAssistDepth::preparePlanarInput(result.preview);
-                result.input.source["assist_input_prepare_ms"]=clock.nsecsElapsed()/1e6;
-            }catch(const std::exception &error){result.error=QString::fromUtf8(error.what());}
-            result.input.image={};
-            bool notify=false;
-            {std::lock_guard<std::mutex> lock(mutex);if(stopping)return;
-             if(result.input.cancellation!=cancellation)continue;
-             completed=std::move(result);notify=!notificationQueued;notificationQueued=true;}
-            if(notify)QMetaObject::invokeMethod(owner,[view=owner]{view->takeHostHdPrepared();},Qt::QueuedConnection);
+                result.source["host_hd_prepare_queue_ms"]=(RvHdVideoStream::nowNs()-job.queuedNs)/1e6;
+                const auto &calibration=RvCameraStream::hdVgaCalibration();
+                RvCameraStream::require(calibration.sha256()==RvCameraView::Rgb672VgaFp16.mapSha,
+                                        "HD model calibration fingerprint mismatch");
+                QElapsedTimer clock;
+                clock.start();
+                result.preview=RvCameraStream::prepareHd(job.image,calibration);
+                result.source["host_hd_prepare_ms"]=clock.nsecsElapsed()/1e6;
+                clock.restart();
+                result.planar=RvAssistDepth::preparePlanarInput(result.preview);
+                result.source["assist_input_prepare_ms"]=clock.nsecsElapsed()/1e6;
+            }catch(const std::exception &error){
+                result.error=QString::fromUtf8(error.what());
+            }
+
+            bool notify;
+            {
+                std::lock_guard lock(mutex);
+                if(stopping)return;
+                if(job.cancellation!=cancellation)continue;
+                completed=std::move(result);
+                notify=!notificationQueued;
+                notificationQueued=true;
+            }
+            if(notify)
+                QMetaObject::invokeMethod(owner,[session=owner]{session->takeHostHdPrepared();},Qt::QueuedConnection);
         }
     }
+
     RvSessionController *owner;
-    std::mutex mutex;std::condition_variable wake;
-    std::optional<Job> pending;std::optional<Result> completed;
+    std::mutex mutex;
+    std::condition_variable wake;
+    std::optional<Job> pending;
+    std::optional<Result> completed;
     bool stopping=false,notificationQueued=false;
     quint64 cancellation=0;
     std::thread worker;
@@ -333,11 +395,16 @@ RvSessionController::RvSessionController(QObject *parent,const QString &deviceSt
     // Retired persisted model names never re-enable old inference.
     m_config.model = QStringLiteral("Native");
     auto savedScheme=settings.value("depth/imagingScheme").toString();
-    if(savedScheme!="board_native_tof48"&&savedScheme!="board_native_tof48_high_accuracy")savedScheme="host_unidepth_rgb672_vga_fp16_tof16";
+    m_dtofMode=RvDtofCandidates::modeForScheme(savedScheme);
+    if(m_dtofMode<0){
+        if(imagingHostModel(savedScheme).isEmpty())savedScheme=QLatin1String(GlobalRgbImagingScheme);
+        m_hostScheme=savedScheme;
+        m_dtofMode=RvDtofCandidates::Native48;
+    }
     settings.setValue("depth/imagingScheme",savedScheme);
-    for(const auto *key:{"depth/boardLiteSrHostContourEnabled","depth/boardLiteSrHostHoleMode","depth/boardLiteSrHostOutliers"})settings.remove(key);
+    for(const auto *key:{"depth/hostModel","depth/uniDepthExperiment","depth/boardLiteSrHostContourEnabled",
+                         "depth/boardLiteSrHostHoleMode","depth/boardLiteSrHostOutliers"})settings.remove(key);
     m_config.cameraWidth=2304;
-    m_dtofMode=savedScheme=="board_native_tof48"?RvDtofCandidates::Native48:savedScheme=="board_native_tof48_high_accuracy"?RvDtofCandidates::Native48HighAccuracy:RvDtofCandidates::NativeHd;
     m_dtofOptions=nativeCaptureOptions(m_dtofSettings);
 
     m_controlTimeout.setSingleShot(true);
@@ -477,17 +544,15 @@ RvSessionController::RvSessionController(QObject *parent,const QString &deviceSt
 
     m_assist=new RvAssistDepth(this);
     connect(m_assist,&RvAssistDepth::inferenceUnavailable,this,&RvSessionController::hostInferenceUnavailable);
-    const auto vgaModel=QString::fromLatin1(RvCameraView::UniDepthVgaNative16);
-    const bool vgaSelected=savedScheme=="host_"+vgaModel&&RvAssistDepth::supportsHostModel(vgaModel);
-    m_assist->setHostModel(vgaSelected?vgaModel:QString::fromLatin1(RvCameraView::UniDepthVgaNative16));
-    m_assist->setExperiment(QStringLiteral("H"));
     m_assist->setInputRotationDegrees(effectiveHostInputRotation(m_device));
     m_assist->setEnabled(hostHdAssist());
     connect(m_assist,&RvAssistDepth::loadingStateChanged,this,[this](int state){
         if(m_destroying)return;m_assistLoadingState=state;emit assistStateChanged();
     });
     m_nativeDepthExpiry.setSingleShot(true);
-    connect(&m_nativeDepthExpiry,&QTimer::timeout,this,[this]{if(!m_destroying)emit depthStreamCleared(tr("Native ToF depth expired"));});
+    connect(&m_nativeDepthExpiry,&QTimer::timeout,this,[this]{
+        if(!m_destroying)emit depthStreamCleared(RvCaptureContract::isLiteSr(m_dtofMode)?tr("LiteSR depth expired"):tr("Native ToF depth expired"));
+    });
     m_assistExpiry.setSingleShot(true);
     connect(&m_assistExpiry,&QTimer::timeout,this,[this]{
         if(m_destroying)return;
@@ -504,14 +569,18 @@ RvSessionController::RvSessionController(QObject *parent,const QString &deviceSt
             if(m_imagingSwitchActive)cancelImagingSwitch(reason);
             else if(!m_destroying)emit imagingSwitchAborted(UiStyle::depthErrorText(reason));
         }
-        if(!m_destroying){emit assistDepthStreamCleared(reason);emit assistStateChanged();}
+        if(!m_destroying){
+            emit assistDepthStreamCleared(reason);emit assistStateChanged();
+            if(m_assist->failed()&&m_automaticConnectionStage==AutomaticConnectionStage::WaitingForDepth)
+                setAutomaticConnectionStage(AutomaticConnectionStage::Idle);
+        }
     });
-    connect(m_assist,&RvAssistDepth::resultReady,this,[this](const QByteArray &depth,const QJsonObject &metadata,const QImage &camera,quint64 epoch,const RvTofFrame &tof,const QByteArray &diagnostic){
+    connect(m_assist,&RvAssistDepth::resultReady,this,[this](const QByteArray &depth,const QJsonObject &metadata,const QImage &camera,quint64 epoch,const RvTofFrame &tof,const QByteArray &diagnostic,const QImage &inferenceInput){
         if(m_destroying||!assistDepthEnabled()||m_userStopped||busy()||epoch!=m_presentationEpoch
-            ||(m_config.cameraWidth!=576&&!hostHdAssist())||metadata["generation"]!=m_currentMetadata["generation"]
-            ||(hostHdAssist()&&metadata["boot_id"]!=m_currentMetadata["boot_id"])
+            ||!hostHdAssist()||metadata["generation"]!=m_currentMetadata["generation"]
+            ||metadata["boot_id"]!=m_currentMetadata["boot_id"]
             ||metadata["assist_input_rotation_degrees"].toInt(-1)!=assistInputRotationDegrees()
-            ||(RvAssistDepth::isUniDepth(assistHostModel())&&metadata.value("assist_experiment").toString("A")!=assistExperiment())
+            ||metadata["assist_experiment"]!=assistExperiment()
             ||metadata["frame_id"].toDouble()>m_currentMetadata["frame_id"].toDouble()
             ||metadata["frame_id"].toDouble()<=m_lastAssistFrame)return;
         if(m_imagingSwitchActive&&metadata["assist_host_model"]!=assistHostModel())return;
@@ -527,36 +596,32 @@ RvSessionController::RvSessionController(QObject *parent,const QString &deviceSt
             m_assistInfo=tr("Using last dToF scale %1 | reference %2 s ago | inference %3 ms")
                 .arg(fit["scale"].toDouble(),0,'f',3).arg(fit["scale_reference_age_ms"].toDouble()/1000,0,'f',1)
                 .arg(metadata["assist_inference_ms"].toDouble(),0,'f',1);
+        else if(fit["fusion_mode"]=="unavailable")
+            m_assistInfo=tr("Metric depth unavailable: waiting for reliable dToF correction");
         else if(fit["fusion_mode"]=="monocular")
             m_assistInfo=tr("Monocular estimate, not dToF corrected | inference %1 ms | age %2 ms")
                 .arg(metadata["assist_inference_ms"].toDouble(),0,'f',1).arg(metadata["assist_frame_age_ms"].toDouble(),0,'f',0);
-        else m_assistInfo+=QStringLiteral(" | ")+(fit["fusion_mode"]=="global_scale"?tr("Global scale"):tr("Scale + local correction"));
-        if(assistExperiment()=="H"&&metadata["dtof_present"]==true)m_assistInfo+=tr(" | ToF %1: %2 | pair delta %3 ms")
-            .arg(metadata["tof_sequence"].toInteger()).arg(tr(metadata["tof_reused"]==true?"reused":"new measurement"))
+        else if(fit["fusion_mode"]=="global_scale")
+            m_assistInfo+=QStringLiteral(" | ")+tr("Global scale");
+        if(metadata["dtof_present"]==true)m_assistInfo+=tr(" | ToF %1: %2 | pair delta %3 ms")
+            .arg(metadata["tof_sequence"].toInteger())
+            .arg(metadata["tof_reused"]==true?tr("reused measurement"):tr("new measurement"))
             .arg(metadata["pair_delta_ms"].toDouble(),0,'f',1);
-        if(fit["recovery_applied"]==true)m_assistInfo+=tr(" | Local recovery: %1 anchors").arg(fit["recovery_anchors"].toInt());
-        if(fit["recovery_applied"]==true&&!fit["global_fit_accepted"].toBool())m_assistInfo+=tr(" | Global fit unavailable; current local correction only");
-        if((fit["fusion_mode"]=="held_scale"||fit["fusion_mode"]=="monocular")&&!fit["fallback_reason"].toString().isEmpty()){
+        if((fit["fusion_mode"]=="held_scale"||fit["fusion_mode"]=="monocular"||fit["fusion_mode"]=="unavailable")
+           &&!fit["fallback_reason"].toString().isEmpty()){
             const auto reason=fit["fallback_reason"].toString().toUtf8();m_assistInfo+='\n'+QCoreApplication::translate("RvAssistFusion",reason.constData());
-        }
-        if(metadata["assist_output_policy"]==QLatin1String(RvAssistFusion::SupportPolicy)){
-            if(fit["support_pixels"].toInt()>0)m_assistInfo+=tr(" | dToF-supported output %1%; outside support is unknown")
-                .arg(100.*fit["support_pixels"].toDouble()/outputPixels,0,'f',1);
-            else m_assistInfo=tr("No connected current dToF correction support; depth is unknown");
         }
         if(metadata["assist_output_policy"]==QLatin1String(RvAssistFusion::FieldOfViewPolicy))
             m_assistInfo+=tr(" | dToF geometric field %1%; continuous predicted depth inside")
                 .arg(100.*fit["fov_pixels"].toDouble()/outputPixels,0,'f',1);
-        if(fit["fusion_mode"]=="rgbd_completion")
-            m_assistInfo=tr("%1 | ToF %2 x %3 | points %4 | inference %5 ms | age %6 ms")
-                .arg(metadata["model"].toString()).arg(fit["native_columns"].toInt()).arg(fit["native_rows"].toInt())
-                .arg(fit["projected_points"].toInt()).arg(metadata["assist_inference_ms"].toDouble(),0,'f',1).arg(metadata["assist_frame_age_ms"].toDouble(),0,'f',0);
         setProperty("rvAssistMetadata",metadata.toVariantMap());
         const double sourceAge=std::max(metadata["assist_frame_age_ms"].toDouble(),metadata["assist_measurement_age_ms"].toDouble());
         const int processingBudget=std::clamp(metadata["assist_processing_budget_ms"].toInt(1000),1000,120000);
         m_assistExpiry.start(std::max(1,processingBudget-int(std::ceil(sourceAge))));
         finishImagingSwitch();
-        emit assistDepthSnapshotReady(depth,metadata,camera,tof,diagnostic);
+        emit assistDepthSnapshotReady(depth,metadata,camera,tof,diagnostic,inferenceInput);
+        if(epoch==m_presentationEpoch&&m_automaticConnectionStage==AutomaticConnectionStage::WaitingForDepth)
+            setAutomaticConnectionStage(AutomaticConnectionStage::Idle);
         if(!m_destroying&&epoch==m_presentationEpoch)emit assistStateChanged();
     });
     resetQtPlayer();
@@ -751,26 +816,16 @@ QString RvSessionController::hostInferencePreflightError() const
 {
     return RvAssistDepth::preflightError(assistHostModel());
 }
-QString RvSessionController::assistExperiment() const {return m_assist?m_assist->experiment():QStringLiteral("A");}
-void RvSessionController::setAssistExperiment(const QString &mode) {
-    if(m_destroying||busy()||m_imagingSwitchActive||!hostHdAssist()||!m_assist||!RvAssistDepth::isUniDepth(assistHostModel())
-        ||!RvAssistDepth::validExperiment(mode)||mode==assistExperiment())return;
-    // Retire all pre-switch input, without restarting the camera/board or
-    // changing its epoch, clock mapping, calibration or sensor parameters.
-    for(const auto &raw:m_hdNativeFrames)
-        m_hdScheduledTof=std::max(m_hdScheduledTof,quint64(raw.metadata["tof_sequence"].toInteger()));
-    m_hdNativeFrames.clear();m_hdRgbFrames.clear();m_hdPairDrops={};
-    if(!m_assist->setExperiment(mode))return;
-    QSettings().setValue("depth/uniDepthExperiment",mode);
-    emit assistStateChanged();
+QString RvSessionController::assistExperiment() const {
+    return m_hostScheme==QLatin1String(ReuseLatestTofImagingScheme)?QStringLiteral("B"):QStringLiteral("G");
 }
 void RvSessionController::setAssistDepthEnabled(bool enabled)
 {
     if(m_destroying||!m_assist)return;
-    if(enabled&&((m_config.cameraWidth!=576&&m_config.cameraWidth!=2304)||busy()))return;
+    if(enabled&&(!hostHdAssist()||busy()))return;
+    if(!enabled&&m_hdPreparer)m_hdPreparer->cancel();
     m_assist->setEnabled(enabled);
-    if(enabled)m_assistInfo=m_config.cameraWidth==2304?tr("Waiting for a managed H.265 frame for host inference"):
-        tr("Waiting for a paired 576×324 camera and dToF frame");
+    if(enabled)m_assistInfo=tr("Waiting for a managed H.265 frame for host inference");
     emit assistStateChanged();
 }
 
@@ -787,9 +842,9 @@ bool RvSessionController::applyDtofCandidate(int mode,const RvDtofCandidates::Se
     try{if(mode>=0)options=nativeCaptureOptions(settings);}catch(...){return false;}
     if(mode==m_dtofMode&&(mode<0||options==m_dtofOptions))return true;
     if(busy()||!controlledSource())return false;
-    if(RvDtofCandidates::isCaptureOnly(mode)&&!m_userStopped&&!prepareManagedVlc()){m_depthConfigError=tr("VLC 3 with H.265 support is required for the managed camera");emit configurationChanged();return false;}
+    if(!m_userStopped&&!prepareManagedVlc()){m_depthConfigError=tr("VLC 3 with H.265 support is required for the managed camera");emit configurationChanged();return false;}
     m_dtofMode=mode;m_dtofOptions=options;m_dtofSettings=settings;m_dtofReceipt={};
-    if(mode>=0){m_config.cameraWidth=RvDtofCandidates::isCaptureOnly(mode)?2304:576;m_config.depthWidth=144;m_config.location="none";m_config.method="none";m_streamUrl=m_device.streamUrl();}
+    m_config.cameraWidth=2304;m_config.depthWidth=144;m_config.location="none";m_config.method="none";m_streamUrl=m_device.streamUrl();
     emit dtofCandidateSelectionChanged();
     if(!m_userStopped)submitConfiguration(m_config,true,true);
     else{emit configurationChanged();}
@@ -814,74 +869,73 @@ void RvSessionController::setDepthModel(const QString &model)
 
 void RvSessionController::selectImagingScheme(const QString& scheme,const RvDtofCandidates::Settings& settings)
 {
-    const int nativeMode=scheme=="board_native_tof48"?RvDtofCandidates::Native48:scheme=="board_native_tof48_high_accuracy"?RvDtofCandidates::Native48HighAccuracy:-1;
-    if(nativeMode<0&&scheme!="host_unidepth_rgb672_vga_fp16_tof16")return;
-    if(m_destroying||busy()||m_imagingSwitchActive||!controlledSource())return;
-    if(nativeMode>=0){
-        if(m_dtofMode==nativeMode&&!assistDepthEnabled())return;
+    const int boardMode=RvDtofCandidates::modeForScheme(scheme);
+    const auto selected=imagingHostModel(scheme);
+    if(boardMode<0&&selected.isEmpty())return;
+    if(m_destroying||busy()||automaticConnecting()||m_imagingSwitchActive||!controlledSource())return;
+    if(boardMode>=0){
+        if(m_dtofMode==boardMode&&!assistDepthEnabled())return;
         if(!m_userStopped)beginImagingSwitch(scheme,true);
+        m_hostScheme.clear();
         m_assist->setEnabled(false);
-        m_dtofMode=nativeMode;m_dtofOptions=nativeCaptureOptions(settings);m_dtofSettings=settings;m_dtofReceipt={};
+        m_dtofMode=boardMode;m_dtofOptions=nativeCaptureOptions(settings);m_dtofSettings=settings;m_dtofReceipt={};
         m_config=withCameraWidth(2304);m_streamUrl=m_device.streamUrl();
         QSettings().setValue("depth/imagingScheme",scheme);emit dtofCandidateSelectionChanged();
         if(!m_userStopped)submitConfiguration(m_config,true,true);
         else{emit configurationChanged();updateState();}
         return;
     }
-    if(scheme.startsWith("host_")) {
-        const auto selected=scheme=="host_assisted"?QStringLiteral("unidepth"):scheme.mid(5);
-        if(!RvAssistDepth::supportsHostModel(selected))return;
-        if(!m_userStopped){
-            const auto problem=RvAssistDepth::preflightError(selected);
-            if(!problem.isEmpty()){emit hostInferenceUnavailable(problem,{});emit configurationChanged();return;}
-        }
-        if(!RvAssistDepth::hostModelAvailable(selected)){
-            emit hostInferenceUnavailable(tr("The required host inference files are missing or invalid."),{});
-            emit configurationChanged();return;
-        }
-        const auto currentGrid=nativeCaptureGrid(m_dtofReceipt);
-        if(!m_userStopped&&hostHdAssist()&&!RvCameraView::supportsNativeGrid(selected,currentGrid.width(),currentGrid.height())){
-            m_depthConfigError=tr("Selected model does not support the current %1×%2 native ToF grid. Stop capture and save compatible settings first.").arg(currentGrid.width()).arg(currentGrid.height());
-            m_depthInfoText=m_depthConfigError;setState(tr("Error"),m_depthConfigError);emit configurationChanged();return;
-        }
-        const auto options=nativeCaptureOptions(settings);
-        if(m_dtofMode==RvDtofCandidates::NativeHd&&m_config.cameraWidth==2304&&m_dtofOptions==options
-            &&assistHostModel()==selected&&assistDepthEnabled()&&!m_assist->failed())return;
-        const bool keepCapture=!m_userStopped&&hostHdAssist()&&assistDepthEnabled()&&m_dtofStream
-            &&m_dtofOptions==options&&m_rtspStatusReady&&m_hdFrameClock.isValid()&&m_hdFrameClock.elapsed()<3000
-            &&dtofBoardReceipt(m_dtofReceipt,m_dtofMode,m_dtofToken,m_dtofOptions);
-        if(!m_userStopped){beginImagingSwitch(scheme,!keepCapture);if(!m_imagingSwitchActive||m_userStopped)return;}
-        QSettings().setValue("depth/imagingScheme",scheme);
-        if(keepCapture){
-            // Keep the one board owner, LSG2 polling, clock mapping and RTSP
-            // decoder. Only host inputs and the disposable inference process change.
-            m_hdNativeFrames.clear();m_hdRgbFrames.clear();m_hdPairDrops={};
-            m_currentMetadata={};
-            m_assist->setHostModel(selected);
-            // An explicit re-selection may retry a failed host process without
-            // resetting the sensor. Ordinary incoming frames never clear a failure.
-            if(m_assist->failed()){m_assist->setEnabled(false);m_assist->setEnabled(true);}
-            QSettings().setValue("depth/hostModel",selected);
-            emit dtofCandidateSelectionChanged();emit configurationChanged();updateState();
-            return;
-        }
-        m_assist->setHostModel(selected);QSettings().setValue("depth/hostModel",selected);
-        if(m_assist->failed()){m_assist->setEnabled(false);m_assist->setEnabled(true);}
-        m_dtofMode=RvDtofCandidates::NativeHd;m_dtofOptions=options;m_dtofSettings=settings;m_dtofReceipt={};
-        m_config=withCameraWidth(2304);m_streamUrl=m_device.streamUrl();
-        setAssistDepthEnabled(true);emit dtofCandidateSelectionChanged();
-        // Selecting while stopped is inert; an active selection uses the shared
-        // coordinator to renew native capture and the camera stream.
-        if(!m_userStopped)submitConfiguration(m_config,true,true);
-        else{emit configurationChanged();updateState();}
+    if(!RvAssistDepth::supportsHostModel(selected))return;
+    if(!m_userStopped){
+        const auto problem=RvAssistDepth::preflightError(selected);
+        if(!problem.isEmpty()){emit hostInferenceUnavailable(problem,{});emit configurationChanged();return;}
+    }
+    if(!RvAssistDepth::hostModelAvailable(selected)){
+        emit hostInferenceUnavailable(tr("The required host inference files are missing or invalid."),{});
+        emit configurationChanged();return;
+    }
+    const auto currentGrid=nativeCaptureGrid(m_dtofReceipt);
+    const int targetMode=RvCameraView::captureMode(selected);
+    const auto options=nativeCaptureOptions(settings);
+    if(m_hostScheme==scheme&&hostHdAssist()&&m_dtofMode==targetMode&&m_config.cameraWidth==2304
+        &&m_dtofOptions==options&&assistDepthEnabled()&&!m_assist->failed())return;
+    const bool keepCapture=!m_userStopped&&hostHdAssist()&&assistDepthEnabled()&&m_dtofStream
+        &&m_dtofMode==targetMode&&RvCameraView::supportsNativeGrid(selected,currentGrid.width(),currentGrid.height())
+        &&m_dtofOptions==options&&m_rtspStatusReady&&m_hdFrameClock.isValid()&&m_hdFrameClock.elapsed()<3000
+        &&dtofBoardReceipt(m_dtofReceipt,m_dtofMode,m_dtofToken,m_dtofOptions);
+    if(!m_userStopped){beginImagingSwitch(scheme,!keepCapture);if(!m_imagingSwitchActive||m_userStopped)return;}
+    QSettings().setValue("depth/imagingScheme",scheme);
+    m_hostScheme=scheme;
+    if(keepCapture){
+        // Renew the host inference state using the same capture generation.
+        m_hdNativeFrames.clear();
+        m_currentMetadata={};
+        m_assist->setEnabled(false);
+        m_assist->setEnabled(true);
+        emit dtofCandidateSelectionChanged();emit configurationChanged();updateState();
         return;
     }
+    if(m_assist->failed()){m_assist->setEnabled(false);m_assist->setEnabled(true);}
+    m_dtofMode=targetMode;m_dtofOptions=options;m_dtofSettings=settings;m_dtofReceipt={};
+    m_config=withCameraWidth(2304);m_streamUrl=m_device.streamUrl();
+    setAssistDepthEnabled(true);emit dtofCandidateSelectionChanged();
+    // Selecting while stopped is inert; an active selection uses the shared
+    // coordinator to renew native capture and the camera stream.
+    if(!m_userStopped)submitConfiguration(m_config,true,true);
+    else{emit configurationChanged();updateState();}
+    return;
+}
 
+QString RvSessionController::imagingHostModel(const QString &scheme)
+{
+    if(scheme==QLatin1String(GlobalRgbImagingScheme)||scheme==QLatin1String(ReuseLatestTofImagingScheme))
+        return QString::fromLatin1(RvCameraView::UniDepthVgaNative48);
+    return {};
 }
 
 QString RvSessionController::currentImagingScheme() const
 {
-    if(hostHdAssist()&&assistDepthEnabled())return assistHostModel()=="unidepth"?QStringLiteral("host_assisted"):"host_"+assistHostModel();
+    if(hostHdAssist()&&assistDepthEnabled())return m_hostScheme;
     if(m_dtofMode>=0)return RvDtofCandidates::name(m_dtofMode);
     return {};
 }
@@ -889,6 +943,7 @@ QString RvSessionController::currentImagingScheme() const
 void RvSessionController::beginImagingSwitch(const QString &scheme,bool boardRestart)
 {
     if(m_destroying||m_userStopped)return;
+    if(m_hdPreparer)m_hdPreparer->cancel();
     m_imagingSwitchScheme=scheme;m_imagingSwitchBoardRestart=boardRestart;
     // Retained Small timings include cold file caches, plus capture handover.
     const int hostMs=5500;
@@ -986,7 +1041,7 @@ void RvSessionController::submitConfiguration(const Configuration &candidate, bo
     const auto worker = RuntimeDiscovery::rvControlForLaunch();
     if (!worker.ok()) { failPreviewControl(worker.error); return; }
     const QString root = QFileInfo(worker.executable).absolutePath();
-    if (((m_dtofMode<0&&candidate.cameraWidth==2304)||RvDtofCandidates::isCaptureOnly(m_dtofMode))&&!prepareManagedVlc()) {
+    if (candidate.cameraWidth==2304&&!prepareManagedVlc()) {
         failPreviewControl(tr("VLC 3 with H.265 support is required for the managed camera")); return;
     }
     m_transitioning = true;
@@ -1013,7 +1068,7 @@ void RvSessionController::submitConfiguration(const Configuration &candidate, bo
     if(startAfter&&!reconnecting&&assistDepthEnabled()&&m_assist->failed()){
         m_assist->setEnabled(false);m_assist->setEnabled(true);
     }
-    if(startAfter&&!m_imagingSwitchActive&&hostHdAssist()&&assistDepthEnabled())
+    if(startAfter&&!automatic&&!m_imagingSwitchActive&&hostHdAssist()&&assistDepthEnabled())
         beginImagingSwitch(currentImagingScheme(),true);
     if(!receptionAuthorized())return;
     // Revoke old callbacks immediately, but keep the old LSG2 receiver polling
@@ -1031,9 +1086,11 @@ void RvSessionController::submitConfiguration(const Configuration &candidate, bo
     if (!receptionAuthorized()) return;
     emit streamCleared();
     if (!receptionAuthorized()) return;
-    setProperty("rvMode", "switching"); emit depthStreamCleared(tr("Switching work mode..."));
+    const auto connectingDetail = automatic ? tr("Starting camera and depth capture...")
+        : reconnecting ? tr("Automatically restoring camera and depth...") : tr("Switching work mode...");
+    setProperty("rvMode", "switching"); emit depthStreamCleared(connectingDetail);
     if (!receptionAuthorized()) return;
-    setState(tr("Connecting"), reconnecting ? tr("Automatically restoring camera and depth...") : tr("Switching work mode..."));
+    setState(tr("Connecting"), connectingDetail);
     if (!receptionAuthorized()) return;
     QStringList args = {QString::number(candidate.cameraWidth), "--host", address.host(),
         "--depth-width", QString::number(candidate.depthWidth), "--location", candidate.location, "--method", candidate.method};
@@ -1042,7 +1099,6 @@ void RvSessionController::submitConfiguration(const Configuration &candidate, bo
     if(m_dtofMode>=0){
         m_dtofToken=QUuid::createUuid().toString(QUuid::Id128);m_dtofReceipt={};
         args={"--dtof",QString::number(m_dtofMode),m_dtofToken,m_dtofOptions};
-        if(hostHdAssist())args<<"--host-model"<<assistHostModel();
     }
     // Explicit Start may recover any fault after ownership checks. Background
     // recovery must pass the board's structural-fault classifier and rate cap.
@@ -1124,6 +1180,8 @@ void RvSessionController::failPreviewControl(const QString &reason, bool retry)
     if (m_hasConfirmedConfig) m_config = m_confirmedConfig;
     emit configurationChanged(); updateState(); setProperty("rvMode", "error");
     setState(tr("Error"), reason); emit depthStreamCleared(reason);
+    if(automaticConnecting()&&assistDepthEnabled())emit assistDepthStreamCleared(reason);
+    setAutomaticConnectionStage(AutomaticConnectionStage::Idle);
 }
 
 void RvSessionController::setState(const QString &state, const QString &detail)
@@ -1144,7 +1202,14 @@ void RvSessionController::retranslateState()
 
 void RvSessionController::start()
 {
-    startImaging(false);
+    if (!automaticConnecting()) startImaging(false);
+}
+
+void RvSessionController::setAutomaticConnectionStage(AutomaticConnectionStage stage)
+{
+    if (m_automaticConnectionStage == stage) return;
+    m_automaticConnectionStage = stage;
+    if (!m_destroying) emit stateChanged();
 }
 
 bool RvSessionController::automaticStartAllowed(const QString &deviceId) const
@@ -1159,7 +1224,11 @@ void RvSessionController::startAutomatically(bool verifiedUsbAttachment)
     if (qEnvironmentVariable("RV_TEST_OFFLINE_ONLY") == "1" || !m_userStopped || busy()
         || m_dtofMode < 0 || !controlledSource() || !m_device.ready()
         || (!verifiedUsbAttachment && m_autoStartAttemptedDevice == m_device.id)) return;
+    const auto revision = m_stopRevision;
+    setAutomaticConnectionStage(AutomaticConnectionStage::StartingCapture);
+    if (revision != m_stopRevision) return;
     startImaging(true);
+    if (m_userStopped) setAutomaticConnectionStage(AutomaticConnectionStage::Idle);
 }
 
 void RvSessionController::deviceUnreachable(const QString &deviceId)
@@ -1220,6 +1289,7 @@ void RvSessionController::stop()
     });
     m_autoStartAttemptedDevice = m_device.id;
     m_userStopped = true;
+    setAutomaticConnectionStage(AutomaticConnectionStage::Idle);
     cancelImagingSwitch(tr("Camera is not started"));
     m_recoveryDisplayTimer.stop();
     // Revoke before kill: a queued completion cannot accept a late receipt or
@@ -1272,8 +1342,10 @@ void RvSessionController::beginConnection(bool resetAttempts)
     if (!stillConnecting()) return;
     if(m_dtofMode>=0){
         if(!dtofBoardReceipt(m_dtofReceipt,m_dtofMode,m_dtofToken,m_dtofOptions)){failPreviewControl(tr("Candidate confirmation is missing"));return;}
-        auto* stream=new RvDtofBoardStream(m_dtofReceipt,m_dtofSettings,this,m_device.host);m_dtofStream=stream;
-        if(RvDtofCandidates::isCaptureOnly(m_dtofMode)){
+        const bool boardDepth=RvDtofCandidates::isNativeDepth(m_dtofMode)&&!hostHdAssist();
+        const auto output=boardDepth?RvDtofBoardStream::Output::BoardDepth:RvDtofBoardStream::Output::RawToF;
+        auto* stream=new RvDtofBoardStream(m_dtofReceipt,output,this,m_device.host);m_dtofStream=stream;
+        {
             m_rtspStatusReady=false;m_lastEncodedFrame=m_lastRetrievedFrame=0;m_hdVideoSeen=false;m_hdVideoReconnects=0;setProperty("rvVideoReconnectCount",0);
             m_encoderProgressClock.restart();m_hdFrameClock.restart();
             stream->videoProgress=[this,stream](const QJsonObject& meta){
@@ -1286,27 +1358,47 @@ void RvSessionController::beginConnection(bool resetAttempts)
                 }
             };
         }
-        stream->rawFrame=[this,stream](const RvTofFrame& received){
-            if(m_dtofStream!=stream||m_userStopped||m_controlPending)return;
+        const auto current=[this,stream,epoch]{
+            return m_dtofStream==stream&&epoch==m_presentationEpoch&&!m_userStopped&&!m_controlPending;
+        };
+        const auto publishDepth=[this,current](const QByteArray& bytes,const QByteArray& coverage,QJsonObject metadata,double age){
+            if(!current())return;
+            RvCaptureCalibration::annotate(metadata,m_dtofReceipt);
+            metadata["source_generation"]=metadata["generation"];metadata["generation"]=double(m_presentationEpoch);
+            metadata["calibration_release"]=RvCalibration::Release;
+            metadata["sensor_mode"]=RvCaptureContract::sensorMode(m_dtofMode);
+            m_nativeDepthExpiry.start(std::max(1,RvCaptureContract::FreshMs-int(std::ceil(age))));
+            if(m_waitingForSelectedFrame){m_waitingForSelectedFrame=false;m_switchFrameTimeout.stop();updateState();}
+            if(!current())return;
+            finishImagingSwitch();
+            if(!current())return;
+            emit depthFrameReady(bytes,metadata);
+            if(!current())return;
+            emit depthSnapshotReady(bytes,metadata,QImage(),coverage);
+            if(current()&&m_automaticConnectionStage==AutomaticConnectionStage::WaitingForDepth)
+                setAutomaticConnectionStage(AutomaticConnectionStage::Idle);
+        };
+        if(RvCaptureContract::isLiteSr(m_dtofMode)){
+            stream->depthFrame=[publishDepth](const QByteArray& bytes,const QByteArray& coverage,const QJsonObject& metadata){
+                publishDepth(bytes,coverage,metadata,metadata["age_ms"].toDouble());
+            };
+        }
+        stream->rawFrame=[this,current,publishDepth](const RvTofFrame& received,const QByteArray& holeFillRanges){
+            if(!current())return;
             auto raw=received;RvCaptureCalibration::annotate(raw.metadata,m_dtofReceipt);
             if(hostHdAssist()){
-                if(m_assist->tofDriven()&&!m_hdNativeFrames.empty()&&quint64(m_hdNativeFrames.back().metadata["tof_sequence"].toInteger())>m_hdScheduledTof)
-                    m_hdPairDrops["unpaired_superseded"]=m_hdPairDrops["unpaired_superseded"].toInt()+1;
                 if(m_hdNativeFrames.size()==16)m_hdNativeFrames.pop_front();m_hdNativeFrames.push_back(raw);
-                if(m_assist->tofDriven())dispatchHostHdMeasurement();
             }
             setProperty("rvRawTofSequence",raw.metadata["tof_sequence"].toVariant());emit tofFrameReady(raw);
-            if(RvDtofCandidates::isNativeDepth(m_dtofMode)){
-                const auto bytes=raw.radialMetres();if(bytes.isEmpty())return;
+            if(current()&&RvDtofCandidates::isNativeDepth(m_dtofMode)&&!hostHdAssist()){
+                QJsonArray filledIndices;
+                const auto bytes=raw.radialMetres(holeFillRanges,&filledIndices);if(bytes.isEmpty())return;
                 auto metadata=raw.metadata;
-                metadata["source_generation"]=metadata["generation"];metadata["generation"]=double(m_presentationEpoch);
                 metadata["model"]=RvDtofCandidates::name(m_dtofMode);metadata["width"]=48;metadata["height"]=32;
                 metadata["depth_unit"]="sensor_radial_m_float32";metadata["depth_location"]="native_sensor";
-                metadata["sensor_mode"]=RvCaptureContract::sensorMode(m_dtofMode);
-                metadata["native_order"]=true;metadata["interpolation"]=false;metadata["calibration_release"]=RvCalibration::Release;
-                m_nativeDepthExpiry.start(std::max(1,1000-int(std::ceil(metadata["raw_age_ms"].toDouble()))));
-                if(m_waitingForSelectedFrame){m_waitingForSelectedFrame=false;m_switchFrameTimeout.stop();updateState();}
-                finishImagingSwitch();emit depthFrameReady(bytes,metadata);emit depthSnapshotReady(bytes,metadata,QImage());
+                metadata["native_order"]=true;metadata["interpolation"]=!filledIndices.isEmpty();
+                if(!filledIndices.isEmpty())metadata["native_hole_fill_indices"]=filledIndices;
+                publishDepth(bytes,{},metadata,metadata["raw_age_ms"].toDouble());
             }
         };
         stream->error=[this,stream,epoch](const QString& reason){
@@ -1317,11 +1409,12 @@ void RvSessionController::beginConnection(bool resetAttempts)
             });
         };
         m_connectionClock.restart();m_framesInWindow=0;m_fpsClock.restart();
-        if(RvDtofCandidates::isCaptureOnly(m_dtofMode)){
-            m_hdVideo=new RvHdVideoStream(m_device.streamUrl(true));m_hdVideoSequence=0;m_hdOutputSequence=0;
-            m_hdVideo->start();m_frameTimer.start();
-        }
-        setState(tr("Connecting"),tr("Waiting for RV1103 candidate output"));return;
+        m_hdVideo=new RvHdVideoStream(m_device.streamUrl(true));m_hdVideoSequence=0;m_hdOutputSequence=0;
+        m_hdVideo->start();m_frameTimer.start();
+        setState(tr("Connecting"),tr("Waiting for RV1103 candidate output"));
+        if(m_automaticConnectionStage==AutomaticConnectionStage::StartingCapture)
+            setAutomaticConnectionStage(AutomaticConnectionStage::WaitingForDepth);
+        return;
     }
     if (resetAttempts) { m_reconnectAttempt = 0; m_nextReconnectDelayMs = 1000; }
     m_framesInWindow = 0;
@@ -1397,6 +1490,7 @@ void RvSessionController::scheduleReconnect(const QString &reason)
     if (!m_recoveryDisplayTimer.isActive() && (!m_currentMetadata.isEmpty() || property("rvSourceWidth").isValid()))
         m_recoveryDisplayTimer.start();
     stopVlc();
+    setAutomaticConnectionStage(AutomaticConnectionStage::Idle);
     const quint64 epoch = m_presentationEpoch;
     if (m_userStopped || m_controlPending) return;
     m_player->stop();
@@ -1468,7 +1562,7 @@ bool RvSessionController::startVlc(const QUrl &source)
     // available via the process-local RV_RTSP_OUTPUT=vmem override.
     // Both receivers feed the same bounded mailbox; only the existing generation,
     // VENC progress gate and freshness watchdog authorize presentation.
-    if((RvDtofCandidates::isCaptureOnly(m_dtofMode)||hostHdAssist())&&qEnvironmentVariable("RV_RTSP_OUTPUT")!="vmem"){
+    if(RvDtofCandidates::supports(m_dtofMode)&&qEnvironmentVariable("RV_RTSP_OUTPUT")!="vmem"){
         auto backend=std::make_unique<RtspVlcBackend>();
         backend->managedCamera=true;backend->output="qt";backend->cacheMs=-1;backend->threads=-1;
         backend->transport="qt_ffmpeg_default";
@@ -1494,12 +1588,12 @@ bool RvSessionController::startVlc(const QUrl &source)
     // Optional A/B comparison without changing the project or persistent settings.
     if (qEnvironmentVariable("RTSP_CAMERA_BACKEND").compare(QStringLiteral("qt"), Qt::CaseInsensitive) == 0)
         return false;
-    const QStringList directories=(m_managedRtsp||RvDtofCandidates::isCaptureOnly(m_dtofMode))?QStringList{m_managedVlcDirectory}:vlcDirectories();
+    const QStringList directories=(m_managedRtsp||RvDtofCandidates::supports(m_dtofMode))?QStringList{m_managedVlcDirectory}:vlcDirectories();
     for (const auto &directory : directories) {
         if (directory.isEmpty()) continue;
         auto backend = std::make_unique<RtspVlcBackend>();
         if (!backend->load(directory)) continue;
-        backend->managedCamera=m_managedRtsp||RvDtofCandidates::isCaptureOnly(m_dtofMode);
+        backend->managedCamera=m_managedRtsp||RvDtofCandidates::supports(m_dtofMode);
         const char *args[] = {"--no-audio", "--no-video-title-show", "--avcodec-hw=none"};
         backend->instance = backend->create(3, args);
         if (!backend->instance) continue;
@@ -1647,7 +1741,7 @@ void RvSessionController::clearCurrentFrame(const QString &reason)
     if(m_assist)m_assist->cancel(reason);
     m_lastAssistFrame=0;
     m_currentMetadata = {};
-    m_hdNativeFrames.clear();m_hdRgbFrames.clear();m_hdScheduledTof=0;m_hdPairDrops={};
+    m_hdNativeFrames.clear();
     m_hdRealtimeOffsetNs=m_hdBoardSampleNs=m_hdSampleReceivedNs=0;m_hdClockSamples=0;
     m_depthInfoText.clear();
     for(const auto* name:{"rvDepthMetadata","rvModel","rvFrameId","rvGeneration","rvWidth","rvRawTofSequence","rvRgbSequence",
@@ -1663,7 +1757,8 @@ bool RvSessionController::reconnectHostHdVideo()
 {
     // An RTSP decoder can join before parameter sets/IDR arrive. Renew only
     // that receiver once; retain native capture and the board generation.
-    if(!RvDtofCandidates::isCaptureOnly(m_dtofMode)||!m_dtofStream||m_hdVideoReconnects>=1||m_encoderProgressClock.elapsed()>=3000)return false;
+    if(!RvDtofCandidates::supports(m_dtofMode)||!m_dtofStream||m_hdVideoReconnects>=1||m_encoderProgressClock.elapsed()>=3000)return false;
+    if(m_hdPreparer)m_hdPreparer->cancel();
     ++m_hdVideoReconnects;setProperty("rvVideoReconnectCount",m_hdVideoReconnects);
     if(m_hdVideo){auto *old=m_hdVideo;m_hdVideo=nullptr;delete old;
         m_hdVideo=new RvHdVideoStream(m_device.streamUrl(true));m_hdVideoSequence=0;
@@ -1679,101 +1774,74 @@ void RvSessionController::observeHostHdClock(const QJsonObject &m)
     const auto real=m["server_realtime_ns"].toString().toLongLong(&validReal);
     const auto mono=m["server_monotonic_ns"].toString().toLongLong(&validMono);
     if(!validReal||!validMono||real<=0||mono<=0||m["boot_id"]!=m_dtofReceipt["boot_id"]||m["generation"]!=m_dtofToken){
-        m_hdClockSamples=0;m_hdRgbFrames.clear();return;
+        m_hdClockSamples=0;return;
     }
     if(mono<=m_hdBoardSampleNs)return;
     const auto offset=real-mono;
     // RTCP and the native ToF timestamps originate on this board. A wall-clock
     // step invalidates the mapping; require two fresh, stable samples again.
-    if(m_hdClockSamples&&std::abs(offset-m_hdRealtimeOffsetNs)>1000000LL){m_hdClockSamples=0;m_hdNativeFrames.clear();m_hdRgbFrames.clear();}
+    if(m_hdClockSamples&&std::abs(offset-m_hdRealtimeOffsetNs)>1000000LL){m_hdClockSamples=0;m_hdNativeFrames.clear();}
     m_hdRealtimeOffsetNs=offset;m_hdBoardSampleNs=mono;m_hdSampleReceivedNs=RvHdVideoStream::nowNs();
     m_hdClockSamples=std::min(m_hdClockSamples+1,1000000);
 }
 
-int RvSessionController::nearestHostHdRgb(const RvTofFrame &raw,qint64 now) const
-{
-    const auto &m=raw.metadata;const auto tofNs=m["tof_timestamp_ns"].toInteger();
-    int nearest=-1; qint64 distance=std::numeric_limits<qint64>::max();
-    for(int i=0;i<int(m_hdRgbFrames.size());++i){const auto &rgb=m_hdRgbFrames[i];
-        if(rgb.source["boot_id"]!=m["boot_id"]||rgb.source["source_generation"]!=m["generation"]
-           ||rgb.source["generation"]!=double(m_presentationEpoch)||now-rgb.source["host_decoded_monotonic_ns"].toInteger()>1000000000LL
-           ||rgb.source["rectify_map_sha256"]!=QLatin1String(RvCameraView::profile(assistHostModel()).mapSha))continue;
-        const auto delta=std::abs(rgb.boardNs-tofNs);if(delta<distance){distance=delta;nearest=i;}
-    }
-    return nearest;
-}
-
-const RvTofFrame *RvSessionController::latestReusableNative(qint64 rgbNs,qint64 now) const
-{
-    if(!(m_assist&&m_assist->reusesNativeMeasurements())||m_hdNativeFrames.empty()||rgbNs<=0
-        ||m_hdClockSamples<2||now-m_hdSampleReceivedNs>=1500000000LL)return nullptr;
-    // Raw capture is monotonic. An invalid/expired newest frame never falls
-    // back to an older, apparently closer frame and hides the new condition.
-    const auto &raw=m_hdNativeFrames.back();const auto &m=raw.metadata;
-    const auto tofNs=m["tof_timestamp_ns"].toInteger();
-    const auto boardNow=m_hdBoardSampleNs+now-m_hdSampleReceivedNs;
-    if(!raw.isValid()||m["boot_id"]!=m_dtofReceipt["boot_id"]||m["generation"]!=m_dtofToken
-        ||m["dtof_fov_correction"].toInt(-1)!=m_device.fov()||(m["tof_warning_flags"]!=0&&m["tof_warning_flags"]!=16)
-        ||tofNs<=0||boardNow-tofNs>1000000000LL||tofNs-boardNow>200000000LL
-        ||std::abs(rgbNs-tofNs)>qint64(RvTofFrame::GlobalScaleMaxPairDeltaMs*1000000.))return nullptr;
-    return &raw;
-}
-
-void RvSessionController::dispatchHostHdMeasurement()
-{
-    if(!m_assist||!m_assist->tofDriven()||m_userStopped||m_controlPending||m_transitioning||m_hdNativeFrames.empty())return;
-    const auto now=RvHdVideoStream::nowNs();
-    const RvTofFrame *candidate=&m_hdNativeFrames.back();
-
-    const auto &raw=*candidate;const auto &m=raw.metadata;
-    const auto seq=quint64(m["tof_sequence"].toInteger());if(seq<=m_hdScheduledTof)return;
-    const auto drop=[&](const char *reason){m_hdPairDrops[reason]=m_hdPairDrops[reason].toInt()+1;m_hdScheduledTof=seq;};
-    if(!raw.isValid()||m["boot_id"]!=m_dtofReceipt["boot_id"]||m["generation"]!=m_dtofToken
-       ||m["dtof_fov_correction"].toInt(-1)!=m_device.fov()||(m["tof_warning_flags"]!=0&&m["tof_warning_flags"]!=16)){drop("native_identity");return;}
-    if(m_hdClockSamples<2||now-m_hdSampleReceivedNs>=1500000000LL){drop("clock_unavailable");return;}
-    const auto tofNs=m["tof_timestamp_ns"].toInteger();
-    const auto estimatedBoardNow=m_hdBoardSampleNs+now-m_hdSampleReceivedNs;
-    if(tofNs<=0||estimatedBoardNow-tofNs>1000000000LL||tofNs-estimatedBoardNow>200000000LL){drop("measurement_expired");return;}
-    const auto selected=nearestHostHdRgb(raw,now);
-    const HdRgb *nearest=selected<0?nullptr:&m_hdRgbFrames[selected];
-    // When the video is temporarily behind, keep just the newest measurement
-    // until a suitable RGB arrives. Never manufacture a timestamp or catch up.
-    if(!nearest)return;
-    const auto distance=std::abs(nearest->boardNs-tofNs);
-    if(distance>165000000LL){if(nearest->boardNs>tofNs)drop("pair_delta_exceeded");return;}
-
-    auto source=nearest->source;
-    for(const auto *key:{"tof_sequence","tof_timestamp_ns","tof_reused","dtof_width","dtof_height","dtof_bytes","dtof_format",
-                        "dtof_range_unit","dtof_source","dtof_coordinate","dtof_fov_correction","tof_warning_flags"})source[key]=m[key];
-    source["work_mode"]="rgb_tof";source["dtof_present"]=true;source["rgb_timestamp_ns"]=double(nearest->boardNs);
-    source["pair_delta_ms"]=(tofNs-nearest->boardNs)/1e6;source["pair_clock_uncertainty_ms"]=35;
-    source["pair_clock_source"]="rtcp_prft_board_realtime_monotonic";source["pairing_policy"]="nearest_cached_rgb_new_tof_v1";
-
-    source["measurement_age_at_pair_ms"]=std::max(0.,(estimatedBoardNow-tofNs)/1e6);
-    source["assist_pair_drop_reasons"]=m_hdPairDrops;
-    m_hdScheduledTof=seq;
-    m_assist->submitHd(nearest->image,source,m_presentationEpoch,raw.samples);
-}
-
-void RvSessionController::prepareHostHdFrame(const QImage &image,const QJsonObject &source,quint64 epoch,const QByteArray &native)
-{
-    if(!m_hdPreparer)m_hdPreparer=std::make_unique<HdPreparer>(this);
-    const auto now=RvHdVideoStream::nowNs();auto paired=source;
-    paired["host_pair_enqueued_ms"]=double(now/1000000);
-    m_hdPreparer->submit({image,paired,native,epoch,now});
-}
 void RvSessionController::takeHostHdPrepared()
 {
     if(!m_hdPreparer)return;
-    auto result=m_hdPreparer->take();
-    if(!result||m_destroying||m_userStopped||m_controlPending||m_transitioning||!m_assist
-        ||!assistDepthEnabled()||!hostHdAssist()||result->input.epoch!=m_presentationEpoch
-        ||result->input.source["source_generation"]!=m_dtofToken
-        ||result->input.source["boot_id"]!=m_dtofReceipt["boot_id"]
-        ||!RvCameraView::isUniDepthVga(assistHostModel()))return;
-    if(!result->error.isEmpty()){failPreviewControl(result->error);return;}
-    m_assist->submitHd(result->preview,result->input.source,result->input.epoch,result->input.native,result->planar);
+    const auto result=m_hdPreparer->take();
+    if(!result||m_destroying||m_userStopped||busy()||!hostHdAssist()||!assistDepthEnabled()||m_assist->failed()
+       ||result->epoch!=m_presentationEpoch||result->source["source_generation"]!=m_dtofToken
+       ||result->source["boot_id"]!=m_dtofReceipt["boot_id"]||result->source["assist_experiment"]!=assistExperiment())return;
+    if(!result->error.isEmpty()){
+        failPreviewControl(result->error);
+        return;
+    }
+    m_assist->submitHd(result->preview,result->source,result->epoch,result->native,result->planar);
 }
+
+bool RvSessionController::testHostHdPreparation()
+{
+    QImage hd(2304,1296,QImage::Format_RGB888);
+    hd.fill(qRgb(13,127,241));
+    const auto expected=RvCameraStream::prepareHd(hd,RvCameraStream::hdVgaCalibration());
+    HdPreparer preparer(this);
+    preparer.submit({hd,{{"frame_id",1},{"tof_sequence",31}},QByteArray("old"),1,RvHdVideoStream::nowNs()});
+    preparer.cancel();
+    preparer.submit({hd,{{"frame_id",2},{"tof_sequence",32}},QByteArray("new"),2,RvHdVideoStream::nowNs()});
+    QElapsedTimer timeout;
+    timeout.start();
+    // Keep the controller event queue idle so we can inspect the mailbox here.
+    while(timeout.elapsed()<3000){
+        if(const auto result=preparer.take())
+            return result->error.isEmpty()&&result->epoch==2&&result->source["frame_id"]==2
+                &&result->source["tof_sequence"]==32&&result->native=="new"
+                &&result->preview==expected&&result->planar==RvAssistDepth::preparePlanarInput(expected);
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+    return false;
+}
+
+const RvTofFrame *RvSessionController::pairedHostTof(qint64 rgbNs) const
+{
+    constexpr qint64 limitNs=qint64((RvTofFrame::FreshRgbPairBudgetMs-RvTofFrame::PairClockUncertaintyMs)*1e6);
+    const bool latest=m_hostScheme==QLatin1String(ReuseLatestTofImagingScheme);
+    const RvTofFrame *selected=nullptr;
+    qint64 nearestDelta=std::numeric_limits<qint64>::max(),latestTimestamp=0;
+    for(const auto &raw:m_hdNativeFrames){
+        const auto &m=raw.metadata;
+        const auto timestamp=m["tof_timestamp_ns"].toInteger();
+        const auto delta=std::abs(rgbNs-timestamp);
+        if(delta>limitNs||m["boot_id"]!=m_dtofReceipt["boot_id"]||m["generation"]!=m_dtofToken
+           ||m["dtof_fov_correction"].toInt(-1)!=m_device.fov()||m["tof_warning_flags"]!=0||!raw.isValid())continue;
+        if(latest?timestamp>latestTimestamp:delta<nearestDelta){
+            selected=&raw;
+            nearestDelta=delta;
+            latestTimestamp=timestamp;
+        }
+    }
+    return selected;
+}
+
 void RvSessionController::presentHostHdVideo()
 {
     if(!m_hdVideo||!m_dtofStream||m_userStopped||m_controlPending||m_transitioning)return;
@@ -1789,7 +1857,8 @@ void RvSessionController::presentHostHdVideo()
     s.image=cameraInCalibrationFrame(s.image);
     const auto sourceSequence=++m_hdOutputSequence;
     m_hdVideoSeen=true;m_hdFrameClock.restart();m_lastFrameClock.restart();
-    if(m_waitingForSelectedFrame){m_waitingForSelectedFrame=false;m_switchFrameTimeout.stop();updateState();}
+    const bool liteSr=RvCaptureContract::isLiteSr(m_dtofMode);
+    if(m_waitingForSelectedFrame&&!liteSr){m_waitingForSelectedFrame=false;m_switchFrameTimeout.stop();updateState();}
     setProperty("rvMode","host_hd");setProperty("rvTransport","rtsp_h265+lsg2");
     setProperty("rvIdentitySource","lsg2_receipt_and_venc_progress");setProperty("rvBootId",m_dtofReceipt["boot_id"].toString());
     setProperty("rvGeneration",m_dtofToken);setProperty("rvModel","Native");setProperty("rvWidth",2304);
@@ -1798,100 +1867,48 @@ void RvSessionController::presentHostHdVideo()
     const auto epoch=m_presentationEpoch;emit cameraFrameReady(s.image);
     if(m_userStopped||epoch!=m_presentationEpoch)return;
     if(!hostHdAssist()||!assistDepthEnabled()){
-        setState(tr("Playing"),tr("H.265 video and native 48x32 ToF"));
+        if(!m_waitingForSelectedFrame)
+            setState(tr("Playing"),liteSr?tr("H.265 video and board LiteSR"):tr("H.265 video and native 48x32 ToF"));
         ++m_framesInWindow;
         if(m_fpsClock.elapsed()>=1000){m_videoFps=m_framesInWindow*1000.0/m_fpsClock.elapsed();
             m_framesInWindow=0;m_fpsClock.restart();emit stateChanged();}
         return;
     }
     try{
-        const auto model=assistHostModel();
-        const auto &view=RvCameraView::profile(model);
-        const bool wide=RvCameraView::isWide(model);
-        const auto &calibration=RvCameraView::isUniDepthVga(model)?RvCameraStream::hdVgaCalibration():RvCameraStream::hdCalibration(wide);
-        if(RvCameraView::isUniDepthVga(model))
-            RvCameraStream::require(calibration.sha256()==view.mapSha,"HD model calibration fingerprint mismatch");
-        const bool background=m_assist->reusesNativeMeasurements()&&RvCameraView::isUniDepthVga(model);
-        QElapsedTimer prepare;prepare.start();const auto preview=background?QImage():RvCameraStream::prepareHd(s.image,calibration);
+        const auto &view=RvCameraView::Rgb672VgaFp16;
         QJsonObject source{{"source_protocol","HDA1"},{"source_transport","rtsp_h265"},
             {"source_rgb_width",2304},{"source_rgb_height",1296},{"rgb_width",view.inputWidth},{"rgb_height",view.inputHeight},
             {"camera_mount_rotation_degrees",m_device.cameraMountRotation},{"camera_coordinate_frame","calibrated_reference"},
-            {"model","Native"},{"work_mode","host_rgb"},{"dtof_present",false},
+            {"model","Native"},{"work_mode","host_rgb"},{"dtof_present",false},{"assist_experiment",assistExperiment()},
             {"generation",double(epoch)},{"generation_source","host_presentation_epoch"},{"source_generation",m_dtofToken},
-            {"source_candidate_mode",14},{"source_engine","native-hd-capture-v1"},{"boot_id",m_dtofReceipt["boot_id"]},
+            {"source_candidate_mode",m_dtofMode},{"source_engine",RvCaptureContract::engine(m_dtofMode)},{"boot_id",m_dtofReceipt["boot_id"]},
             {"frame_id",double(sourceSequence)},{"video_decoder_sequence",double(s.sequence)},{"host_decoded_monotonic_ns",double(s.receivedNs)},
-            {"rectify_map_sha256",QString::fromLatin1(calibration.sha256())},{"width",0},{"height",0},
-            {"host_hd_prepare_ms",prepare.nsecsElapsed()/1e6},{"video_pts_us",double(s.ptsUs)},
-            {"video_producer_realtime_us",QString::number(s.producerRealtimeUs)}};
-        if(wide)source["assist_camera_profile"]="wide";
+            {"rectify_map_sha256",QLatin1String(view.mapSha)},{"width",0},{"height",0},{"video_pts_us",double(s.ptsUs)},
+            {"video_producer_realtime_us",QString::number(s.producerRealtimeUs)},{"assist_camera_profile","wide"},
+            {"assist_output_policy",RvAssistFusion::FieldOfViewPolicy},{"assist_tof_fov_correction",m_device.fov()}};
         RvCaptureCalibration::annotate(source,m_dtofReceipt);
-        if(RvCameraView::isUniDepth(assistHostModel())&&RvCameraView::isWide(assistHostModel())){
-            source["assist_output_policy"]=RvAssistFusion::FieldOfViewPolicy;
-            source["assist_tof_fov_correction"]=m_device.fov();
-        }
         QByteArray samples;
-        if(m_assist->tofDriven()){
-            const auto now=RvHdVideoStream::nowNs();
-            if(s.producerRealtimeUs>0&&m_hdClockSamples>=2&&now-m_hdSampleReceivedNs<1500000000LL){
-                const auto boardNs=s.producerRealtimeUs*1000-m_hdRealtimeOffsetNs;
-                if(boardNs>0&&std::abs(boardNs-m_hdBoardSampleNs)<2000000000LL){
-                    if(m_hdRgbFrames.size()==16)m_hdRgbFrames.pop_front();
-                    m_hdRgbFrames.push_back({preview,source,boardNs});
-                }
-            }
-            m_currentMetadata=source;setProperty("rvFrameId",sourceSequence);dispatchHostHdMeasurement();
-        }else if(m_assist->reusesNativeMeasurements()){
-            const auto now=RvHdVideoStream::nowNs();
-            const qint64 rgbNs=s.producerRealtimeUs>0?s.producerRealtimeUs*1000-m_hdRealtimeOffsetNs:0;
-            const auto *latest=std::abs(rgbNs-m_hdBoardSampleNs)<2000000000LL?latestReusableNative(rgbNs,now):nullptr;
-            if(qEnvironmentVariable("RV_DEPTHOR_PERF_PROFILE")=="1"){
-                if(!m_hdNativeFrames.empty())source["profile_latest_native_delta_ms"]=(m_hdNativeFrames.back().metadata["tof_timestamp_ns"].toInteger()-rgbNs)/1e6;
-                const char *reason=latest?"depthor_paired":m_hdClockSamples<2?"depthor_clock_unavailable":m_hdNativeFrames.empty()?"depthor_native_empty":
-                    std::abs(source["profile_latest_native_delta_ms"].toDouble(1000))>100?"depthor_pair_over_100ms":"depthor_native_identity_fov_warning_age";
-                m_hdPairDrops[reason]=m_hdPairDrops[reason].toInt()+1;
-            }
-            if(latest){
-                const auto &m=latest->metadata;
-                for(const auto *key:{"tof_sequence","tof_timestamp_ns","tof_reused","dtof_width","dtof_height","dtof_bytes","dtof_format",
-                    "dtof_range_unit","dtof_source","dtof_coordinate","dtof_fov_correction","tof_warning_flags"})source[key]=m[key];
-                source["work_mode"]="rgb_tof";source["dtof_present"]=true;source["rgb_timestamp_ns"]=double(rgbNs);
-                source["pair_delta_ms"]=(m["tof_timestamp_ns"].toInteger()-rgbNs)/1e6;
-                source["pair_clock_uncertainty_ms"]=35;source["pair_clock_source"]="rtcp_prft_board_realtime_monotonic";
-                source["pairing_policy"]=RvTofFrame::GlobalScaleReusePolicy;
-                source["measurement_age_at_pair_ms"]=std::max(0.,(m_hdBoardSampleNs+now-m_hdSampleReceivedNs-m["tof_timestamp_ns"].toInteger())/1e6);
-                samples=latest->samples;
-            }
-            m_currentMetadata=source;setProperty("rvFrameId",sourceSequence);
-            if(background)prepareHostHdFrame(s.image,source,epoch,samples);
-            else m_assist->submitHd(preview,source,epoch,samples);
-        }else{
         // RTCP supplies the reference for the decoded packet, rather than PC
         // arrival. One frame interval (35 ms) is reserved for timestamp/exposure
         // uncertainty; this is software pairing, not hardware synchronization.
         const auto now=RvHdVideoStream::nowNs();
         if(s.producerRealtimeUs>0&&m_hdClockSamples>=2&&now-m_hdSampleReceivedNs<1500000000LL){
             const qint64 rgbNs=s.producerRealtimeUs*1000-m_hdRealtimeOffsetNs;
-            const RvTofFrame *nearest=nullptr;qint64 distance=std::numeric_limits<qint64>::max();
-            for(const auto &raw:m_hdNativeFrames){
-                const auto &m=raw.metadata;
-                if(!raw.isValid()||m["boot_id"]!=source["boot_id"]||m["generation"]!=m_dtofToken
-                    ||m["dtof_fov_correction"].toInt(-1)!=m_device.fov()||(m["tof_warning_flags"]!=0&&m["tof_warning_flags"]!=16))continue;
-                const auto delta=std::abs(rgbNs-m["tof_timestamp_ns"].toInteger());
-                if(delta<distance){distance=delta;nearest=&raw;}
-            }
-            if(rgbNs>0&&std::abs(rgbNs-m_hdBoardSampleNs)<2000000000LL&&nearest&&distance<=165000000LL){
-                const auto &m=nearest->metadata;
+            const auto *matched=rgbNs>0&&std::abs(rgbNs-m_hdBoardSampleNs)<2000000000LL?pairedHostTof(rgbNs):nullptr;
+            if(matched){
+                const auto &m=matched->metadata;
                 for(const auto *key:{"tof_sequence","tof_timestamp_ns","tof_reused","dtof_width","dtof_height","dtof_bytes","dtof_format",
                         "dtof_range_unit","dtof_source","dtof_coordinate","dtof_fov_correction","tof_warning_flags"})source[key]=m[key];
                 source["work_mode"]="rgb_tof";source["dtof_present"]=true;source["rgb_timestamp_ns"]=double(rgbNs);
                 source["pair_delta_ms"]=(m["tof_timestamp_ns"].toInteger()-rgbNs)/1e6;
-                source["pair_clock_uncertainty_ms"]=35;source["pair_clock_source"]="rtcp_prft_board_realtime_monotonic";
-                source["pairing_policy"]="bounded_software_time_pair_not_hardware_sync";samples=nearest->samples;
+                source["pair_clock_uncertainty_ms"]=RvTofFrame::PairClockUncertaintyMs;
+                source["pair_clock_source"]="rtcp_prft_board_realtime_monotonic";
+                source["pairing_policy"]=RvTofFrame::FreshRgbPairPolicy;samples=matched->samples;
             }
         }
         m_currentMetadata=source;setProperty("rvFrameId",sourceSequence);
-        m_assist->submitHd(preview,source,epoch,samples);
-        }
+        if(!m_hdPreparer)m_hdPreparer=std::make_unique<HdPreparer>(this);
+        m_hdPreparer->submit({s.image,std::move(source),std::move(samples),epoch,RvHdVideoStream::nowNs()});
     }catch(const std::exception &error){failPreviewControl(QString::fromUtf8(error.what()));return;}
     if(m_userStopped||epoch!=m_presentationEpoch)return;
     setState(tr("Playing"),tr("H.265 video and host inference"));
@@ -1907,7 +1924,7 @@ void RvSessionController::presentVlcFrame()
     const int pollMs=(hostHdAssist()&&assistDepthEnabled()&&RvCameraView::profile(assistHostModel()).networkProfile?5:15);
     if(m_frameTimer.interval()!=pollMs)m_frameTimer.setInterval(pollMs);
     if (m_userStopped || m_controlPending || m_transitioning) return;
-    if(RvDtofCandidates::isCaptureOnly(m_dtofMode)){presentHostHdVideo();return;}
+    if(RvDtofCandidates::supports(m_dtofMode)){presentHostHdVideo();return;}
     const quint64 epoch = m_presentationEpoch;
     const auto stillCurrent = [this, epoch] {
         return !m_userStopped && !m_controlPending && epoch == m_presentationEpoch;
@@ -1985,10 +2002,6 @@ void RvSessionController::presentVlcFrame()
             if (!snap.depth.isEmpty()) emit depthSnapshotReady(snap.depth,snap.metadata,snap.image);
             if(stillCurrent()&&!m_waitingForSelectedFrame)emit tofFrameReady(snap.tof);
             if(stillCurrent()&&!m_waitingForSelectedFrame&&!snap.depth.isEmpty())emit depthFrameReady(snap.depth,snap.metadata);
-            if(stillCurrent()&&!m_waitingForSelectedFrame&&assistDepthEnabled()&&snap.image.width()==576){
-                auto pairedTof=snap.tof;pairedTof.metadata=snap.metadata;
-                m_assist->submit(snap.image,pairedTof,epoch);
-            }
 
         }
         return;

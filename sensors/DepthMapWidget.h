@@ -3,6 +3,7 @@
 #include "DepthSnapshot.h"
 #include "ImageDisplaySettings.h"
 #include "RvSessionController.h"
+#include "RvDepthDiagnostic.h"
 
 #include <QtCore/QElapsedTimer>
 #include <QtCore/QPointer>
@@ -29,10 +30,10 @@ public:
     ~DepthMapWidget() override;
     void setSessionController(RvSessionController *controller);
     RvSessionController *sessionController() const;
-    void acceptRvDepth(const QByteArray &depth,const QJsonObject &metadata);
+    void acceptRvDepth(const QByteArray &depth,const QJsonObject &metadata,const QByteArray &coverage={});
     void clearRvDepth(const QString &reason);
-    void acceptRvSnapshot(const QByteArray &depth, const QJsonObject &metadata, const QImage &camera);
-    void acceptAssistSnapshot(const QByteArray &depth,const QJsonObject &metadata,const QImage &camera,const RvTofFrame &tof=RvTofFrame(),const QByteArray &diagnostic=QByteArray());
+    void acceptRvSnapshot(const QByteArray &depth, const QJsonObject &metadata, const QImage &camera,const QByteArray &coverage);
+    void acceptAssistSnapshot(const QByteArray &depth,const QJsonObject &metadata,const QImage &camera,const RvTofFrame &tof=RvTofFrame(),const QByteArray &diagnostic=QByteArray(),const QImage &inferenceInput=QImage());
     void clearAssistDepth(const QString &reason);
     DepthSnapshot snapshot() const;
     int selectedWidth() const;
@@ -49,13 +50,24 @@ private:
     void finishImagingSwitchUi();
     void cancelImagingSwitchUi();
     void advanceImagingSwitchUi();
+    void syncAutomaticConnectionUi();
     bool eventFilter(QObject *watched,QEvent *event) override;
     void saveCurrentFrame();
+    void startDiagnosticRecording();
+    void updateDiagnosticRecording();
     void editNativeTofRotation();
     void syncNativeTofRotation();
     QPushButton *m_nativeTofAngle = nullptr;
     int m_nativeTofRotation = 90;
     QPushButton *m_saveButton = nullptr;
+    QPushButton *m_recordButton = nullptr,*m_openRecording = nullptr;
+    QPushButton *m_tofPointsButton = nullptr;
+    QPushButton *m_monocularButton = nullptr;
+    QPushButton *m_pairedRgbButton = nullptr;
+    QLabel *m_recordStatus = nullptr;
+    QTimer *m_recordTimer = nullptr;
+    std::unique_ptr<RvDepthDiagnostic::SequenceRecorder> m_recorder;
+    QString m_recordingFolder;
     QCheckBox *m_saveCamera = nullptr;
     QCheckBox *m_blackOutsideRange = nullptr;
     QLabel *m_colorMinimumLabel = nullptr, *m_colorMaximumLabel = nullptr;
@@ -72,10 +84,10 @@ private:
     RvDepthView *m_rvCanvas = nullptr;
     RvDepthView *m_assistCanvas = nullptr;
     QTabWidget *m_depthTabs = nullptr;
-    QWidget *m_switchOverlay=nullptr;
-    QLabel *m_switchTitle=nullptr,*m_switchDetail=nullptr;
-    QProgressBar *m_switchProgress=nullptr;
-    QTimer *m_switchUiTimer=nullptr;
+    QWidget *m_progressOverlay=nullptr;
+    QLabel *m_progressTitle=nullptr,*m_progressDetail=nullptr;
+    QProgressBar *m_progressBar=nullptr;
+    QTimer *m_progressUiTimer=nullptr;
     QElapsedTimer m_switchUiClock,m_switchFinishClock;
     int m_switchEstimatedMs=10000,m_switchFinishFrom=0;
     bool m_switchUiActive=false,m_switchUiFinishing=false;

@@ -5,7 +5,7 @@ ulimit -c 0
 export TMF8829_I2C_DEV=/dev/i2c-3 TMF8829_SPI_DEV=/dev/spidev0.0 TMF8829_SPI_HZ=5000000
 export TMF8829_ENABLE_GPIO=54 TMF8829_CS_GPIO=54
 export TMF_HOST_READBACK=/run/dtof_candidates/sensor_readback.json
-case "${1:-}" in 14|24|25) ;; *) exit 2;; esac
+case "${1:-}" in 13|14|24|25) ;; *) exit 2;; esac
 root=/root/dtof_candidates_20261009
 state=/run/dtof_candidates
 owner=/run/r144_fusion_20260923
@@ -55,13 +55,9 @@ echo "$2" > "$owner/session.generation"
 owned=1
 mkdir -p /run/extrinsic_capture
 cd /root/r144_depth
-case "$1" in
- 14|24|25) available=$(awk '/MemAvailable:/ {print $2}' /proc/meminfo)
-  [ "$available" -ge 8192 ] || { echo 'Native capture startup needs at least 8192 KiB before capture' >&2;exit 2; }
-  engine="$root/native_gui.sh";;
- *) echo 'Retired board candidate' >&2;exit 2;;
-esac
-if [ "$1" = 14 ] || [ "$1" = 24 ] || [ "$1" = 25 ]; then
+available=$(awk '/MemAvailable:/ {print $2}' /proc/meminfo)
+[ "$available" -ge 8192 ] || { echo 'Imaging startup needs at least 8192 KiB before capture' >&2;exit 2; }
+{
  # One camera owner: only rkipc opens VI/AIQ; the capture server emits native measurements.
  hd_runtime="$state/hd_$2"
  umask 077
@@ -77,30 +73,16 @@ if [ "$1" = 14 ] || [ "$1" = 24 ] || [ "$1" = 25 ]; then
  DEPTH_RTSP_GUARD_FILE="$hd_runtime/route_guard.active" LD_PRELOAD=/root/r144_depth/no_route_monitor.so LD_LIBRARY_PATH=/oem/usr/lib:/usr/lib /oem/usr/bin/rkipc -c "$hd_runtime/camera.ini" -a /oem/usr/share/iqfiles -l 1 > "$state/encoder.pipe" 2>&1 &
  encoder=$!;encoder_born=$(sed 's/.*) //' /proc/$encoder/stat | awk '{print $20}')
  echo "$encoder" > "$hd_runtime/encoder.pid";echo "$encoder_born" > "$hd_runtime/encoder.start"
-fi
-sensor_output="$state/sensor.log"
-case "$1" in 14|24|25)
+}
  [ -p "$state/sensor.pipe" ] || mkfifo "$state/sensor.pipe"
  awk -v base="$state/sensor.log" -f /root/r144_depth/bounded_log.awk < "$state/sensor.pipe" &
  sensor_logger=$!;sensor_logger_born=$(sed 's/.*) //' /proc/$sensor_logger/stat | awk '{print $20}')
- sensor_output="$state/sensor.pipe";;
-esac
+sensor_output="$state/sensor.pipe"
 # Preserve prompt FIFO reads while encoding and native transport overlap. This is CFS
 # nice, not a realtime policy; only the shared HD capture and its threads inherit it.
 launch_tof(){
- mode=$1;shift
- # Saved settings may contain a literal -g after parameter tuning. Apply the
- # mode policy here so a later save cannot re-enable Signal for host inference.
- if [ "$mode" = 14 ] || [ "$mode" = 24 ] || [ "$mode" = 25 ];then
-  remaining=$#
-  while [ "$remaining" -gt 0 ];do
-   argument=$1;shift
-   [ "$argument" = -g ] || set -- "$@" "$argument"
-   remaining=$((remaining-1))
-  done
- fi
- if [ "$mode" = 14 ] || [ "$mode" = 24 ] || [ "$mode" = 25 ];then exec nice -n -5 "$@";fi
- exec "$@"
+ shift
+ exec nice -n -5 "$@"
 }
 CANONICAL_RUN_ID="dtof_$2" CANONICAL_WARNING_POLICY=observe-0x08 launch_tof "$1" ./tmf8829_ext -m -s 100 -g -b 1 -d 11 -p 66 -t 0 -o 1 -r 6 -i 600 --socket /run/extrinsic_capture/tof.sock --quiet --poll-us 1000 > "$sensor_output" 2>&1 &
 producer=$!;producer_born=$(sed 's/.*) //' /proc/$producer/stat | awk '{print $20}')
@@ -109,7 +91,7 @@ same "$producer" "$producer_born" || exit 2
 [ -p "$state/server.pipe" ] || mkfifo "$state/server.pipe"
 awk -v base="$state/server.log" -f /root/r144_depth/bounded_log.awk < "$state/server.pipe" &
 logger=$!;logger_born=$(sed 's/.*) //' /proc/$logger/stat | awk '{print $20}')
-LD_LIBRARY_PATH=/root/r144_depth:/oem/usr/lib "$engine" serve "$@" > "$state/server.pipe" 2>&1 &
+"$root/model-switch.sh" serve "$@" > "$state/server.pipe" 2>&1 &
 server=$!;server_born=$(sed 's/.*) //' /proc/$server/stat | awk '{print $20}')
 code=0;wait "$server" || code=$?
 if [ "$code" != 0 ]; then

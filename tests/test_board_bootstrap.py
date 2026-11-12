@@ -13,8 +13,10 @@ SERIAL = '1234567890abcdef'
 BOOT = '11111111-2222-3333-4444-555555555555'
 CAPABILITIES = ('{"native_capture_protocol":"native-m48-m16-m8-v2","fov":6,'
                 '"model_inference":false,"photon_enabled":false,"m8":false,'
-                '"m16":true,"m48":true}')
+                '"m16":true,"m48":true,"native_hole_fill_protocol":"native48-hole-fill-v1"}')
+LITESR_SHA = 'a916354dce57bd4cf4559cde91270cbd50bb2b14302ed277e8653e02b525268b'
 SCRIPT = Path(__file__).resolve().parents[1] / 'tools/rv_control/bootstrap/install.sh'
+MODEL_SWITCH = SCRIPT.parents[2] / 'rv_capture/payload/model-switch.sh'
 
 
 def shell_path(path):
@@ -136,6 +138,40 @@ class BoardBootstrapTests(unittest.TestCase):
         self.assertEqual((self.root / 'oem/usr/bin/RkLunch.sh.dcts-before-bootstrap').read_text(), self.original_oem)
         self.assertFalse((self.root / 'run/dcts-board-install.lock').exists())
 
+    def stage_model(self, model_sha):
+        receipt = f'{{"candidate_mode":13,"fov":6,"model_sha256":"{model_sha}"}}'
+        self.write('stage/candidate/model-switch.sh', MODEL_SWITCH.read_bytes(), True)
+        self.write('stage/candidate/litesr_near_gui', '#!/bin/sh\n'
+                   '[ "$1" = --check-model ] && [ -s "$2" ] || exit 2\n'
+                   "printf '%s\\n' '" + receipt + "'\n", True)
+        for name in ('litesr-near-256.dctsm', 'librknnmrt.so', 'libcrypto.so.1.1'):
+            self.write('stage/candidate/' + name, 'simulated import asset\n')
+
+    def test_activation_imports_verified_litesr_with_switcher(self):
+        self.stage_model(LITESR_SHA)
+        code, output = self.run_setup('activate')
+        self.assertEqual(code, 0, output)
+        candidate = self.root / 'root/dtof_candidates_20261009'
+        for name in ('model-switch.sh', 'litesr_near_gui', 'litesr-near-256.dctsm', 'librknnmrt.so', 'libcrypto.so.1.1'):
+            self.assertTrue((candidate / name).is_file(), name)
+
+    def test_model_identity_failure_preserves_previous_deployment(self):
+        self.stage_model('0' * 64)
+        previous = self.write('root/dtof_candidates_20261009/session.sh', 'previous deployment\n')
+        code, output = self.run_setup('activate', mode='repair')
+        self.assertNotEqual(code, 0, output)
+        self.assertIn('LiteSR model or calibration identity differs', output)
+        self.assertEqual(previous.read_text(), 'previous deployment\n')
+        self.assertEqual((self.root / 'root/rv1103_mw_spi/bin/tof_driver').read_bytes(), self.previous_driver)
+
+    def test_missing_litesr_dependency_fails_before_activation(self):
+        self.stage_model(LITESR_SHA)
+        (self.stage / 'candidate/librknnmrt.so').unlink()
+        code, output = self.run_setup('activate')
+        self.assertNotEqual(code, 0, output)
+        self.assertIn('protected model could not be verified', output)
+        self.assertFalse((self.root / 'root/dtof_candidates_20261009').exists())
+
     def test_activation_failure_restores_driver_and_startup(self):
         code, output = self.run_setup('activate', BOOTSTRAP_FAIL_CANDIDATE_MOVE='1')
         self.assertNotEqual(code, 0, output)
@@ -222,6 +258,15 @@ class BoardBootstrapTests(unittest.TestCase):
         code, output = self.run_setup('activate', mode='repair')
         self.assertNotEqual(code, 0, output)
         self.assertIn('Native16 capture program could not start', output)
+        self.assertEqual((self.root/'root/r144_depth/tmf8829_ext').read_text(), 'old capture driver\n')
+
+    def test_usb_repair_rejects_an_old_capture_program_before_replacement(self):
+        self.existing_runtime()
+        old_capabilities = CAPABILITIES.split(',"native_hole_fill_protocol"')[0] + '}'
+        self.write('stage/candidate/native_hd_gui', '#!/bin/sh\nprintf \'%s\\n\' \'' + old_capabilities + '\'\n', True)
+        code, output = self.run_setup('activate', mode='repair')
+        self.assertNotEqual(code, 0, output)
+        self.assertIn('expected calibration and hole-fill capabilities', output)
         self.assertEqual((self.root/'root/r144_depth/tmf8829_ext').read_text(), 'old capture driver\n')
 
     def test_usb_repair_checks_entire_upload_manifest_before_replacement(self):

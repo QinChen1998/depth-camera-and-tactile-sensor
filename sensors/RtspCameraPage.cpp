@@ -172,10 +172,11 @@ void RtspCameraPage::setDisplayRotationDegrees(int degrees) { m_imageSettings->s
 void RtspCameraPage::updateSessionUi()
 {
     const bool available = !m_session.isNull();
-    const bool busy = available && m_session->busy();
+    const bool connecting = available && m_session->automaticConnecting();
+    const bool busy = available && (m_session->busy() || connecting);
     const bool stopped = !available || m_session->userStopped();
     m_startButton->setEnabled(available && !busy && stopped);
-    m_stopButton->setEnabled(available && !stopped);
+    m_stopButton->setEnabled(available && (!stopped || connecting));
     m_reconnectButton->setEnabled(available && !busy);
 
     const auto size = m_video->image().size();

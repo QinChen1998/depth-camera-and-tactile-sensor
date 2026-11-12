@@ -6,10 +6,8 @@ state=/run/dtof_candidates
 lock=/run/dtof_switch.lock
 same(){ [ -r "/proc/$1/stat" ] && [ "$(sed 's/.*) //' /proc/"$1"/stat | awk '{print $20}')" = "$2" ]; }
 case "${1:-}" in
- candidate) [ "$#" = 4 ]; case "$2" in
-   14|24|25) "$root/native_gui.sh" validate "$2" "$3" "$4";;
-   *) exit 2;;
-  esac;;
+ candidate) [ "$#" = 4 ]; case "$2" in 13|14|24|25) ;; *) exit 2;; esac
+  "$root/model-switch.sh" validate "$2" "$3" "$4";;
  legacy) [ "$#" = 6 ]; case "$2" in 144|576|2304) ;; *) exit 2;; esac
   case "$6" in Native) ;; *) exit 2;; esac
   case "$3:$4:$5" in

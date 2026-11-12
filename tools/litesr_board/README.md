@@ -1,5 +1,5 @@
-# 已退役的 LiteSR 板端推理
+# LiteSR 近距轮廓与历史记录
 
-2026-11-09 当前产品已移除 LiteSR 普通／高精度推理、密文、ARM 程序、NPU 依赖、主机轮廓处理和参数模板。后续用户授权继续清理遗留代码，未被产品引用的 256×256 轮廓研究头和 LiteSR 主机绑定也已移除。此目录仅保留历史说明。
+`Contour.h` 和 `ContourGrid.inc` 提供本次 mode13 使用的 256×256 同帧轮廓处理，移植自 `Dexterous Hand Visualization`。当前 LiteSR 近距运行程序、模型和会话切换见 [RV1103 板端源码与构建](../rv_capture/README.md)。
 
-当前板端原生采集源码和构建已迁至 [rv_capture](../rv_capture/README.md)。原始权重、外部研究项目和历史安装包保持；本轮变更见 [默认标定与原生 ToF 模式](../../docs/DEFAULT_CALIBRATION_NATIVE_TOF.md)。
+2026-11-09 的 LiteSR 384 普通／高精度退役记录见 [仅保留上位机辅助推理](../../docs/HOST_ASSIST_ONLY.md)。

@@ -36,6 +36,7 @@ __pycache__/
 /tools/rv_capture/common/
 /tools/rv_capture/**/runtime/
 /tools/rv_capture/**/payload/*.bin
+/tools/rv_capture/**/payload/*.dctsm
 *.pth
 *.pyc
 *.dll

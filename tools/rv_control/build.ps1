@@ -1,6 +1,9 @@
-param([ValidateSet('Debug','Release')][string]$Configuration='Release',[string]$QtRoot='',[string]$MSBuild='', [string]$EvidenceDirectory='', [switch]$TransportTests, [string]$OutputDirectory='', [string]$DeployDirectory='')
+param([ValidateSet('Debug','Release')][string]$Configuration='Release',[string]$QtRoot='',[string]$MSBuild='', [string]$EvidenceDirectory='', [switch]$TransportTests, [string]$OutputDirectory='', [string]$DeployDirectory='', [switch]$CheckInputsOnly)
 $ErrorActionPreference='Stop'
 $rvProject=Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
+. (Join-Path $PSScriptRoot 'check_build_inputs.ps1')
+Assert-RvBuildInputs -ProjectRoot $rvProject
+if($CheckInputsOnly){Write-Output 'RV worker SDK and matching board build inputs are present.';return}
 . (Join-Path (Split-Path $PSScriptRoot -Parent) 'resolve_vs2022_toolchain.ps1')
 $rvTools=Resolve-Vs2022Toolchain -MSBuild $MSBuild -RequireMSBuild -RequireDumpBin -RequireRedist
 $QtRoot=Resolve-Qt611Root -QtRoot $QtRoot -MSBuild $rvTools.MSBuild
@@ -67,11 +70,22 @@ foreach($rvRetired in @('rv_capture/native-fov1.bin','rv_capture/native-fov2.bin
  if(!$rvRetiredPath.StartsWith([IO.Path]::GetFullPath($rvRuntime)+[IO.Path]::DirectorySeparatorChar)){throw 'Invalid retired payload path'}
  if(Test-Path -LiteralPath $rvRetiredPath){Remove-Item -LiteralPath $rvRetiredPath -Force}
 }
-foreach($rvName in @('native_gui.sh','dtof-host.sh','native-fov6.bin')) {
+foreach($rvName in @('native_gui.sh','dtof-host.sh','model-switch.sh','native-fov6.bin')) {
  $rvRelative="rv_capture/$rvName"
  $rvSource=if($rvName.EndsWith('.bin')){"tools/rv_capture/native/payload/$rvName"}else{"tools/rv_capture/payload/$rvName"}
  Copy-Item -LiteralPath (Join-Path $rvProject $rvSource) -Destination (Join-Path $rvRuntime $rvRelative) -Force
  $rvPayload[$rvRelative]=(Get-FileHash (Join-Path $rvRuntime $rvRelative) -Algorithm SHA256).Hash.ToLower()
+}
+$rvLiteSrSource=Join-Path $rvProject 'tools/rv_capture/litesr/payload'
+$rvModelModes=@()
+if(Test-Path -LiteralPath $rvLiteSrSource -PathType Container){
+ $rvLiteSr=Join-Path $rvRuntime 'rv_capture/litesr'
+ New-Item -ItemType Directory -Force -Path $rvLiteSr | Out-Null
+ foreach($rvName in @('litesr-fov6.bin','litesr-near-256.dctsm','librknnmrt.so','libcrypto.so.1.1')) {
+  Copy-Item -LiteralPath (Join-Path $rvLiteSrSource $rvName) -Destination $rvLiteSr -Force
+  $rvPayload["rv_capture/litesr/$rvName"]=(Get-FileHash -LiteralPath (Join-Path $rvLiteSr $rvName) -Algorithm SHA256).Hash.ToLower()
+ }
+ $rvModelModes=@(13)
 }
 $rvBootstrap=Join-Path $rvRuntime 'rv1103_bootstrap'
 New-Item -ItemType Directory -Force -Path $rvBootstrap | Out-Null
@@ -95,7 +109,8 @@ foreach($rvName in @('known_hosts','licenses/libssh2.txt','licenses/OpenSSL.txt'
 $rvBoardFiles=[ordered]@{}
 foreach($rvName in $rvPayload.Keys){if($rvName -match '^(rv_capture|rv1103_bootstrap|dtof_tuner)/'){$rvBoardFiles[$rvName]=$rvPayload[$rvName]}}
 [ordered]@{schema=1;calibration_release='RV1103_SC3336_TMF8829_20261109';processing_fov=6;
- supported_capture_modes=@(14,24,25);sensor_modes=@(5,11,12);models_required=$false;
+ supported_capture_modes=$rvModelModes+@(14,24,25);sensor_modes=@(5,11,12);models_required=($rvModelModes.Count -gt 0);model_modes=$rvModelModes;
+ native_hole_fill_protocol='native48-hole-fill-v1';native_hole_fill_modes=@(24,25);
  replacement_policy='complete_hash_checked_transaction_with_rollback';files=$rvBoardFiles} |
  ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $rvRuntime 'board-import.json') -Encoding UTF8
 $rvPayload['board-import.json']=(Get-FileHash (Join-Path $rvRuntime 'board-import.json')).Hash.ToLower()

@@ -2,11 +2,13 @@
 #include "ImagePresentation.h"
 #include "DepthColorScale.h"
 #include "ImageHoverTip.h"
+#include "RvTofFrame.h"
 #include <QtWidgets/QWidget>
 #include <QtGui/QPainter>
 #include <QtGui/QMouseEvent>
 #include <QtCore/QtEndian>
 #include <QtCore/QJsonObject>
+#include <QtCore/QJsonArray>
 #include <QtCore/QTimer>
 #include <QtCore/QElapsedTimer>
 #include <vector>
@@ -16,7 +18,10 @@
 #include <cmath>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <chrono>
+
+namespace RvCameraView {struct Profile;}
 
 // Metric display: host camera-Z or explicitly selected native radial metres.
 class RvDepthView : public QWidget {
@@ -48,12 +53,15 @@ public:
   if(nativeRadial)return QSizeF(grid.height(),grid.width());
   if(radial)return QSizeF(grid);
   if(!imageSourceRect.isEmpty()&&imageSourceRect!=image.rect())return imageSourceRect.size();
-  // The VGA virtual camera uses square pixels on the full 4:3 grid.
-  if(image.size()==QSize(640,480))return image.size();
+  if(image.size()==QSize(480,640))return image.size();
   return QSizeF(144,81);
  }
  QRect displayedSourceRect()const{return imageSourceRect;}
- bool setDepth(const QByteArray& bytes,const QJsonObject& m,const QByteArray& diagnostic={});
+ bool setDepth(const QByteArray& bytes,const QJsonObject& m,const QByteArray& diagnostic={},const RvTofFrame& tof={},
+               const QImage& pairedCamera={},const QByteArray& depthCoverage={});
+ void setMonocularVisible(bool visible);
+ void setTofPointsVisible(bool visible){showTofPoints=visible;update();}
+ void setPairedRgbVisible(bool visible){showPairedRgb=visible;refreshHover();update();}
  bool setCoverage(const QByteArray &values);
  // Retain only display pixels; expired metric values must not remain queryable.
  void holdFrame();
@@ -111,17 +119,24 @@ protected:
    QRectF fill=bar;fill.setWidth(width*loadingProgress/100.0);p.setBrush(QColor("#249cff"));p.drawRoundedRect(fill,4,4);
    p.setPen(QColor("#9ba9b9"));p.drawText(QRectF(10,bar.bottom()+12,this->width()-20,36),Qt::AlignCenter,loadingState==1?tr("Preparing GPU and model. Please wait..."):tr("Model ready"));return;
   }
-  if(image.isNull()){p.drawText(rect(),Qt::AlignCenter,emptyReason.isEmpty()?tr("Waiting for RV1103 depth"):emptyReason);return;}
+  const auto &source=showPairedRgb?imageCamera:image;
+  if(source.isNull()){
+   const auto reason=showPairedRgb&&emptyReason.isEmpty()?tr("Waiting for paired RGB")
+       :showMonocular&&(depth||emptyReason.isEmpty())?tr("Waiting for monocular depth")
+       :emptyReason.isEmpty()?tr("Waiting for RV1103 depth"):emptyReason;
+   p.drawText(rect(),Qt::AlignCenter,reason);return;
+  }
   // Fit the calibrated presentation geometry before applying display rotation.
   target=nativeRotationEnabled?nativePresentationTransform().mapRect(QRectF(QPointF(),presentationSize()))
       :ImagePresentation::fittedRect(QRectF(rect()).adjusted(8,8,-8,-8),presentationSize(),rotation);
   setProperty("presentationRect",target);
-  const auto display=nativeRadial?image.transformed(QTransform().rotate(-90)).flipped(Qt::Horizontal):image;
+  const auto display=nativeRadial?source.transformed(QTransform().rotate(-90)).flipped(Qt::Horizontal):source;
   p.setRenderHint(QPainter::SmoothPixmapTransform,radial&&depthSize!=QSize(48,32));
   if(nativeRotationEnabled){
    p.save();p.setTransform(nativePresentationTransform(),true);
    p.drawImage(QRectF(QPointF(),presentationSize()),display,nativeRadial?QRectF(display.rect()):QRectF(imageSourceRect));p.restore();
   }else ImagePresentation::drawImage(p,target,display,rotation,nativeRadial?QRectF(display.rect()):QRectF(imageSourceRect));
+  paintTofPoints(p);
   setProperty("displaySourceRect",imageSourceRect);
   if(!held&&(paintedId!=imageFrameId||paintedGeneration!=imageGeneration)){
    if(!fpsClock.isValid())fpsClock.start();
@@ -157,11 +172,30 @@ private:
   return transform;
  }
  QJsonObject depthMetadata;
+ struct PairedTof {
+  RvTofFrame frame;
+  const RvCameraView::Profile *profile=nullptr;
+  QJsonArray adopted;
+ };
+ struct TofPoint {QPointF pixel;float cameraZ;bool adopted;};
+ PairedTof depthTof;
+ QImage depthCamera;
+ mutable PairedTof imageTof;
+ mutable QImage imageCamera;
+ mutable std::optional<std::vector<TofPoint>> imageTofPoints;
+ mutable double imageRangeMinimum=0,imageRangeMaximum=3;
+ mutable bool imageBlackOutside=false;
+ bool showTofPoints=false,showPairedRgb=false;
+ void syncImageTof()const;
+ std::vector<TofPoint> projectImageTof()const;
+ void paintTofPoints(QPainter &painter)const;
  QJsonObject imagePerformance;
  double guiSetDepthMs=0;
  ImageHoverTip hoverTip;
  void refreshHover();
- QByteArray sideDiagnostic;
+ QByteArray monocularDiagnostic;
+ bool showMonocular=false;
+ mutable bool imageMonocular=false;
  double sideScale=1;
  int sidePixels=0;
  mutable int imageSidePixels=0;

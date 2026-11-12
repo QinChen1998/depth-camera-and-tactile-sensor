@@ -202,8 +202,14 @@ sh "$stage/depth/ensure-spi.sh"
 export LD_LIBRARY_PATH="$stage/depth:/oem/usr/lib:/usr/lib"
 "$stage/candidate/native_hd_gui" --native-capabilities > "$stage/native.json" ||
  fail 'The Native16 capture program could not start on this firmware.'
-grep -qx "{\"native_capture_protocol\":\"native-m48-m16-m8-v2\",\"fov\":$fov,\"model_inference\":false,\"photon_enabled\":false,\"m8\":false,\"m16\":true,\"m48\":true}" "$stage/native.json" ||
- fail 'The Native16 capture program did not report the expected calibration capabilities.'
+grep -qx "{\"native_capture_protocol\":\"native-m48-m16-m8-v2\",\"fov\":$fov,\"model_inference\":false,\"photon_enabled\":false,\"m8\":false,\"m16\":true,\"m48\":true,\"native_hole_fill_protocol\":\"native48-hole-fill-v1\"}" "$stage/native.json" ||
+ fail 'The native capture program did not report the expected calibration and hole-fill capabilities.'
+if [ -e "$stage/candidate/litesr_near_gui" ]; then
+ "$stage/candidate/model-switch.sh" check-litesr > "$stage/litesr.json" ||
+  fail 'The F6 LiteSR program or protected model could not be verified on this firmware.'
+ grep -qx "{\"candidate_mode\":13,\"fov\":$fov,\"model_sha256\":\"a916354dce57bd4cf4559cde91270cbd50bb2b14302ed277e8653e02b525268b\"}" "$stage/litesr.json" ||
+  fail 'The installed LiteSR model or calibration identity differs from the expected payload.'
+fi
 [ "$(digest "$oem")" = "$oem_sha" ] || fail 'The factory startup script changed during setup.'
 if ! exists "$backup"; then ln "$oem" "$backup";saved_oem=1; fi
 cp -p "$oem" "$stage/oem-before"

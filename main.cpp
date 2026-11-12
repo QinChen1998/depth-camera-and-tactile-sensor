@@ -8,6 +8,7 @@
 #include "sensors/RvInferenceRuntime.h"
 #include "sensors/RvDepthDiagnostic.h"
 #include "sensors/RvDeviceStore.h"
+#include "sensors/RvSessionController.h"
 #include "sensors/RvUsbEnrollment.h"
 #include <QApplication>
 #include <QDir>
@@ -74,8 +75,6 @@ void configureSettings(const QString &directory,bool seedDefaults,bool importOri
 #ifdef DCTS_INSTALLER_BUILD
         current.setValue("ui/language","zh_CN");
 #endif
-        current.setValue("depth/uniDepthExperiment","H");
-        current.setValue("depth/hostModel","unidepth_wide_576_fp16_tof16");
         current.setValue("application/imported",true);current.sync();
     }
 }
@@ -83,7 +82,6 @@ void configureSettings(const QString &directory,bool seedDefaults,bool importOri
 
 int main(int argc,char **argv)
 {
-    qputenv("RV_UNIDEPTH_EXPERIMENT","H");
     if(argc>1&&(std::strcmp(argv[1],"--inference-probe")==0||std::strcmp(argv[1],"--inference-enumerate")==0
                ||std::strcmp(argv[1],"--inference-discovery-test")==0)){
         QCoreApplication app(argc,argv);const auto args=app.arguments();
@@ -154,9 +152,7 @@ int main(int argc,char **argv)
     }
     configureSettings(testing?temporary->path():configurationDirectory(),
         !testing||flag=="--port-ui-smoke-test"||flag=="--inference-ui-test");
-    // USB validation observes H; normal launches retain the user's selected
-    // native/H scheme. This setting exists only in the temporary test store.
-    if(usbEnrollmentLive)QSettings().setValue("depth/imagingScheme","host_unidepth_rgb672_vga_fp16_tof16");
+    if(usbEnrollmentLive)QSettings().setValue("depth/imagingScheme",RvSessionController::GlobalRgbImagingScheme);
     LanguageManager language;
     if(flag=="--tactile-3d-test")return runTactile3DTests(report);
     if(flag=="--tactile-render-test")return runTactileRenderSmoke(report);
@@ -201,10 +197,8 @@ int main(int argc,char **argv)
         return result?result:(preserved?0:1);
     }
     if(qEnvironmentVariable("RV_TEST_OFFLINE_ONLY")!="1")window.tactile()->display()->connectDefaultSerial();
-    // Device discovery uses only local synthetic inputs. Delay automatic RV
-    // startup until the usable inference choices are known.
     auto *inference=RvInferenceSettings::instance();
-    QObject::connect(inference,&RvInferenceSettings::finished,&window,[&window]{watchRvUsbDevices(window.session(),&window);},Qt::SingleShotConnection);
-    QTimer::singleShot(0,inference,&RvInferenceSettings::refresh);
+    watchRvUsbDevices(window.session(),&window);
+    QTimer::singleShot(0,inference,&RvInferenceSettings::detectDevices);
     app.setQuitOnLastWindowClosed(true);return app.exec();
 }

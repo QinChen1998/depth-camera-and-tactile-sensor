@@ -32,6 +32,7 @@
 #include <QtCore/QTimer>
 #include <functional>
 #include <cstring>
+#include <limits>
 
 namespace {
 const QString Token(32,'a'),Boot="11111111-2222-3333-4444-555555555555";
@@ -46,14 +47,25 @@ bool rejects(const std::function<void()> &fn){try{fn();return false;}catch(const
 }
 // Exercise the production asynchronous Native16 transport with fragmentation.
 enum class StreamOutcome { InfrastructureFailure, Accepted, Rejected };
-static StreamOutcome nativeStreamCase(int warning,int defect,int mode=14){
+using StreamOutput=RvDtofBoardStream::Output;
+enum class HoleFillFixture { None, Valid, WrongSize, MeasuredIndex, WrongProtocol };
+static StreamOutcome nativeStreamCase(int warning,int defect,int mode=14,StreamOutput output=StreamOutput::RawToF,
+                                      HoleFillFixture fill=HoleFillFixture::None,QString* details=nullptr){
+ const bool liteSr=RvCaptureContract::isLiteSr(mode);
  const int cols=RvCaptureContract::columns(mode),rows=RvCaptureContract::rows(mode);
  QJsonObject receipt{{"state","running"},{"protocol","LSG1"},{"paired_depth_native_protocol","LSG2"},{"boot_id",Boot},{"generation",Token},
    {"candidate_mode",mode},{"options","1,1"},{"engine","native-hd-capture-v1"},{"model_sha256",""},{"width",256},{"height",256},{"fresh_ms",1000},
    {"capture_only",true},{"inference_location","none"},{"depth_present",false},{"photon_enabled",false},
    {"video_transport","rtsp_h265"},{"video_width",2304},{"video_height",1296},{"video_fps",30},{"video_kbps",4096},
    {"native_capture_protocol",RvCaptureContract::NativeCaptureProtocolV2},{"native_columns",cols},{"native_rows",rows},
-   {"requested_host_model","unidepth_rgb672_vga_fp16_tof16"},{"expected_fov",6}};
+   {"native_hole_fill_protocol",RvCaptureContract::NativeHoleFillProtocol},
+   {"expected_fov",6}};
+ if(liteSr){
+    receipt["engine"]=RvCaptureContract::LiteSrEngine;receipt["model_sha256"]=RvCaptureContract::LiteSrModelSha;
+    receipt["capture_only"]=false;receipt["inference_location"]="board";receipt["depth_present"]=true;receipt["photon_enabled"]=true;
+    receipt["checkpoint_sha256"]=RvCaptureContract::LiteSrCheckpointSha;
+    receipt["training_minimum_m"]=.01;receipt["input_rotation_degrees"]=0;receipt["intensity_white_counts"]=512;
+ }
  if(!dtofBoardReceipt(receipt,mode,Token,"1,1"))return StreamOutcome::InfrastructureFailure;
  QJsonObject m=receipt;m["protocol"]="LSG2";m["request"]=1;m["data"]=false;m["raw_data"]=true;m["rgb_data"]=false;m["photon_data"]=false;
  m["raw_sequence"]="1";m["raw_timestamp_ns"]="1000000000";m["raw_age_ms"]=0.;m["raw_fov_correction"]=6;m["raw_columns"]=cols;m["raw_rows"]=rows;m["tof_warning_flags"]=warning;
@@ -75,32 +87,116 @@ static StreamOutcome nativeStreamCase(int warning,int defect,int mode=14){
  if(defect==14)native[3]=2;
  if(defect==15)m.remove("capture_only");
  if(defect==16)m["native_capture_protocol"]="native-m48-m8-v1";
+ const int missing=cols*5+5,zeroRange=cols*5+8;
+ QByteArray estimates;
+ if(fill!=HoleFillFixture::None){
+    estimates=QByteArray(RvCaptureContract::HoleFillBytes,0);
+    if(fill!=HoleFillFixture::MeasuredIndex)native[4*missing+3]=0;
+    qToLittleEndian<quint16>(0,native.data()+4*zeroRange);
+    qToLittleEndian<quint16>(1210,estimates.data()+2*missing);
+    qToLittleEndian<quint16>(1190,estimates.data()+2*zeroRange);
+    if(fill==HoleFillFixture::WrongSize)estimates.chop(2);
+    if(fill==HoleFillFixture::WrongProtocol)m.remove("native_hole_fill_protocol");
+ }
+ QByteArray modelDepth,pairedNative;
+ const float uniformDepth=.3f;
+ if(liteSr){
+    modelDepth.resize(RvCaptureContract::DepthBytes);
+    quint32 bits;std::memcpy(&bits,&uniformDepth,4);
+    for(int i=0;i<modelDepth.size();i+=4)qToLittleEndian(bits,modelDepth.data()+i);
+    pairedNative=native;m["data"]=true;
+    m["tof_sequence"]="1";m["depth_native_sequence"]="1";
+    m["tof_timestamp_ns"]="1000000000";m["depth_native_timestamp_ns"]="1000000000";
+    m["age_ms"]=0.;m["npu_ms"]=12.;m["compute_ms"]=18.;
+    m["depth_native_fov_correction"]=6;m["depth_native_warning_flags"]=warning;
+    if(defect==20)m["depth_native_sequence"]="2";
+    if(defect==21)m["depth_native_fov_correction"]=2;
+    if(defect==22)pairedNative.chop(4);
+    if(defect==23)pairedNative[0]^=1;
+    if(defect==24){const auto nan=std::numeric_limits<float>::quiet_NaN();std::memcpy(&bits,&nan,4);qToLittleEndian(bits,modelDepth.data());}
+    if(defect==25)m["checkpoint_sha256"]=QString(64,'0');
+ }
  const auto json=QJsonDocument(m).toJson(QJsonDocument::Compact);
- QByteArray packet(36,0);quint32 sizes[]={RvCaptureContract::PairedResponseMagic,quint32(json.size()),defect==17?4u:0u,0,quint32(native.size()),defect==18?4u:0u,defect==19?4u:0u,0,0};
- for(int i=0;i<9;++i)qToLittleEndian(sizes[i],packet.data()+4*i);packet+=json+native;
+ QByteArray packet(36,0);quint32 sizes[]={RvCaptureContract::PairedResponseMagic,quint32(json.size()),defect==17?4u:quint32(modelDepth.size()),0,
+    quint32(native.size()),defect==18?4u:0u,defect==19?4u:0u,0,quint32(estimates.size()+pairedNative.size())};
+ for(int i=0;i<9;++i)qToLittleEndian(sizes[i],packet.data()+4*i);packet+=json+modelDepth+native+estimates+pairedNative;
  QTcpServer server;if(!server.listen(QHostAddress::LocalHost))return StreamOutcome::InfrastructureFailure;
  QObject scope;QEventLoop loop;QTimer deadline;deadline.setSingleShot(true);auto outcome=StreamOutcome::InfrastructureFailure;
  bool requested=false;int position=0;QTcpSocket *peer=nullptr;std::function<void()> send;
  QObject::connect(&deadline,&QTimer::timeout,&loop,&QEventLoop::quit);
  send=[&]{if(!peer||position>=packet.size())return;const auto part=packet.mid(position,position<36?1:8191);position+=part.size();peer->write(part);QTimer::singleShot(0,&scope,send);};
  QObject::connect(&server,&QTcpServer::newConnection,&scope,[&]{peer=server.nextPendingConnection();QObject::connect(peer,&QTcpSocket::readyRead,&scope,[&]{
-    if(peer->bytesAvailable()<32)return;const auto request=peer->read(32);if(qFromLittleEndian<quint32>(request.constData())!=RvCaptureContract::PairedRequestMagic){loop.quit();return;}requested=true;if(position==0)send();
+    if(peer->bytesAvailable()<32)return;
+    const auto request=peer->read(32);
+    const auto flag=output==StreamOutput::BoardDepth&&RvCaptureContract::supportsHoleFill(mode)?RvCaptureContract::HoleFillRequest:0u;
+    if(qFromLittleEndian<quint32>(request.constData())!=RvCaptureContract::PairedRequestMagic
+       ||qFromLittleEndian<quint32>(request.constData()+RvCaptureContract::HoleFillRequestOffset)!=flag){loop.quit();return;}
+    requested=true;if(position==0)send();
  });});
- RvDtofBoardStream stream(receipt,{},nullptr,"127.0.0.1",server.serverPort());
- stream.rawFrame=[&](const RvTofFrame &f){if(requested&&f.isValid()&&f.columns()==cols&&f.rows()==rows&&f.samples==native)outcome=StreamOutcome::Accepted;loop.quit();};
- stream.error=[&](const QString &reason){if(requested&&position>=36&&!reason.isEmpty()
+ RvDtofBoardStream stream(receipt,output,nullptr,"127.0.0.1",server.serverPort());
+ bool rawAccepted=true;
+ stream.rawFrame=[&](const RvTofFrame &f,const QByteArray& ranges){
+    bool correct=requested&&f.isValid()&&f.columns()==cols&&f.rows()==rows&&f.samples==native&&ranges==estimates;
+    if(correct&&!ranges.isEmpty()){
+        QJsonArray filled;
+        const auto raw=f.radialMetres(),display=f.radialMetres(ranges,&filled);
+        auto expected=raw;
+        for(const auto index:{missing,zeroRange}){
+            const float value=qFromLittleEndian<quint16>(estimates.constData()+2*index)*.00025f;
+            quint32 bits;std::memcpy(&bits,&value,4);qToLittleEndian(bits,expected.data()+4*index);
+        }
+        correct=filled==QJsonArray{missing,zeroRange}&&raw.mid(4*missing,4)==QByteArray(4,0)
+            &&raw.mid(4*zeroRange,4)==QByteArray(4,0)&&display==expected&&f.radialMetres()==raw;
+    }
+    if(liteSr){rawAccepted=correct;return;}
+    if(correct)outcome=StreamOutcome::Accepted;
+    loop.quit();
+ };
+ stream.depthFrame=[&](const QByteArray& depth,const QByteArray& coverage,const QJsonObject& meta){
+    bool metric=depth.size()==RvCaptureContract::DepthBytes;
+    for(int i=0;metric&&i<depth.size();i+=4){
+        const auto bits=qFromLittleEndian<quint32>(depth.constData()+i);float z;std::memcpy(&z,&bits,4);
+        metric=std::abs(z-uniformDepth)<1e-6f;
+    }
+    if(rawAccepted&&metric&&coverage==QByteArray(256*256,char(255))&&meta["frame_id"]==1
+        &&meta["dtof_fov_correction"]==6&&meta["depth_unit"]=="sensor_radial_m_float32"
+        &&meta["pairing_policy"]=="same_native_measurement")outcome=StreamOutcome::Accepted;
+    if(details&&outcome!=StreamOutcome::Accepted)
+        *details=QString("depth received: raw=%1 metric=%2 coverage=%3 id=%4 pairing=%5")
+            .arg(rawAccepted).arg(metric).arg(coverage.size()).arg(meta["frame_id"].toInteger()).arg(meta["pairing_policy"].toString());
+    loop.quit();
+ };
+ stream.error=[&](const QString &reason){if(details)*details=reason;
+    if(requested&&position>=36&&!reason.isEmpty()
        &&reason!=RvDtofBoardStream::tr("RV1103 candidate stream disconnected")&&reason!=RvDtofBoardStream::tr("RV1103 candidate stream timed out"))outcome=StreamOutcome::Rejected;loop.quit();};
- deadline.start(4000);loop.exec();return outcome;
+ deadline.start(4000);loop.exec();
+ if(details&&outcome!=StreamOutcome::Accepted&&details->isEmpty())*details=QString("fixture deadline: sent %1/%2, request %3")
+    .arg(position).arg(packet.size()).arg(requested);
+ return outcome;
 }
 
 int runRvTunerTests(const QString &path){
  QFile report(path);if(!report.open(QIODevice::WriteOnly|QIODevice::Text))return 3;QTextStream out(&report);bool passed=true;int checks=0;
  const auto check=[&](const QString &name,bool ok){++checks;out<<name<<' '<<(ok?"PASS":"FAIL")<<Qt::endl;passed&=ok;};
- for(int mode:{9,10,11,12,13,15,16,17,18,19,20,21,22})check(QString("RETIRED_BOARD_MODE_%1_REJECTED").arg(mode),!RvDtofCandidates::supports(mode));
+ for(int mode:{9,10,11,12,15,16,17,18,19,20,21,22})check(QString("RETIRED_BOARD_MODE_%1_REJECTED").arg(mode),!RvDtofCandidates::supports(mode));
+ QString liteSrDetails;
+ const bool liteSrAccepted=nativeStreamCase(0,0,13,StreamOutput::RawToF,HoleFillFixture::None,&liteSrDetails)==StreamOutcome::Accepted;
+ if(!liteSrAccepted)out<<"LiteSR fixture: "<<liteSrDetails<<Qt::endl;
+ check("LITESR_FRAGMENTED_F6_DEPTH_AND_MATCHED_TOF",liteSrAccepted);
+ for(int defect:{1,5,20,21,22,23,24,25})
+     check(QString("LITESR_PAIRED_FRAME_REJECT_%1").arg(defect),nativeStreamCase(0,defect,13)==StreamOutcome::Rejected);
  for(int mode:{24,25}){
    check(QString("NATIVE48_F6_TRANSPORT_%1").arg(mode),nativeStreamCase(0,0,mode)==StreamOutcome::Accepted);
+   check(QString("BOARD_DEPTH_FILL_PRESERVES_RAW_%1").arg(mode),nativeStreamCase(0,0,mode,StreamOutput::BoardDepth,HoleFillFixture::Valid)==StreamOutcome::Accepted);
+   check(QString("BOARD_DEPTH_WITHOUT_ELIGIBLE_HOLES_%1").arg(mode),nativeStreamCase(0,0,mode,StreamOutput::BoardDepth)==StreamOutcome::Accepted);
    for(int defect:{3,4,5,6,11,14})check(QString("NATIVE48_REJECT_%1_%2").arg(mode).arg(defect),nativeStreamCase(0,defect,mode)==StreamOutcome::Rejected);
  }
+ check("HOST_NATIVE48_REFUSES_UNREQUESTED_ESTIMATES",nativeStreamCase(0,0,24,StreamOutput::RawToF,HoleFillFixture::Valid)==StreamOutcome::Rejected);
+ check("NATIVE16_CANNOT_REQUEST_ESTIMATES",nativeStreamCase(0,0,14,StreamOutput::BoardDepth,HoleFillFixture::Valid)==StreamOutcome::Rejected);
+ check("BOARD_DEPTH_REFUSES_ESTIMATES_ON_WARNING",nativeStreamCase(8,0,25,StreamOutput::BoardDepth,HoleFillFixture::Valid)==StreamOutcome::Rejected);
+ check("BOARD_DEPTH_REFUSES_MALFORMED_ESTIMATE_SIZE",nativeStreamCase(0,0,25,StreamOutput::BoardDepth,HoleFillFixture::WrongSize)==StreamOutcome::Rejected);
+ check("BOARD_DEPTH_REFUSES_ESTIMATE_OVER_MEASUREMENT",nativeStreamCase(0,0,25,StreamOutput::BoardDepth,HoleFillFixture::MeasuredIndex)==StreamOutcome::Rejected);
+ check("BOARD_DEPTH_REFUSES_UNKNOWN_ESTIMATE_PROTOCOL",nativeStreamCase(0,0,25,StreamOutput::BoardDepth,HoleFillFixture::WrongProtocol)==StreamOutcome::Rejected);
  for(int warning:{0,8,16,24,32,64,128})check(QString("NATIVE16_FRAGMENTED_WARNING_%1").arg(warning),nativeStreamCase(warning,0)==(warning==0||warning==8||warning==16?StreamOutcome::Accepted:StreamOutcome::Rejected));
  for(int defect=1;defect<=19;++defect)check(QString("NATIVE16_OUTPUT_IDENTITY_REJECT_%1").arg(defect),nativeStreamCase(0,defect)==StreamOutcome::Rejected);
  QTemporaryDir temporary;if(!temporary.isValid())return 3;QSettings::setDefaultFormat(QSettings::IniFormat);QSettings::setPath(QSettings::IniFormat,QSettings::UserScope,temporary.path());QSettings::setPath(QSettings::IniFormat,QSettings::SystemScope,temporary.path());
@@ -232,11 +328,11 @@ int runRvTunerTests(const QString &path){
     check(QString("SAVE_GRID_%1_REACHES_TRANSACTION").arg(mode),calls.last().action=="persist"&&calls.last().request["settings"]==grid.json());
     const int pendingCount=calls.size();control->persist();check(QString("SAVE_GRID_%1_NO_DUPLICATE_TRANSACTION").arg(mode),calls.size()==pendingCount);
     reply({{"settings",grid.json()},{"snapshot",QString(64,'d')},{"backup","mock"}});
-    check(QString("SAVE_GRID_%1_RECEIPT_PRESERVES_SAVED_VALUES").arg(mode),control->savedSettings()==grid.json()&&control->state()==RvTunerController::Running&&control->detail().contains(QString::fromUtf8("16×16")));
+    check(QString("SAVE_GRID_%1_RECEIPT_PRESERVES_SAVED_VALUES").arg(mode),control->savedSettings()==grid.json()&&control->state()==RvTunerController::Running&&control->detail().contains(QString::fromUtf8("48×32")));
     control->stop();reply({{"state","stopped"}});
  }
  LanguageManager language;language.setLanguage(LanguageManager::Language::SimplifiedChinese,false);QApplication::processEvents();check("EMBEDDED_CHINESE_TUNER_TRANSLATION",widget.m_buttons["Persist"]->text()==QString::fromUtf8("长期保存"));
- check("EMBEDDED_CHINESE_ALL_RESOLUTIONS_SAVE",widget.m_buttons["Persist"]->toolTip().contains(QString::fromUtf8("所有支持的分辨率"))&&widget.m_buttons["Persist"]->toolTip().contains(QString::fromUtf8("16×16")));
+ check("EMBEDDED_CHINESE_ALL_RESOLUTIONS_SAVE",widget.m_buttons["Persist"]->toolTip().contains(QString::fromUtf8("所有支持的分辨率"))&&widget.m_buttons["Persist"]->toolTip().contains(QString::fromUtf8("48×32")));
  widget.acceptFrame(frame);widget.m_status->setText(QString::fromUtf8("离线合成 DTN1 验证（SIMULATED），未连接设备"));QApplication::processEvents();
  widget.grab().save(QFileInfo(path).absolutePath()+"/tuner_offline.png");
  out<<"CHECKS "<<checks<<"\nOFFLINE_SYNTHETIC_ONLY; no board connection, deployment, capture or permanent write\n";return passed?0:1;

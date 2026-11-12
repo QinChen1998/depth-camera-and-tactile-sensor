@@ -1,6 +1,6 @@
 # 模型保护与安装包约定
 
-2026-11-09：当前开发版仅保留主机 H。LiteSR 普通／高精度的密文、ARM 推理程序、RKNN 依赖和参数切换模板均已移除；板端只部署原生采集支持。主机 H 的原生 DLL、AES-256-GCM 加密和 ORT 内存加载契约保持。历史 v1.1.6 安装包未重制，见 [当前移除记录](HOST_ASSIST_ONLY.md) 和 [历史安装记录](INSTALLER_1_1_6.md)。
+当前开发版的上位机辅助推理使用 G。未来安装构建从主工程编译程序，收集 UniDepth 运行时和板端原生采集支持。I 方案封存在本地 `archives/`，该目录位于安装载荷之外。保护实现使用原生 DLL、AES-256-GCM 加密和 ORT 内存加载。
 
 用户已于 2026 年 11 月 2 日确认：未来制作客户安装包时采用原生 DLL、AES-256-GCM 加密模型和 ORT 内存加载。目标是防止客户从安装目录直接复制得到可用的明文模型，模型随上位机提供使用。防蒸馏和强对抗内存提取不属于本次目标，设备授权、TPM 或云端服务也不是当前既定前提。
 
@@ -42,10 +42,10 @@ flowchart LR
     Auth --> Session[CreateSessionFromArray]
     Session --> Clear[清零临时明文]
     Clear --> Run[复用 ORT 会话执行每帧推理]
-    Run --> H[既有预测逆恢复与 H 矫正]
+    Run --> Fusion[预测逆恢复与 G 全局尺度校正]
 ```
 
-DLL 负责解密和会话创建，返回 ORT 会话，不向调用者提供明文模型缓冲区。当前默认开发版和安装版使用 ORT 1.31.1 TensorRT-RTX；历史 CUDA 构建使用 ORT 1.23.2。DLL 接收主机创建的 session options，保留相应 FP16 设置和 H 处理，不更换网络、不量化、不更改模型输入方向或输出网格。临时明文在会话创建完成后清零，不保存临时 ONNX，也不每帧解密或重复创建会话。
+DLL 负责解密和会话创建，返回 ORT 会话，不向调用者提供明文模型缓冲区。当前默认开发版和安装版使用 ORT 1.31.1 TensorRT-RTX；历史 CUDA 构建使用 ORT 1.23.2。DLL 接收主机创建的 session options，保留相应 FP16 设置及预测逆恢复，不更换网络、不量化、不更改模型输入方向或输出网格。临时明文在会话创建完成后清零，不保存临时 ONNX，也不每帧解密或重复创建会话。
 
 实验使用 Windows CNG `bcrypt.dll` 实现 AES-256-GCM 和 SHA256，无新增 Python/PyTorch 运行时依赖。模型密文比原始模型增加 96 字节封装头，头部包含版本、长度、随机 nonce、认证标签和原模型 SHA256。GCM 认证覆盖封装元数据及模型内容；解密后再与主机绑定的预期模型 SHA256 比对，防止合法格式但错误身份的模型进入会话。
 
@@ -121,9 +121,9 @@ Release/Debug 各通过 28 个合成场景，其中 19 份有效深度、单目�
 
 本次证据可从 [完整汇总](../../dToF/output/litesr_depth_only_20261106_v1/retired_host_assets/x64/validation/model_crypto_trial_20261102/reports/final_summary.json)、[性能明细](../../dToF/output/litesr_depth_only_20261106_v1/retired_host_assets/x64/validation/model_crypto_trial_20261102/reports/performance_full_diagnostic/summary.json)、[Release 一致性](../../dToF/output/litesr_depth_only_20261106_v1/retired_host_assets/x64/validation/model_crypto_trial_20261102/reports/parity_Release/summary.json)、[Debug 一致性](../../dToF/output/litesr_depth_only_20261106_v1/retired_host_assets/x64/validation/model_crypto_trial_20261102/reports/parity_Debug/summary.json) 和 [拒绝测试](../../dToF/output/litesr_depth_only_20261106_v1/retired_host_assets/x64/validation/model_crypto_trial_20261102/reports/rejections.json) 读取。实验位于忽略的目录，清理或迁机后这些链接可能缺失；本文件保留方案、状态和关键结果，缺失的本地报告不能当作新一轮验收证据。
 
-## RV1103 原生采集
+## RV1103 原生采集和 LiteSR
 
-当前安装构建不再复制板端模型或模型解密程序。`tools/rv_capture/` 只提供 Native16 测量、H.265 进度及 H 会话预设，不需要 RKNN/OpenSSL 板端推理运行库。设备升级用完整事务式采集资源修复，旧活动目录留作回滚；此次仅修改本机项目，未部署真实设备。原始研究权重和外部研究目录保持。
+`tools/rv_capture/` 提供 Native48/Native16 测量、H.265 进度及会话预设。LiteSR mode13 使用私有 F6 程序，先认证 AES-256-GCM 密文和原模型 SHA256，再在内存中初始化 RKNN 并清零临时明文。导入阶段认证密文和 F6 版本，运行阶段初始化 NPU。纯采集程序使用独立构建。文件和导入入口见 [板端源码与构建](../tools/rv_capture/README.md)。
 
 ## 安装包构建
 
@@ -134,10 +134,12 @@ Release/Debug 各通过 28 个合成场景，其中 19 份有效深度、单目�
 ./tools/installer/prepare-sandbox.ps1 -BuildDirectory (Join-Path $PWD 'x64/validation/installer_release')
 ```
 
+复用已暂存载荷时，构建脚本校验成像菜单及两个桌面程序的 SHA256。旧载荷需从当前源码重新暂存。
+
 安装程序命名为 `触想工作台-内测版-v<版本>-x64.exe`，并与 SHA256 校验文件一同保存在构建目录的 `delivery/`。只从该目录选取交付文件。`private_build/` 是内部构建目录，包含明文副本、当次生成的密钥材料和中间产物。安装版固定要求保护清单，安装后的用户配置位于 `%LOCALAPPDATA%/DepthCameraAndTactileSensor/config`。普通开发版继续读本项目独立配置和明文模型包。
 
-安装目录和主程序名可包含中文。H 推理通过随包的 `DctsInferenceWorker.exe` 启动，优先使用可读的 ASCII 路径或目录别名。别名不可用时，将所需 DLL、程序和加密模型运行文件复制到当前用户的私有 ASCII 临时目录。推理进程退出后清理临时文件和别名。
+安装目录和主程序名可包含中文。上位机推理通过随包的 `DctsInferenceWorker.exe` 启动，优先使用可读的 ASCII 路径或目录别名。别名不可用时，将所需 DLL、程序和加密模型运行文件复制到当前用户的私有 ASCII 临时目录。推理进程退出后清理临时文件和别名。
 
 安装版和默认开发版均使用 ORT 1.31.1 和 TensorRT-RTX EP。安装版自带用户态推理 DLL，主机需要受支持的 Ampere 或更新的 NVIDIA RTX 显卡和兼容 CUDA 12.9 的驱动。显卡、驱动或模型不可用时，上位机显示原因，提示修复上位机运行文件及显卡环境。
 
-打开生成的 `DctsCleanInstall.wsb` 执行离线 Windows Sandbox 验证，结果写入 `sandbox-results/`。TensorRT-RTX 加密加载及 H 输出需另在配备兼容 NVIDIA 驱动的主机验证。串口驱动、NVIDIA 驱动和板端服务按实际设备配置。对外分发前核对 Qt Quick 3D、TensorRT-RTX、CUDA 等第三方依赖的授权覆盖。
+打开生成的 `DctsCleanInstall.wsb` 执行离线 Windows Sandbox 验证，结果写入 `sandbox-results/`。TensorRT-RTX 加密加载及上位机深度输出需另在配备兼容 NVIDIA 驱动的主机验证。串口驱动、NVIDIA 驱动和板端服务按实际设备配置。对外分发前核对 Qt Quick 3D、TensorRT-RTX、CUDA 等第三方依赖的授权覆盖。

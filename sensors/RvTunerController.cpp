@@ -106,7 +106,7 @@ void RvTunerController::completed(quint64 operation,const QString &action,const 
     }
     if(action=="persist"){
         m_saved=r["settings"].toObject();m_info["snapshot"]=r["snapshot"];m_info["backup"]=r["backup"];
-        setState(Running,tr("dToF settings saved and read back. Imaging uses a 16×16 session preset without changing the saved settings."));
+        setState(Running,tr("dToF settings saved and read back. Imaging uses a 48×32 session preset without changing the saved settings."));
     }else if(action=="start"||action=="switch"){
         if(r["token"]!=m_token||r["settings"].toObject()!=m_requested.json()){fail(tr("Experiment receipt differs from requested settings."));return;}
         m_applied=m_requested.json();m_info["snapshot"]=r["snapshot"];m_oldToken.clear();

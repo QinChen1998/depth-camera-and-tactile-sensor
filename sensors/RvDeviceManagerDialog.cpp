@@ -1,5 +1,6 @@
 #include "RvDeviceManagerDialog.h"
 #include "RvImportDiagnostics.h"
+#include "RvInferenceSettings.h"
 #include "RvSessionController.h"
 #include "RvTunerController.h"
 #include "../RuntimeDiscovery.h"
@@ -178,7 +179,9 @@ void RvDeviceManagerDialog::finishUsbEnrollment(bool added)
     m_usbEnrollmentPending = false;
     if (added) {
         reload();
-        if (m_store) message(tr("The RV1103 was verified and selected for imaging."));
+        if (m_store) message(m_session && m_session->assistDepthEnabled() && RvInferenceSettings::instance()->detecting()
+            ? tr("The RV1103 is connected. Wait for inference device detection to finish, then click Start.")
+            : tr("The RV1103 was verified and selected for imaging."));
     } else {
         busy(false);
         message(tr("USB connection setup ended."));
@@ -308,6 +311,9 @@ void RvDeviceManagerDialog::operationFailed(const QString &reason,int code){
     message(tr("Automatic serial reading failed. Retry or follow the manual steps below."),true);
 }
 void RvDeviceManagerDialog::updateFingerprint(){
+    if(m_key->text().trimmed().isEmpty()){
+        m_fingerprint->setText(tr("Connect via USB to read the public key automatically."));return;
+    }
     try{const auto current=RvDeviceStore::keyFingerprint(m_key->text().trimmed().section(' ',-1));m_fingerprint->setText(m_savedFingerprint.isEmpty()||current==m_savedFingerprint?current:tr("Saved: %1\nNew: %2").arg(m_savedFingerprint,current));}
     catch(...){m_fingerprint->setText(tr("Enter a complete Ed25519 public key"));}
 }
@@ -321,7 +327,7 @@ void RvDeviceManagerDialog::refresh(const QString &id){
     m_table->blockSignals(false);m_active->setText(m_store->activeId().isEmpty()?tr("No active device"):tr("Active device: %1").arg(m_session&& !m_session->userStopped()?m_session->deviceProfile().name:m_store->active().name));
     if(selected>=0)m_table->selectRow(selected);else if(m_table->rowCount())m_table->selectRow(0);else{RvDeviceProfile p;p.id=QUuid::createUuid().toString(QUuid::Id128);p.host="172.32.0.93";edit(p,true);}
 }
-void RvDeviceManagerDialog::edit(const RvDeviceProfile &p,bool fresh){m_fresh=false;m_readingSerial=false;m_operation.clear();m_serialHelp->hide();m_serial->setReadOnly(true);m_serial->setPlaceholderText(tr("Read automatically when connecting"));m_savedFingerprint=fresh?QString():p.fingerprint();m_id=p.id;m_name->setText(p.name);m_host->setText(p.host);m_port->setValue(p.sshPort);m_serial->setText(p.serial);m_username->setText(p.username);m_key->setText(p.publicKey.isEmpty()?QString():"ssh-ed25519 "+p.publicKey);m_rotation->setCurrentIndex(m_rotation->findData(RvSessionController::effectiveHostInputRotation(p)));m_legacyCameraMountRotation=p.cameraMountRotation;m_legacy->setChecked(p.legacyCoordinator);m_confirm->setChecked(false);m_fingerprint->setText(fresh?tr("Enter a complete Ed25519 public key"):p.fingerprint());m_verify->setEnabled(!fresh);m_forget->setEnabled(!fresh);m_use->setEnabled(!fresh);m_remove->setEnabled(!fresh);m_installCapture->setEnabled(!fresh);m_fresh=fresh;}
+void RvDeviceManagerDialog::edit(const RvDeviceProfile &p,bool fresh){m_fresh=false;m_readingSerial=false;m_operation.clear();m_serialHelp->hide();m_serial->setReadOnly(true);m_serial->setPlaceholderText(tr("Read automatically when connecting"));m_savedFingerprint=fresh?QString():p.fingerprint();m_id=p.id;m_name->setText(p.name);m_host->setText(p.host);m_port->setValue(p.sshPort);m_serial->setText(p.serial);m_username->setText(p.username);m_key->setText(p.publicKey.isEmpty()?QString():"ssh-ed25519 "+p.publicKey);m_rotation->setCurrentIndex(m_rotation->findData(RvSessionController::effectiveHostInputRotation(p)));m_legacyCameraMountRotation=p.cameraMountRotation;m_legacy->setChecked(p.legacyCoordinator);m_confirm->setChecked(false);m_fingerprint->setText(fresh?tr("Connect via USB to read the public key automatically."):p.fingerprint());m_verify->setEnabled(!fresh);m_forget->setEnabled(!fresh);m_use->setEnabled(!fresh);m_remove->setEnabled(!fresh);m_installCapture->setEnabled(!fresh);m_fresh=fresh;}
 RvDeviceProfile RvDeviceManagerDialog::draft() const {RvDeviceProfile p;p.id=m_id;p.name=m_name->text().trimmed();p.host=m_host->text().trimmed();p.sshPort=m_port->value();p.serial=m_serial->text().trimmed().toLower();p.username=m_username->text().trimmed();p.publicKey=m_key->text().trimmed();if(p.publicKey.startsWith("ssh-ed25519 "))p.publicKey=p.publicKey.mid(12).trimmed();p.calibration=QLatin1String(RvCalibration::Id);p.inputRotation=m_rotation->currentData().toInt();p.cameraMountRotation=m_legacyCameraMountRotation;p.legacyCoordinator=m_legacy->isChecked();p.temporaryFovCalibration=false;p.validate();return p;}
 void RvDeviceManagerDialog::save(){if(m_session&&m_session->tuner()->shutdownPending()){message(tr("Stop dToF tuning before changing trusted devices."),true);return;}if(m_serial->text().isEmpty()&&m_serial->isReadOnly()){readDeviceInformation();return;}try{auto p=draft();auto list=m_store->profiles();int index=-1;for(int i=0;i<list.size();++i)if(list[i].id==p.id)index=i;
     bool trustChanged=index<0;if(index>=0){const auto &old=list[index];trustChanged=old.publicKey!=p.publicKey||old.serial!=p.serial||old.calibration!=p.calibration||old.inputRotation!=p.inputRotation||old.cameraMountRotation!=p.cameraMountRotation||old.legacyCoordinator!=p.legacyCoordinator||old.temporaryFovCalibration!=p.temporaryFovCalibration;p.lastConnected=trustChanged?QString():old.lastConnected;}

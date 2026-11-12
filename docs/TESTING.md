@@ -3,13 +3,19 @@
 2026-11-09 后续变更：新增两档 48×32 原生 ToF，固定使用报告标定并完整导入板端，见 [默认标定与原生 ToF 模式](DEFAULT_CALIBRATION_NATIVE_TOF.md)。
 从项目根目录执行。工具输出使用新的 `x64/validation/<本轮目录>/`；不覆盖已有报告。历史实机报告不能代替当前改动的验收。2026-11-08 已将既有验证历史按原路径归档，恢复与 SHA256 索引见 [本地归档](../archives/README.md)。
 
-USB 启动与新板接入修复的证据目录为 `x64/validation/usb_startup_20261109/`。`python -m unittest discover -s tests -p test_usb_network.py -v` 在临时文件系统和模拟 Windows 网卡上运行实际探测/配置脚本，覆盖断开、迟到枚举、错误父设备、固件临时地址、旧地址保留及失败回滚；不访问硬件。C++ 专项继续通过统一 runner 的 `rv-usb-enrollment-test` 执行。USB 实机验证在临时设置中选择 H，避免用户保存的原生档位影响深度统计，正常启动仍保留用户选择。
+USB 启动与新板接入修复的证据目录为 `x64/validation/usb_startup_20261109/`。`python -m unittest discover -s tests -p test_usb_network.py -v` 在临时文件系统和模拟 Windows 网卡上运行实际探测/配置脚本，覆盖断开、迟到枚举、错误父设备、固件临时地址、旧地址保留及失败回滚；不访问硬件。C++ 专项继续通过统一 runner 的 `rv-usb-enrollment-test` 执行。USB 实机验证在临时设置中选择 G，避免用户保存的原生档位影响深度统计，正常启动仍保留用户选择。
+
+USB 发现错误分类及空白公钥提示的回归证据在 `x64/validation/multibackend_20261109/usb-discovery-fix/`。空列表、离线、未授权、多连接和缺少 transport ID 分别报告；仅 ADB 列举阶段保留有长度上限的输出，不记录后续身份读取或凭据输出。`tools/diagnose_rv1103_usb.ps1` 可在出现问题的 Windows 上读取 ADB 列表和 Rockchip USB 驱动状态，默认将报告写到桌面；自定义安装位置可指定 `-ApplicationDirectory`。脚本不修改驱动、网络配置或板端文件，列举设备时可能启动本机 ADB 服务。另一台电脑的具体失败原因须依据该机报告确认，本机离线检查不能代替验证。
 
 两档原生 ToF 水平镜像与设备管理角度控件移除的证据目录为 `x64/validation/native_tof_mirror_20261109/`。`port-ui-smoke-test` 用不对称测点验证自定义角度及四个全局旋转下的屏幕水平镜像、悬停原始索引和距离、两档快照不变、UniDepth 不镜像，以及设备保存仍保留既有方向。此次为主机显示改动，使用离线测试，不更新板端文件。
 
-当前成像入口为主机 H，以及不使用神经网络的 48×32 原生 ToF 普通／高精度两档。LiteSR 普通／高精度、Tiny 的模型、推理程序和切换模板已移除。下文板端推理实测章节均为对应日期的历史结果，不能据此运行已删除目标。模型移除记录见 [仅保留上位机辅助推理](HOST_ASSIST_ONLY.md)，当前三档见 [默认标定与原生 ToF 模式](DEFAULT_CALIBRATION_NATIVE_TOF.md)。
+当前菜单提供上位机辅助推理（G）、上位机辅助推理（B，复用 ToF）、板端推理、板端推理高精度。四项均使用 48×32 ToF。H 的两项产品入口及专用实现已移除。I 封存在本地归档，相关检查覆盖旧设置迁移与运行拒绝。当前档位见 [默认标定与原生 ToF 模式](DEFAULT_CALIBRATION_NATIVE_TOF.md)。
+
+2026-11-10 主机 48×32 证据为 `x64/validation/h_native48_20261110/`，结果及限制见 [H 原生 48×32 对照](H_NATIVE48_COMPARISON.md)。Release/Debug 各通过相关三组 649 项断言（融合 146、界面 179、协议 324）；没有因本次增加新的 runner 标志。原生控制 worker 复用现有版本，主构建使用 `NativeWorkersBuild=false`，不将此前中断的独立构建输入修复算作本次通过。
 
 ## 构建与离线专项
+
+H 尺度跳变与十秒录制的改动及证据见 [H 融合连续性](H_FUSION_STABILITY.md)。同输入仅比较模型张量时显式指定 `tools/verify_port.py --comparison monocular`；完整融合回归使用 `rv-assist-recovery-test`，不能将两种对照混淆。
 
 推理设备新增专项见 [UniDepth 推理设备选择](MULTI_BACKEND_INFERENCE.md)。`tools/test_inference_backends.ps1` 负责实际模型检测、选项策略、完整深度输出、加密加载及设置界面；`tools/verify_port.py` 可对同后端的开发／安装运行包作同输入对照。该专项不扩展下述八组标志的白名单。本轮输出为 `x64/validation/multibackend_20261109/`。
 
@@ -33,7 +39,7 @@ python -m unittest discover -s tests -p 'test_*.py' -v
 | `tactile-visualization-test` | 触觉显示、面板可见性、选择、曲线和断开 |
 | `tactile-3d-test` | QML 三维数据与生命周期 |
 | `tactile-render-test` | 三维渲染、交互、显示刷新和关闭 |
-| `rv-assist-recovery-test` | 当前 640×480 H 模型/F1/F2 的米制几何、100 ms 边界、原生点有效性、尺度连续性与 schema 1/2 诊断 |
+| `rv-assist-recovery-test` | G/B 的 F6 几何、480×640 输出、真实 48×32 网格、配对边界、尺度连续性与诊断回放 |
 | `rv-usb-enrollment-test` | USB 身份、地址规划、已有设备复用、完整检查回执、设置交接身份及登记准入 |
 
 脚本清除继承的 RV/DCTS/Python/Qt 覆盖，强制 `RV_TEST_OFFLINE_ONLY=1`，TEMP/TMP 指向本轮输出的 `tmp/`。调参测试只使用本机 TCP 回环；需要允许本机回环连接，不会打开真实设备。连接失败/超时不能冒充协议拒绝通过负例。QtMsBuild 需要读取本机 Qt 注册表；访问被沙箱拒绝时应修正运行环境，不改模型或设备参数。
@@ -63,17 +69,16 @@ Release/Debug 构建均通过，两配置各八组离线专项、各 1320 个断
 需要 NumPy、匹配的 Qt DLL 和兼容 NVIDIA GPU。先保存待比较版本的 EXE（ASCII 文件名），对候选/参考执行相同合成输入；两者的模型 ID、后端和运行包必须匹配。
 
 ```powershell
-python tools/verify_port.py --executable x64/Release/DctsInferenceWorker.exe --reference-executable x64/validation/reference/before-Release.exe --qt-root E:/Qt/6.11.1/msvc2022_64 --output x64/validation/my_check/parity-default
-python tools/verify_port.py --executable x64/Release/DctsInferenceWorker.exe --reference-executable x64/validation/reference/before-Release.exe --qt-root E:/Qt/6.11.1/msvc2022_64 --model unidepth_rgb672_vga_fp16_tof16 --output x64/validation/my_check/parity-vga
+python tools/verify_port.py --executable x64/Release/DctsInferenceWorker.exe --reference-executable x64/validation/reference/before-Release.exe --qt-root E:/Qt/6.11.1/msvc2022_64 --output x64/validation/my_check/parity-g
 ```
 
-默认使用 `UniDepthRuntimeRgb672VgaFP16RTX/`，仅接受 VGA 模型 ID。`--runtime` 指定候选包，`--reference-runtime` 单独指定参考包，未指定时使用候选包。受保护包按清单要求 AES-GCM 内存加载、原 SHA 校验和不读明文；开发明文包验证 `plaintext-file`，不能因传了目录参数就假定加密。
+默认使用 `UniDepthRuntimeRgb672VgaFP16RTX/`，两端均执行 G。可用 `--runtime` 和 `--reference-runtime` 分别指定运行包。工具按 SHA256 核验运行包并检查实际加载方式，受保护包要求 AES-GCM 内存加载，开发包验证明文文件加载。
 
-每个模型覆盖 28 个场景：F1/F2、0°/180°、不同 RGB、±100 ms 接受和超界拒绝、复用身份/字节一致、错误网格/FOV/方向/有效位、低 SNR 和 RGB-only。比较有效输出的米制深度、原始预测及诊断字节，检查停止重启、不重放旧 RGB，并拒绝已移除的 A 模式。包清单逐文件 SHA256 也须通过。协议和合成样本共用 `tools/unidepth/native16_contract.py`；不再运行已删除的旧模型测试脚本。
+合成案例覆盖 0°/180°、不同 RGB、±165 ms 配对边界及 35 ms 时钟裕量、重复测量拒绝、错误网格或 FOV、异常方向或有效位、测量告警、低 SNR 和 RGB-only 尺度沿用。工具对有效输出比较米制深度、原始预测和诊断字节，并检查停止重启及已移除或封存的请求。协议和合成样本共用 `tools/unidepth/native48_contract.py`。
 
-这类测试验证代码与数据合同，不证明实际物理精度、客户显卡性能或设备安装标定。连续尺度平滑使用单调时间；逐字节比较采用固定场景，不能把不同墙钟节奏下的长流输出直接当作同一帧比较。
+连续尺度平滑使用单调时间。逐字节比较采用固定场景。若仅比较模型张量，可指定 `--comparison monocular`。
 
-原生控制 worker 可单独运行 `x64/rv_control/<配置>/runtime/RvControlWorker.exe --self-test`。主机异步启动/结果回传入口为主程序 `--rv-assist-path-test <绝对报告.json>`，须同时设置 `RV_TEST_OFFLINE_ONLY=1`；报告 `pass=true` 且 `depth_bytes` 正确才通过。
+原生控制 worker 可单独运行 `x64/rv_control/<配置>/runtime/RvControlWorker.exe --self-test`。主机异步启动/结果回传入口为主程序 `--rv-assist-path-test <绝对报告.json>`，须同时设置 `RV_TEST_OFFLINE_ONLY=1`；报告 `pass=true` 且 `depth_bytes` 正确才通过。设置 `DCTS_TEST_REUSE_TOF=1` 可走 B 的父子进程链路，验证同一 ToF 的第二次派发标记为复用。
 
 首次板端部署脚本由 `tests/test_board_bootstrap.py` 在临时文件系统中实际执行，覆盖其他版本旧驱动、没有旧交付目录、备份、身份绑定、上传损坏拒绝、安装中断回退、固件依赖缺失、已有残留部署和采集占用。Windows 使用 Git Bash，Linux 使用 bash；测试中的系统路径映射到临时目录，不访问真实板卡。与上述 Python 测试入口一起运行。
 
@@ -81,7 +86,7 @@ python tools/verify_port.py --executable x64/Release/DctsInferenceWorker.exe --r
 
 仅验证上位机辅助推理的实机入口为主程序 `--host-assist-live-validation <绝对报告.json>`。先登记实际 USB 设备、核对公钥与标定并保存登录，在运行该进程的环境中显式设置 `DCTS_LIVE_ENABLE=1` 和与登记设备一致的 `DCTS_LIVE_SERIAL`，清除 `RV_TEST_OFFLINE_ONLY`。通过等待进程退出的方式启动，检查退出码与报告的 `passed=true`；PowerShell 直接调用 GUI EXE 时不能把命令立即返回当作测试完成。
 
-该专项只选择 `host_unidepth_rgb672_vga_fp16_tof16`，进行两轮各 30 秒的普通开始、停止及重启。按 `RV_INFERENCE_BACKEND`（默认 `tensorrt`）检查实际后端、模型摘要及精度身份，并检查 640×480 米制输出、16×16 原生测量、输入方向、H 矫正、100 ms 配对上限、相机与深度实际绘制、停止后的晚到结果，以及两份板端长期设置/脚本保持不变。`DCTS_LIVE_CONFIG_SOURCE` 可指定只读的已登记设备配置来源，复制进临时配置后执行。批量入口为 `tools/test_live_inference_backends.ps1`，要求显式 `-AllowLiveDevice`，首次失败即停止。2026-11-09 五后端结果见 [推理设备选择](MULTI_BACKEND_INFERENCE.md)。报告只保存计数、耗时、身份和设置，不保存真实图像或测量数组，不运行板端推理。它不属于离线八组，也不使用调参持久化操作；实景精度仍须用独立的物理基准评估。
+该专项选择「上位机辅助推理」进行两轮各 30 秒的开始、停止及重启。验证实际后端、模型身份、480×640 输出、48×32 测量、200 ms 配对预算及新测量的唯一派发，也检查相机与深度绘制、停止后迟到结果及板端长期设置。可通过 `DCTS_LIVE_CONFIG_SOURCE` 指定已登记配置来源，并通过 `DCTS_HOST_DIAGNOSTIC_DIRECTORY` 显式录制首轮的诊断。批量入口为 `tools/test_live_inference_backends.ps1`，要求 `-AllowLiveDevice`。
 
 2026-11-07 本轮首次部署及主机实测证据位于 `x64/validation/fresh_board_setup_20261107/`。当前设备通过普通 USB 一键连接完成全量安装（`usb-live-REDACTED_DEVICE.json`），不再要求旧 V1.2.0 驱动哈希。原厂摄像头退出后遗留的 DHCP 进程仅在身份、参数、启动时间、RTSP 监听和摄像头 DMA 句柄均匹配时接管；原始摄像头配置及驱动已备份。
 
@@ -124,7 +129,7 @@ python tools/thermal/run.py --mode host --serial <实际受信任序列号> --ou
 
 `tests/test_thermal_analysis.py` 离线验证累计计数差分、guest 计数不重复、缺失/回退数据、旧时钟列布局、过期采样不复用、板端/PC 帧率区分及只读脚本的临时文件系统执行。实际硬件只在上述显式实机入口运行。
 
-`--mode host` 使用 `--host-thermal-live-validation`：仅选当前 RGB672 输入／640×480 输出的 H 模型运行 600 秒，恢复 2304×1296 H.265，继续严格检查 100 ms 配对、复用身份、无历史校正点冒用、模型输入方向和停止后晚到结果。电脑端每 5 秒通过只读 nvidia-smi 记录 GPU 温度、SM/显存频率、利用率、功耗、硬件/软件热限制状态和累计时间，并记录主机 CPU/内存与供电状态。累计热限制计数只比较本轮增量，历史非零值、N/A 或缺失不能冒充本轮限频。GPU 记录与板端及逐秒推理窗口按同一主机时间对齐，过期读数不复用。此模式的板端发热包含摄像头、ISP、编码和视频传输，不能因神经网络在电脑端运行就假定板端负载很低。
+`--mode host` 使用 `--host-thermal-live-validation`：运行上位机辅助推理 600 秒，检查 480×640 输出、2304×1296 H.265、配对与原生点身份、模型输入方向及停止后晚到结果。电脑端每 5 秒通过只读 nvidia-smi 记录 GPU 温度、SM/显存频率、利用率、功耗、硬件/软件热限制状态和累计时间，并记录主机 CPU/内存与供电状态。累计热限制计数只比较本轮增量，历史非零值、N/A 或缺失不能冒充本轮限频。GPU 记录与板端及逐秒推理窗口按同一主机时间对齐，过期读数不复用。此模式的板端发热包含摄像头、ISP、编码和视频传输，不能因神经网络在电脑端运行就假定板端负载很低。
 
 2026-11-07 当前设备两轮均完整运行 600 秒并正常停止，晚到结果为 0，长期参数和脚本前后相同。板端记录在 `x64/validation/thermal_20261107_REDACTED_DEVICE_run2/`，辅助推理记录在 `x64/validation/thermal_host_20261107_REDACTED_DEVICE_run1/`，汇总与对比图在 `x64/validation/thermal_comparison_20261107/`。板端 run1 仅为 exec-out 通道不兼容的启动失败，未启动推理，不计为实测。辅助轮未再次断电，记录实际起始温度；外界温度及散热片/风扇情况未独立确认。
 
@@ -149,17 +154,17 @@ python tools/audit_source.py --root . --output x64/validation/my_check/source-in
 
 ## 板端公共源码
 
-当前交付使用报告标定对应的 F6 原生采集程序，入口见 [原生采集构建](../tools/rv_capture/README.md)。离线验证覆盖 Native16 分片、网格／身份／告警校验、拒绝旧板端深度载荷、H 与原生 ToF 会话预设及安装回滚。旧 F1/F2、多模型切换和 NPU 一致性记录属于历史。真实设备需另行验证当前 H 启停、USB 修复、视频及配对，不因离线报告或历史报告通过而视为本次已实机验证。
+当前交付使用报告标定对应的 F6 原生采集程序，入口见 [原生采集构建](../tools/rv_capture/README.md)。离线验证覆盖 Native16 分片、网格／身份／告警校验、拒绝旧板端深度载荷、原生 ToF 会话预设及安装回滚。旧 F1/F2、多模型切换和 NPU 一致性记录属于历史。真实设备需另行验证当前上位机辅助推理启停、USB 修复、视频及配对，不因离线报告或历史报告通过而视为本次已实机验证。
 
 ## GUI 减载与实机延迟对照（2026-11-10）
 
-统一离线运行器可用 `--executable <绝对 EXE 路径>` 检查主工程的隔离构建，仍仅接受原有八组标志。Release 全八组和 Debug 相关四组分别保存报告；高 DPI 像素断言按抓图的 devicePixelRatio 换算物理像素，不改变产品镜像、旋转或渲染。
+统一离线运行器可用 `--executable <绝对 EXE 路径>` 检查主工程的隔离构建，支持原有八组标志。高 DPI 像素断言按抓图的 devicePixelRatio 换算物理像素。UI 专项同时验证后台 RGB 校正、取消后的新帧和 ToF 身份、深度扫描的视场准入以及色表与 Qt 转换的一致性。
 
-模型精度对照使用 `tools/verify_port.py`，候选和参考均指定各自的 ASCII 命名 `DctsInferenceWorker.exe` 及匹配运行包，覆盖 0°／180°、同帧身份、100 ms 边界、无效输入拒绝和停止重启，要求预测、H 深度和诊断字节一致。RGB 张量转换另检查正常／带行填充输入、180°图像及 ARGB32 来源。色表缓存对照原始 Qt 转换，遍历全部色相状态的取整边界，并检查百万组范围／像素组合及 NaN、无穷、零值和超范围黑色规则。
+当前 G 的数值对照使用 `tools/verify_port.py`，候选和参考均指定各自的 `DctsInferenceWorker.exe` 及同一模型与后端，覆盖 0°／180°、200 ms 配对预算（含 35 ms 时钟裕量）、无效输入拒绝和停止重启。米制深度、单目预测和诊断数组须逐字节一致。工具同时对当前候选构建检查 B 的重复配对、重新拟合、双向时间边界、测量身份及切换代次。`--rv-assist-path-test` 另对照 CHW 张量的原始转换，覆盖行填充、180°图像和 ARGB32 来源，并使用后台准备的张量格式验证父子进程传输。
 
-显式授权的 `--host-assist-live-validation` 可设置进程环境 `DCTS_LIVE_SECONDS=120`：先预热 10 秒，再各测两轮，每轮限制 30–300 秒；默认行为仍为原两轮各 30 秒。扩展测量按秒记录接收与实际绘制 FPS，按绘制帧汇总 RGB 准备、父进程校验、着色排队／计算、绘制及 `source_to_paint_ms`。后者从主机解码完成时间起算，不包含传输和摄像头曝光延迟。报告只保存计数、耗时、身份及参数，不保存真实图像或测量数组。
+显式授权的 `--host-assist-live-validation` 可设置进程环境 `DCTS_LIVE_SECONDS=120`：先预热 10 秒，再各测两轮，每轮限制 30–300 秒；默认行为仍为原两轮各 30 秒。扩展测量按秒记录接收与实际绘制 FPS，按绘制帧汇总 RGB 准备、父进程校验、着色排队／计算、绘制及 `source_to_paint_ms`。该时长的起点为主机完成解码，终点为上位机绘制。常规报告保存计数、耗时、身份及参数。
 
-本轮同一受信任设备、相同临时配置的基线及优化回测证据位于 `x64/validation/gui_optimization_20261110_01/`。真实 FPS 对照期间暂停「推理设备」测速和其他上位机实例；重测另记录相关进程的出现及退出，核查是否有并发测速。用户指出可能同时启动测速的一轮保留为疑似受干扰证据，排除在最终性能结论之外。每轮继续验证米制网格、实际推理后端、输入方向、原生捕获配对、复用标记、正常停止、停采后无晚到结果及板端长期文件不变。FPS 和延迟以各次实测报告为准。
+以下为 GitHub 提交 `d79d864` 所记录的 2026-11-10 H 方案实测。使用同一受信任设备和相同临时配置，证据目录为 `x64/validation/gui_optimization_20261110_01/`。真实 FPS 对照期间暂停「推理设备」测速和其他上位机实例；重测另记录相关进程的出现及退出，核查是否有并发测速。用户指出可能同时启动测速的一轮保留为疑似受干扰证据，排除在最终性能结论之外。每轮继续验证米制网格、实际推理后端、输入方向、原生捕获配对、复用标记、正常停止、停采后无晚到结果及板端长期文件不变。FPS 和延迟以各次实测报告为准。
 
 最终独占对照使用 `baseline-live-06-final-exclusive`（两轮各 30 秒）和 `optimized-live-05-palette-exclusive`（两轮各 120 秒），两个进程日志均确认没有其他上位机或设备测速。按实际绘制帧数及样本数加权汇总如下：
 
@@ -173,7 +178,7 @@ python tools/audit_source.py --root . --output x64/validation/my_check/source-in
 
 优化版两轮分别为 30.00、29.98 FPS。240 个约一秒窗口最低 28.97 FPS；补充的五秒滚动窗口最低 29.60 FPS，P5 为 29.83 FPS，显示在本次独占实测中持续接近视频源 30 FPS。滚动窗口相互重叠，仅描述运行稳定性，不作为独立统计试验。各轮 P95 单独保留，未对分位数作错误平均。汇总为该目录的 `performance-summary.json`。
 
-最终 Release 八组 1396 项、Debug 相关四组 632 项离线断言通过；两种构建均通过 22 用例／13 组有效深度、预测和诊断数组与基准逐字节对照，父子进程链路及输入张量校验通过。正常停止、重启、无晚到结果和板端长期文件不变均通过。已更新本地 Release／Debug 程序并保留旧二进制备份。
+该提交的 H 版 Release 八组 1396 项、Debug 相关四组 632 项离线断言通过。两种构建均通过 22 用例及 13 组有效深度、预测和诊断数组的逐字节对照。原报告还记录了正常停止、重启、晚到结果为零及板端长期文件一致。
 
 ## 当前 UniDepth 的 CPU／集显可行性实验
 

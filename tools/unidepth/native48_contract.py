@@ -1,4 +1,4 @@
-"""Native16/H synthetic packet fixtures; run tools/verify_port.py. No devices."""
+"""Native48/G synthetic packet fixtures; run tools/verify_port.py. No devices."""
 import hashlib
 import json
 import struct
@@ -7,8 +7,9 @@ import time
 
 import numpy as np
 
-VGA = 'unidepth_rgb672_vga_fp16_tof16'
-SIZES = {VGA: (672, 504, 640, 480)}
+MODEL = 'unidepth_rgb672_vga_fp16_tof48'
+GRAPH_SIZE = (672, 504, 640, 480)
+NATIVE_GRID = (48, 32)
 REASON_BYTES = 1536
 
 
@@ -35,8 +36,9 @@ def decode(data, depth_bytes):
     return packets
 
 
-def metadata(index, fov, rotation, experiment, cols, rows, model, profile, epoch):
-    width, height, _, _ = SIZES[model]
+def metadata(index, fov, rotation, profile, epoch):
+    width, height, _, _ = GRAPH_SIZE
+    cols, rows = NATIVE_GRID
     stamp = 1_000_000_000 + index * 67_000_000
     result = dict(source_protocol='HDA1', source_transport='rtsp_h265', model='Native',
         source_rgb_width=2304, source_rgb_height=1296, rgb_width=width, rgb_height=height,
@@ -44,18 +46,17 @@ def metadata(index, fov, rotation, experiment, cols, rows, model, profile, epoch
         host_decoded_monotonic_ns=time.monotonic_ns(), boot_id='12345678-1234-1234-1234-123456789abc',
         tof_sequence=index, tof_timestamp_ns=stamp, rgb_timestamp_ns=stamp-5_000_000,
         tof_reused=False, pair_delta_ms=5., pair_clock_uncertainty_ms=35.,
-        pair_clock_source='rtcp_prft_board_realtime_monotonic', source_candidate_mode=14,
+        pair_clock_source='rtcp_prft_board_realtime_monotonic', source_candidate_mode=24,
         source_engine='native-hd-capture-v1', generation_source='host_presentation_epoch', source_generation='a'*32,
         dtof_width=cols, dtof_height=rows, dtof_bytes=cols*rows*4,
         dtof_format='range_uq2_u16le_snr_u8_valid_u8', dtof_range_unit='0.25_mm',
         dtof_source='tmf8829_ipc_first_peak', dtof_coordinate='sensor_radial_native',
         dtof_fov_correction=fov, tof_warning_flags=0, rectify_map_sha256=profile['rectify_sha256'],
         assist_camera_profile=profile.get('camera_profile', 'standard'),
-        assist_input_rotation_degrees=rotation, assist_experiment=experiment, assist_diagnostic_capture=True)
+        assist_input_rotation_degrees=rotation, assist_experiment='G', assist_diagnostic_capture=True,
+        pairing_policy='bounded_software_time_pair_not_hardware_sync')
     if result['assist_camera_profile'] == 'wide':
         result.update(assist_output_policy='dtof_geometric_fov_v1', assist_tof_fov_correction=fov)
-    if experiment == 'H':
-        result['pairing_policy'] = 'latest_native_reuse_100ms_global_scale_v1'
     return result
 
 
@@ -73,7 +74,7 @@ def native_plane(root, cols, rows, fov, z=.6):
 
 
 def exchange(executable, root, runtime, model, cases, environment, override=True):
-    token = 'offline-native16-contract'
+    token = 'offline-native48-contract'
     command = [str(executable), '--rv-assist-worker', str(runtime), token]
     if override:
         command.append(model)
@@ -87,12 +88,12 @@ def exchange(executable, root, runtime, model, cases, environment, override=True
         child.kill()
         child.communicate()
         raise
-    _, _, width, height = SIZES[model]
+    _, _, width, height = GRAPH_SIZE
     return child.returncode, decode(stdout, width * height * 4), stderr.decode(errors='replace')
 
 
 def check_batch(executable, root, runtime, model, cases, environment, output):
-    _, _, width, height = SIZES[model]
+    _, _, width, height = GRAPH_SIZE
     depth_bytes = width * height * 4
     payload_bytes = depth_bytes + 2 * REASON_BYTES
     status, packets, stderr = exchange(executable, root, runtime, model, cases, environment)
@@ -123,19 +124,27 @@ def check_batch(executable, root, runtime, model, cases, environment, output):
         assert loading.get('kind') == 'plaintext-file' and loading.get('plaintext_file_used') is True, loading
     rows, fingerprints = [], {}
     for request, (case, (header, depth, diagnostic)) in enumerate(zip(cases, packets[1:]), 1):
-        assert header['request'] == request and header['epoch'] == case['epoch'] and header['token'] == 'offline-native16-contract'
+        assert header['request'] == request and header['epoch'] == case['epoch'] and header['token'] == 'offline-native48-contract'
         accepted = bool(depth)
         assert accepted == case.get('accepted', True), (case['name'], header.get('error'))
         result = dict(case=case['name'], passed=True, accepted=accepted)
         if accepted:
             m = header['metadata']
-            assert (m['width'], m['height']) == (width, height)
+            portrait = m.get('assist_output_grid') == 'tof_portrait_crop_v1'
+            assert (m['width'], m['height']) == ((480, 640) if portrait else (width, height))
+            if portrait:
+                assert m['assist_model_depth_size'] == [640, 480] and m['assist_model_crop_xywh'] == [140, 0, 360, 480]
+                assert np.allclose(m['depth_K'], [260*480/324*4/3]*2+[239.5, 319.5], rtol=0, atol=1e-9)
+                assert len(m['assist_model_monocular_sha256']) == 64
             z = np.frombuffer(depth, '<f4')
-            assert np.isfinite(z).all() and (z >= 0).all() and (z > 0).any()
+            assert np.isfinite(z).all() and (z >= 0).all()
             assert len(diagnostic) == payload_bytes
             mono = np.frombuffer(diagnostic[:depth_bytes], '<f4')
             assert np.isfinite(mono).all() and (mono > 0).all()
             assert m['assist_host_model'] == model and m['assist_graph_sha256'] == expected_graph
+            experiment = case['metadata']['assist_experiment']
+            revision = {'G': 'global_scale_fresh_rgb_portrait_v2', 'B': 'global_scale_reuse_latest_rgb_portrait_v1'}
+            assert m['assist_experiment'] == experiment and m['assist_fusion_revision'] == revision[experiment]
             if 'assist_execution_device' in m:
                 assert m['assist_execution_device']==backend
             assert m['assist_input_orientation_checked'] is True and m['assist_output_restored_to_calibrated_grid'] is True
@@ -144,19 +153,32 @@ def check_batch(executable, root, runtime, model, cases, environment, output):
                         'tof_reused', 'dtof_width', 'dtof_height', 'dtof_bytes'):
                 assert m.get(key) == case['metadata'].get(key), (case['name'], key)
             fit = m['assist_fusion']
-            n = 256
+            if fit.get('fusion_mode') == 'unavailable':
+                assert not z.any() and fit.get('scale') == 0 and fit.get('dtof_corrected') is False
+                assert fit.get('metric_depth_available') is False
+            else:
+                assert (z > 0).any()
+            columns, native_rows = NATIVE_GRID
+            n = columns*native_rows
             for key in ('used_native_indices', 'global_used_native_indices', 'local_used_native_indices'):
                 assert all(type(i) is int and 0 <= i < n for i in fit.get(key, []))
             if fit.get('dtof_corrected'):
                 assert fit.get('tof_total_zones') == n
-            assert m['assist_diagnostic_native_count'] == 256
+            assert m['assist_diagnostic_native_count'] == n
             reasons = np.frombuffer(diagnostic[depth_bytes:], np.uint8).reshape(2, REASON_BYTES)
-            assert not reasons[:, 256:].any()
+            assert not fit.get('local_used_native_indices') and not (reasons[1] == 9).any()
+            if case.get('held_scale'):
+                assert fit['fusion_mode'] == 'held_scale' and fit['scale_reference_frame_id'] == case['reference_frame']
             if case.get('uncorrected'):
                 assert fit.get('dtof_corrected') is False and not fit.get('used_native_indices')
-            fingerprints[case['name']] = dict(depth=digest(depth), diagnostic=digest(diagnostic), mono=digest(diagnostic[:depth_bytes]))
+            if case.get('corrected'):
+                assert fit.get('dtof_corrected') is True and fit['used_native_indices'], case['name']
+            fingerprints[case['name']] = dict(depth=digest(depth), diagnostic=digest(diagnostic), mono=digest(diagnostic[:depth_bytes]),
+                model_mono=m.get('assist_model_monocular_sha256', digest(diagnostic[:depth_bytes])))
             result.update(fusion=fit.get('fusion_mode'), adopted=len(fit.get('used_native_indices', [])),
-                          native_measurements=n if m['dtof_present'] else 0, **fingerprints[case['name']])
+                          applied_scale=fit.get('scale'), measured_scale=fit.get('measured_scale'),
+                          native_measurements=n if m['dtof_present'] else 0, output_wh=[m['width'],m['height']],
+                          output_grid=m.get('assist_output_grid'), **fingerprints[case['name']])
         else:
             assert header.get('error') and not diagnostic
             result['error'] = header['error']

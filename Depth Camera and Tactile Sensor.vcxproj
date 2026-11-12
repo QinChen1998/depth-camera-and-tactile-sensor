@@ -187,13 +187,19 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="tools\rv_capture\build.sh" />
+    <None Include="tools\rv_capture\pack_litesr.py" />
+    <None Include="tools\rv_capture\payload\model-switch.sh" />
+    <ClInclude Include="tools\litesr_board\Contour.h" />
+    <None Include="tools\litesr_board\ContourGrid.inc" />
   </ItemGroup>
   <ItemGroup>
     <None Include="tools\rv_capture\StatusPolicy.h" />
     <None Include="tools\rv_capture\common\camera_rtsp_monitor.cpp" />
     <None Include="tools\rv_capture\common\HdVideo.h" />
     <None Include="tools\rv_capture\common\NativePacket.h" />
+    <None Include="tools\rv_capture\common\NativeHoleFill.h" />
     <None Include="tools\rv_capture\native\runtime\Gui.inc" />
+    <None Include="tools\rv_capture\native\runtime\HoleFillTests.cpp" />
     <None Include="tools\rv_capture\native\runtime\main.cpp" />
     <None Include="tools\rv_capture\common\SpiNative48.h" />
   </ItemGroup>
