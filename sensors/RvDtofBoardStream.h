@@ -38,7 +38,7 @@ inline bool dtofBoardReceipt(const QJsonObject& m,int mode,const QString& token,
 
 // Native measurements, optional hole-fill estimates and encoder telemetry.
 // One asynchronous decode is pending at a time.
-class RvDtofBoardStream final:public QObject {
+class DCTS_DEPTH_INTERNAL RvDtofBoardStream final:public QObject {
     Q_DECLARE_TR_FUNCTIONS(RvDtofBoardStream)
     friend struct RvDtofBoardStreamTestAccess;
     struct Identities {

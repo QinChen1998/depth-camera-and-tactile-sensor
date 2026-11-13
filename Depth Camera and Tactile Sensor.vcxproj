@@ -27,7 +27,8 @@
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props"/>
   <PropertyGroup>
     <OutDir>$(MSBuildProjectDirectory)\x64\$(Configuration)\</OutDir>
-    <IntDir>$(MSBuildProjectDirectory)\x64\obj_$(Configuration)\</IntDir>
+    <DctsIntermediateRoot Condition="'$(DctsIntermediateRoot)' == ''">$(MSBuildProjectDirectory)\x64\obj_$(Configuration)</DctsIntermediateRoot>
+    <IntDir>$(DctsIntermediateRoot)\desktop\</IntDir>
     <TargetName>触想工作台</TargetName>
   </PropertyGroup>
   <Import Project="$(QtMsBuild)\qt_defaults.props"/>
@@ -47,7 +48,7 @@
       <WarningLevel>Level3</WarningLevel>
       <AdditionalOptions>/utf-8 /Zc:__cplusplus %(AdditionalOptions)</AdditionalOptions>
       <AdditionalIncludeDirectories>$(ProjectDir)third_party\ffmpeg_7_1_3;$(ProjectDir)dependency_sources\openvino\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>NOMINMAX;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>NOMINMAX;DCTS_DEPTH_SDK_LINK;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
@@ -74,9 +75,7 @@
   <ItemGroup>
     <ClCompile Include="main.cpp"/>
     <ClCompile Include="SensorMainWindow.cpp"/>
-    <ClCompile Include="RuntimeDiscovery.cpp">
-      <PreprocessorDefinitions Condition="'$(DctsUseCudaEp)' != 'true' or '$(DctsInstallerBuild)' == 'true'">DCTS_TENSORRT_RTX;%(PreprocessorDefinitions)</PreprocessorDefinitions>
-    </ClCompile>
+    <ClInclude Include="sdk\DepthSdkQt.h"/>
     <ClCompile Include="tests\PortSmokeTests.cpp"/>
     <ClCompile Include="UiStyle.cpp"/>
     <ClCompile Include="RenderingSettings.cpp"/>
@@ -85,27 +84,11 @@
     <ClCompile Include="sensors\DepthMapWidget.cpp"/>
     <ClCompile Include="sensors\ImageDisplaySettings.cpp"/>
     <ClCompile Include="sensors\RtspCameraPage.cpp"/>
-    <ClCompile Include="sensors\RvAssistDepth.cpp">
-      <PreprocessorDefinitions Condition="'$(DctsUseCudaEp)' != 'true' or '$(DctsInstallerBuild)' == 'true'">DCTS_TENSORRT_RTX;%(PreprocessorDefinitions)</PreprocessorDefinitions>
-    </ClCompile>
-    <ClCompile Include="sensors\RvAssistFusion.cpp"/>
-    <ClCompile Include="sensors\RvInferenceRuntime.cpp"/>
-    <ClCompile Include="sensors\RvInferenceSettings.cpp"/>
-    <ClInclude Include="sensors\RvInferenceRuntime.h"/>
-    <QtMoc Include="sensors\RvInferenceSettings.h"/>
     <ClInclude Include="tools\model_protection\OpenVinoApi.h"/>
-    <ClCompile Include="sensors\RvDepthCoverage.cpp"/>
-    <ClCompile Include="sensors\RvDepthDiagnostic.cpp"/>
     <ClCompile Include="sensors\RvDepthView.cpp"/>
     <ClCompile Include="sensors\RvDeviceManagerDialog.cpp"/>
-    <ClCompile Include="sensors\RvDeviceStore.cpp"/>
-    <ClCompile Include="sensors\RvUsbEnrollment.cpp"/>
+    <ClCompile Include="sensors\RvUsbEnrollmentUi.cpp"/>
     <ClCompile Include="sensors\RvImportDiagnostics.cpp"/>
-    <ClCompile Include="sensors\RvDtofBoardStream.cpp"/>
-    <ClCompile Include="sensors\RvDtofCandidates.cpp"/>
-    <ClCompile Include="sensors\RvSessionController.cpp"/>
-    <ClCompile Include="sensors\RvTunerController.cpp"/>
-    <ClCompile Include="sensors\RvTunerProtocol.cpp"/>
     <ClCompile Include="sensors\RvTunerWidget.cpp"/>
     <ClCompile Include="sensors\TactileFrame.cpp"/>
     <ClCompile Include="sensors\TactileSceneAdapter.cpp"/>
@@ -121,7 +104,6 @@
     <ClCompile Include="tests\TactileVisualizationTests.cpp"/>
     <QtMoc Include="LanguageManager.h"/>
     <QtMoc Include="RenderingSettings.h"/>
-    <ClInclude Include="RuntimeDiscovery.h"/>
     <ClInclude Include="tools\model_protection\ModelProtectionApi.h"/>
     <ClInclude Include="RvControlProtocol.h"/>
     <QtMoc Include="SensorMainWindow.h"/>
@@ -136,26 +118,16 @@
     <ClInclude Include="sensors\ImagePresentation.h"/>
     <ClInclude Include="sensors\LatestSensorFrameBuffer.h"/>
     <QtMoc Include="sensors\RtspCameraPage.h"/>
-    <QtMoc Include="sensors\RvAssistDepth.h"/>
-    <ClInclude Include="sensors\RvAssistFusion.h"/>
     <ClInclude Include="sensors\RvCameraStream.h"/>
     <ClInclude Include="sensors\RvCameraView.h"/>
-    <ClInclude Include="sensors\RvDepthCoverage.h"/>
-    <ClInclude Include="sensors\RvDepthDiagnostic.h"/>
     <ClInclude Include="sensors\RvDepthView.h"/>
     <QtMoc Include="sensors\RvDeviceManagerDialog.h"/>
-    <ClInclude Include="sensors\RvDeviceStore.h"/>
     <ClInclude Include="sensors\RvCalibration.h" />
     <ClInclude Include="sensors\RvUsbEnrollment.h"/>
     <ClInclude Include="sensors\RvImportDiagnostics.h"/>
-    <ClInclude Include="sensors\RvDtofBoardStream.h"/>
-    <ClInclude Include="sensors\RvDtofCandidates.h"/>
     <ClInclude Include="sensors\RvHdVideoStream.h"/>
     <ClInclude Include="sensors\RvPhotonFrame.h"/>
-    <QtMoc Include="sensors\RvSessionController.h"/>
     <ClInclude Include="sensors\RvTofFrame.h"/>
-    <QtMoc Include="sensors\RvTunerController.h"/>
-    <ClInclude Include="sensors\RvTunerProtocol.h"/>
     <QtMoc Include="sensors\RvTunerWidget.h"/>
     <ClInclude Include="sensors\TactileFrame.h"/>
     <ClInclude Include="tests\TactileTestFixtures.h"/>
@@ -168,17 +140,22 @@
     <ClInclude Include="tests\RvAssistRecoveryTests.h"/>
     <ResourceCompile Include="SensorApp.rc"/>
     <QtRcc Include="SensorResources.qrc"/>
-    <QtRcc Include="Component_depth.qrc"/>
     <QtRcc Include="Component_tactile.qrc"/>
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="DctsDepthSdk.vcxproj">
+      <Project>{DB83F39C-8A21-4BAC-9D5A-350B160C7D47}</Project>
+    </ProjectReference>
+    <ProjectReference Include="DctsInferenceWorker.vcxproj">
+      <Project>{1EB30A0B-3083-420A-857A-AD86DAA394DA}</Project>
+      <LinkLibraryDependencies>false</LinkLibraryDependencies>
+    </ProjectReference>
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets"/>
   <Import Project="$(QtMsBuild)\qt.targets"/>
   <PropertyGroup>
     <NativeWorkersBuild Condition="'$(NativeWorkersBuild)' == ''">true</NativeWorkersBuild>
   </PropertyGroup>
-  <Target Name="CopyInferenceWorker" AfterTargets="Build" Condition="'$(DctsUseCudaEp)' != 'true' or '$(DctsInstallerBuild)' == 'true'">
-    <Copy SourceFiles="$(TargetPath)" DestinationFiles="$(TargetDir)DctsInferenceWorker.exe" SkipUnchangedFiles="true"/>
-  </Target>
   <Target Name="BuildSensorRvWorker" BeforeTargets="PrepareForBuild" Condition="'$(NativeWorkersBuild)' == 'true' and '$(DesignTimeBuild)' != 'true'">
     <Exec Command="&quot;$(MSBuildProjectDirectory)/tools/build_rv_worker.cmd&quot; &quot;$(Configuration)&quot; &quot;$(QtInstall)&quot; &quot;$(MSBuildBinPath)/MSBuild.exe&quot;"/>
   </Target>

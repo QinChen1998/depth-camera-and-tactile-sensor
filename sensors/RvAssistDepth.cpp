@@ -211,9 +211,9 @@ struct RvAssistWorkerPaths {
 std::shared_ptr<void> RvAssistDepth::prepareProbeWorker(QString &program,QString &runtime){
     auto paths=std::make_shared<RvAssistWorkerPaths>();
 #ifdef DCTS_TENSORRT_RTX
-    if(!paths->prepare(QCoreApplication::applicationDirPath(),RuntimeDiscovery::rvAssistRoot(),false))return {};
+    if(!paths->prepare(RuntimeDiscovery::runtimeDirectory(),RuntimeDiscovery::rvAssistRoot(),false))return {};
 #else
-    paths->program=QCoreApplication::applicationFilePath();paths->runtime=RuntimeDiscovery::rvAssistRoot();
+    paths->program=RuntimeDiscovery::inferenceWorker();paths->runtime=RuntimeDiscovery::rvAssistRoot();
 #endif
     program=paths->program;runtime=paths->runtime;return paths;
 }
@@ -588,9 +588,10 @@ AssistReader stdioAssistReader(){
 }
 }
 
-RvAssistDepth::RvAssistDepth(QObject *parent):QObject(parent),m_root(RuntimeDiscovery::rvAssistRoot()),
-    m_hostModel(QLatin1String(RvCameraView::UniDepthVgaNative48)) {
-    auto *settings=RvInferenceSettings::instance();
+RvAssistDepth::RvAssistDepth(QObject *parent,RvInferenceSettings *inference):QObject(parent),m_root(RuntimeDiscovery::rvAssistRoot()),
+    m_hostModel(QLatin1String(RvCameraView::UniDepthVgaNative48)),
+    m_inference(inference?inference:RvInferenceSettings::instance()) {
+    auto *settings=m_inference;
     m_backend=settings->selected();
     connect(settings,&RvInferenceSettings::selectionChanged,this,[this,settings]{
         const auto selected=settings->selected();
@@ -707,17 +708,17 @@ void RvAssistDepth::fail(const QString &reason, bool tryNextBackend)
     const bool integrity=reason.contains("fingerprint",Qt::CaseInsensitive)||reason.contains("protected",Qt::CaseInsensitive)
         ||reason.contains("AES-GCM",Qt::CaseInsensitive)||reason.contains("identity",Qt::CaseInsensitive)
         ||reason.contains("Cannot hash",Qt::CaseInsensitive);
-    if(tryNextBackend&&!integrity&&RvInferenceSettings::instance()->fallback(m_backend,reason))return;
+    if(tryNextBackend&&!integrity&&m_inference->fallback(m_backend,reason))return;
     m_failed=true;
     const QPointer<RvAssistDepth> alive(this);
     cancel(reason);
     if(alive)emit inferenceUnavailable(failureExplanation(reason),reason);
 }
 
-QString RvAssistDepth::preflightError(const QString &model)
+QString RvAssistDepth::preflightError(const QString &model,const RvInferenceSettings *inference)
 {
 #ifdef DCTS_TENSORRT_RTX
-    const auto *settings=RvInferenceSettings::instance();
+    const auto *settings=inference?inference:RvInferenceSettings::instance();
     if(settings->started()&&settings->selected().isEmpty())
         return settings->detecting()?tr("Detecting available inference devices..."):tr("No usable inference device was found. Open Inference Device in Settings to retry.");
     if(!settings->started()&&settings->selected()=="tensorrt"&&!hasNvidiaAdapter())return tr("No NVIDIA GPU was detected. Open Inference Device in Settings to select a CPU or compatible GPU.");
@@ -783,7 +784,7 @@ void RvAssistDepth::submitHd(const QImage &camera,const QJsonObject &source,quin
 
 void RvAssistDepth::startWorker(bool forceStaging) {
     if(m_destroying||!m_enabled||m_failed||m_pending.camera.isNull()||m_process.state()!=QProcess::NotRunning)return;
-    const auto *settings=RvInferenceSettings::instance();
+    const auto *settings=m_inference;
     if(settings->benchmarking())return;
     if(m_backend.isEmpty()){
         if(!settings->detecting())fail(tr("No usable inference device was found. Open Inference Device in Settings to retry."),false);
@@ -800,7 +801,7 @@ void RvAssistDepth::startWorker(bool forceStaging) {
     m_workerPaths.reset();
     auto paths=std::make_unique<RvAssistWorkerPaths>();
 #ifdef DCTS_TENSORRT_RTX
-    const auto appDirectory=QCoreApplication::applicationDirPath();
+    const auto appDirectory=RuntimeDiscovery::runtimeDirectory();
     if(!RvAssistWorkerPaths::readableFile(QDir(appDirectory).filePath("DctsInferenceWorker.exe"))) {
         fail(tr("The TensorRT-RTX worker executable is missing or unreadable in the installation folder."),false);
         return;
@@ -811,7 +812,7 @@ void RvAssistDepth::startWorker(bool forceStaging) {
     }
 #else
     Q_UNUSED(forceStaging);
-    paths->program=QCoreApplication::applicationFilePath();
+    paths->program=RuntimeDiscovery::inferenceWorker();
     paths->runtime=m_root;
 #endif
     m_process.setProcessEnvironment(environment);
@@ -919,7 +920,7 @@ bool RvAssistDepth::acceptResponse(const QJsonObject &response,const QByteArray 
         // Keep the original 1 s freshness rule for RTX. Compatibility workers
         // get a bounded budget from an optional benchmark or the default estimate.
         if(m_backend!="tensorrt"){
-            const auto measured=RvInferenceSettings::instance()->latencyMs(m_backend);
+            const auto measured=m_inference->latencyMs(m_backend);
             m_inferenceTimeoutMs=std::clamp(int(measured*6+2000),10000,120000);
             m_resultAgeLimitMs=std::clamp(int(measured*4+1000),5000,120000);
         }

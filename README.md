@@ -29,6 +29,7 @@ A 的离线源码、回放和 UniDepth 置信度实验封存在本地 `archives/
 |---|---|
 | 本地 AGENTS.md（不上传） | 新窗口阅读顺序、维护约束、原始权重和交付目录规则 |
 | [项目架构](docs/ARCHITECTURE.md) | 模块与进程边界、RGB/dToF 数据链路、目录、配置、构建和验证入口 |
+| [Windows x64 深度图 SDK](docs/DEPTH_SDK_WINDOWS.md) | SDK 构建、运行包、成像会话、帧接口和 USB 接入 |
 | [模型保护与安装包约定](docs/MODEL_PROTECTION.md) | 已确认的加密方案、实验实现、性能与一致性证据、未来安装包集成步骤 |
 | [模型权属及第三方材料](docs/OPEN_SOURCE_LICENSES.md) | 当前模型声明及 ORT、CUDA、Qt、FFmpeg、SSH 等依赖材料的位置 |
 | [Tiny NV12 移除与历史记录](docs/TINY_NV12_INTEGRATION.md) | 完整移除范围、旧设备准入、离线验证与历史归档 |

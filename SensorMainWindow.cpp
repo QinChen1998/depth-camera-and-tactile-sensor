@@ -1,4 +1,5 @@
 #include "SensorMainWindow.h"
+#include "sdk/DepthSdkQt.h"
 #include "LanguageManager.h"
 #include "RenderingSettings.h"
 #include "TactileDockWidget.h"
@@ -59,7 +60,7 @@ SensorMainWindow::SensorMainWindow(LanguageManager *language, QWidget *parent)
     setDockNestingEnabled(true);
     setDockOptions(AllowNestedDocks | AllowTabbedDocks | AnimatedDocks);
     auto *center=new QWidget(this);center->setMaximumSize(0,0);setCentralWidget(center);
-    m_session=new RvSessionController(this);
+    m_session=DepthSdkQt::attach(this);
     connect(m_session,&RvSessionController::hostInferenceUnavailable,this,[this](const QString &reason,const QString &detail){
         if(m_closing||m_inferenceWarning)return;
         auto *dialog=new QMessageBox(QMessageBox::Warning,tr("Host-assisted inference unavailable"),reason,QMessageBox::Ok,this);
@@ -215,7 +216,7 @@ SensorMainWindow::~SensorMainWindow()
     // Destroy subscribers while the session is still alive.
     for(auto *dock:m_docks)delete dock;
     if(m_devices)delete m_devices;
-    delete m_session;
+    // The SDK owner closes the shared session during QObject child cleanup.
 }
 
 void SensorMainWindow::updateCameraVisibility()

@@ -8,14 +8,14 @@ import re
 import xml.etree.ElementTree as ET
 from urllib.parse import unquote
 
-EXTENSIONS = {'.cpp', '.h', '.inc', '.qml', '.py', '.ps1', '.sh', '.awk', '.cmd'}
-ROOTS = ('sensors', 'tests', 'qml', 'tools')
+EXTENSIONS = {'.c', '.cpp', '.h', '.inc', '.qml', '.py', '.ps1', '.sh', '.awk', '.cmd'}
+ROOTS = ('sensors', 'sdk', 'tests', 'qml', 'tools')
 C_TOKEN = re.compile(r'R"([^ ()\\\t\r\n]{0,16})\([\s\S]*?\)\1"|"(?:\\[\s\S]|[^"\\])*"|\'(?:\\[\s\S]|[^\'\\])*\'|//[^\n]*|/\*[\s\S]*?\*/')
 
 
 def sloc(path):
     text = path.read_text(encoding='utf-8-sig')
-    if path.suffix in {'.cpp', '.h', '.inc', '.qml'}:
+    if path.suffix in {'.c', '.cpp', '.h', '.inc', '.qml'}:
         text = C_TOKEN.sub(lambda m: '\n' * m[0].count('\n') if m[0].startswith(('//', '/*')) else m[0], text)
         return sum(bool(line.strip()) for line in text.splitlines())
     if path.suffix == '.ps1':

@@ -97,7 +97,7 @@ void RvInferenceSettings::setSelected(const QString &id){
 }
 bool RvInferenceSettings::choose(const QString &id,bool remember){
     for(const auto &value:m_available){const auto row=value.toObject();if(row["id"]==id){
-        if(remember){m_preference=row["key"].toString();QSettings().setValue("inference/preferredDevice",m_preference);}
+        if(remember){m_preference=row["key"].toString();RuntimeDiscovery::depthSettings().setValue("inference/preferredDevice",m_preference);}
         setSelected(id);emit changed();return true;
     }}return false;
 }
@@ -115,13 +115,13 @@ void RvInferenceSettings::startDetection(bool benchmark)
     const bool firstDetection=!m_started;
     m_started=true;m_scanning=true;m_enumerating=true;m_benchmarkRequested=benchmark;
     m_index=-1;m_benchmarkProbes=0;m_rejected={};m_candidates={};m_benchmarked={};
-    m_preference=QSettings().value("inference/preferredDevice").toString();
+    m_preference=RuntimeDiscovery::depthSettings().value("inference/preferredDevice").toString();
     if(firstDetection)emit selectionChanged();
     if(benchmark)emit benchmarkingChanged(true);
     m_status=tr("Detecting inference devices...");emit changed();
     if(!m_work.isValid()){complete(tr("Cannot create the inference test directory."));return;}
     m_report=m_work.filePath("devices.json");QFile::remove(m_report);
-    const auto program=QCoreApplication::applicationFilePath();
+    const auto program=RuntimeDiscovery::inferenceWorker();
     m_process.setProcessEnvironment(inferenceProcessEnvironment(program,RuntimeDiscovery::rvAssistRoot()));
     m_process.setProgram(program);
     m_process.setArguments({"--inference-enumerate",m_report});

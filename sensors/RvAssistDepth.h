@@ -1,4 +1,5 @@
 #pragma once
+#include "../sdk/DepthSdkExports.h"
 #include "RvTofFrame.h"
 #include <QtCore/QObject>
 #include <QtCore/QProcess>
@@ -7,14 +8,16 @@
 #include <QtGui/QImage>
 #include <memory>
 class QElapsedTimer;
+class RvInferenceSettings;
 struct RvAssistWorkerPaths;
+DCTS_DEPTH_INTERNAL int runRvAssistDepthTests(const QString &reportPath);
 
 // Optional native computation process. Receives paired snapshots from the one
 // RV session; it never opens a camera, connects to the board or controls motion.
-class RvAssistDepth final : public QObject {
+class DCTS_DEPTH_INTERNAL RvAssistDepth final : public QObject {
     Q_OBJECT
 public:
-    explicit RvAssistDepth(QObject *parent=nullptr);
+    explicit RvAssistDepth(QObject *parent=nullptr,RvInferenceSettings *inference=nullptr);
     ~RvAssistDepth() override;
     void setEnabled(bool enabled);
     void cancel(const QString &reason);
@@ -28,7 +31,7 @@ public:
     static bool isUniDepth(const QString &model);
     // File preflight only; runtime identity and GPU checks stay in the worker.
     static bool hostModelAvailable(const QString &model);
-    static QString preflightError(const QString &model);
+    static QString preflightError(const QString &model,const RvInferenceSettings *inference=nullptr);
     static std::shared_ptr<void> prepareProbeWorker(QString &program,QString &runtime);
     int inputRotationDegrees() const {return m_inputRotation;}
     bool enabled() const {return m_enabled;}
@@ -41,7 +44,9 @@ signals:
     void statusChanged(const QString &status);
     void frameRejected(const QJsonObject &metadata,const QString &reason);
 private:
+#ifdef DCTS_DEPTH_SDK_BUILD
     friend int runRvAssistDepthTests(const QString &reportPath);
+#endif
     struct Input {
         QImage camera;
         RvTofFrame tof;
@@ -62,6 +67,7 @@ private:
     QString m_backend;
     int m_inferenceTimeoutMs=1500,m_resultAgeLimitMs=1000;
     const QString m_hostModel;
+    RvInferenceSettings *m_inference;
     std::unique_ptr<RvAssistWorkerPaths> m_workerPaths;
     QProcess m_process;
     QTimer m_timeout;
@@ -74,5 +80,5 @@ private:
     int m_inputRotation=180; // Current RV camera mounting; independent of display rotation.
 };
 
-int runRvAssistWorker(const QString &runtimeRoot,const QString &token,const QString &hostModel=QString());
-int runRvInferenceProbe(const QString &backend,const QString &reportPath);
+DCTS_DEPTH_INTERNAL int runRvAssistWorker(const QString &runtimeRoot,const QString &token,const QString &hostModel=QString());
+DCTS_DEPTH_INTERNAL int runRvInferenceProbe(const QString &backend,const QString &reportPath);

@@ -1,4 +1,6 @@
 #pragma once
+#include <QCoreApplication>
+#include <QRegularExpression>
 
 #include <QString>
 
@@ -20,5 +22,14 @@ QWidget *numberField(QAbstractSpinBox *editor);
 void setUnit(QAbstractSpinBox *editor, const QString &unit);
 QWidget *formField(QWidget *editor);
 void card(QWidget *widget);
-QString depthErrorText(QString detail);
+inline QString depthErrorText(QString detail)
+{
+    static const QRegularExpression hostModel(
+        R"([a-z0-9_.-]*unidepth[a-z0-9_.-]*(?:[ \t]+model\b)?)", QRegularExpression::CaseInsensitiveOption);
+    static const QRegularExpression boardModel(
+        R"([a-z0-9_.-]*litesr[a-z0-9_.-]*(?:[ \t]+model\b)?)", QRegularExpression::CaseInsensitiveOption);
+    detail.replace(hostModel, QCoreApplication::translate("UiStyle", "host-assisted inference model"));
+    detail.replace(boardModel, QCoreApplication::translate("UiStyle", "on-board inference model"));
+    return detail;
+}
 }

@@ -1,4 +1,5 @@
 #pragma once
+#include "../sdk/DepthSdkExports.h"
 #include "RvTofFrame.h"
 #include "../tools/rv_capture/Contract.h"
 
@@ -10,6 +11,6 @@ inline bool isNativeDepth(int mode){return mode==Native48||mode==Native48HighAcc
 inline bool supports(int mode){return RvCaptureContract::supports(mode);}
 struct Settings {};
 inline Settings defaults(int =NativeHd){return {};}
-QString name(int mode);
-int modeForScheme(const QString &scheme);
+DCTS_DEPTH_INTERNAL QString name(int mode);
+DCTS_DEPTH_INTERNAL int modeForScheme(const QString &scheme);
 }

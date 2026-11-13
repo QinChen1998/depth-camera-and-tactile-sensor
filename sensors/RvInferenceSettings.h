@@ -1,4 +1,5 @@
 #pragma once
+#include "../sdk/DepthSdkExports.h"
 #include <QObject>
 #include <QJsonArray>
 #include <QJsonObject>
@@ -9,9 +10,10 @@
 class QWidget;
 class QDialog;
 class SensorMainWindow;
+DCTS_DEPTH_INTERNAL int runRvInferenceDiscoveryTest(const QString &reportPath);
 
 // Startup detects candidates. Model benchmarks run only on an explicit request.
-class RvInferenceSettings final:public QObject {
+class DCTS_DEPTH_INTERNAL RvInferenceSettings final:public QObject {
     Q_OBJECT
 public:
     static RvInferenceSettings *instance();
@@ -37,7 +39,9 @@ signals:
     void benchmarkingChanged(bool active);
     void finished();
 private:
+#ifdef DCTS_DEPTH_SDK_BUILD
     friend int runRvInferenceDiscoveryTest(const QString &reportPath);
+#endif
     friend int runUsbEnrollmentLiveValidation(SensorMainWindow &,const QString &);
     void startDetection(bool benchmark);
     void startBenchmark();
@@ -56,5 +60,4 @@ private:
     bool m_started=false,m_scanning=false,m_enumerating=false,m_timedOut=false,m_benchmarkRequested=false;
 };
 
-int runRvInferenceDiscoveryTest(const QString &reportPath);
-int runRvInferenceUiTest(QWidget *window,const QString &reportPath);
+DCTS_DEPTH_INTERNAL int runRvInferenceUiTest(QWidget *window,const QString &reportPath);

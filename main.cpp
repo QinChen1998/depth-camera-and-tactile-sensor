@@ -97,7 +97,6 @@ int main(int argc,char **argv)
         QCoreApplication app(argc,argv);
         const auto args=app.arguments();
         if(args.size()!=3||qEnvironmentVariable("RV_TEST_OFFLINE_ONLY")!="1")return 3;
-        extern int runRvAssistDepthTests(const QString &reportPath);
         return runRvAssistDepthTests(args[2]);
     }
     if(argc>1&&std::strcmp(argv[1],"--rv-assist-worker")==0){

@@ -5,6 +5,7 @@
 #include "RvCameraStream.h"
 #include "RvHdVideoStream.h"
 #include "RvAssistDepth.h"
+#include "RvInferenceSettings.h"
 #include "RvAssistFusion.h"
 #include "RvCameraView.h"
 #include "RvDtofBoardStream.h"
@@ -379,8 +380,9 @@ private:
     std::thread worker;
 };
 
-RvSessionController::RvSessionController(QObject *parent,const QString &deviceStorePath)
+RvSessionController::RvSessionController(QObject *parent,const QString &deviceStorePath,RvInferenceSettings *inference)
     : QObject(parent)
+    , m_inference(inference?inference:RvInferenceSettings::instance())
     , m_previewControl(new QProcess(this))
     , m_statusNetwork(new QNetworkAccessManager(this))
 {
@@ -390,7 +392,7 @@ RvSessionController::RvSessionController(QObject *parent,const QString &deviceSt
     m_deviceStorePath=deviceStorePath;
     try { RvDeviceStore store(m_deviceStorePath);m_device=store.active(); }
     catch(const std::exception &e){m_deviceError=QString::fromUtf8(e.what());}
-    QSettings settings;
+    auto settings=RuntimeDiscovery::depthSettings();
     m_streamUrl = m_device.streamUrl();
     // Retired persisted model names never re-enable old inference.
     m_config.model = QStringLiteral("Native");
@@ -471,7 +473,7 @@ RvSessionController::RvSessionController(QObject *parent,const QString &deviceSt
             if(m_device.temporaryFovCalibration&&!RvCaptureCalibration::valid(status["tof_calibration"].toObject(),m_dtofToken,m_device.fov(),true)){
                 failPreviewControl(tr("Candidate receipt mismatch"));return;
             }
-            QSettings().setValue("rvDevices/lastConnected/"+m_device.fingerprint(),QDateTime::currentDateTimeUtc().toString(Qt::ISODate));
+            RuntimeDiscovery::depthSettings().setValue("rvDevices/lastConnected/"+m_device.fingerprint(),QDateTime::currentDateTimeUtc().toString(Qt::ISODate));
             m_dtofReceipt=status;m_controlPending=false;
             m_captureOwner={{"owner_boot",status["boot_id"]},{"owner_generation",m_dtofToken}};
             if(!m_userStopped){m_waitingForSelectedFrame=true;m_switchFrameTimeout.start();updateState();if(!m_userStopped)beginConnection(false);}
@@ -515,12 +517,12 @@ RvSessionController::RvSessionController(QObject *parent,const QString &deviceSt
         m_confirmedBoot=status["boot_id"].toString();
         m_captureOwner={{"owner_boot",m_confirmedBoot},{"owner_generation",QString::number(generation)}};
         m_expectedCameraStatus = cameraOnly ? status : QJsonObject();
-        QSettings().setValue("rvDevices/lastConnected/"+m_device.fingerprint(),QDateTime::currentDateTimeUtc().toString(Qt::ISODate));
+        RuntimeDiscovery::depthSettings().setValue("rvDevices/lastConnected/"+m_device.fingerprint(),QDateTime::currentDateTimeUtc().toString(Qt::ISODate));
         m_config = receipt;
         m_confirmedConfig = receipt;
         m_hasConfirmedConfig = true;
         m_streamUrl = m_device.streamUrl(cameraOnly);
-        QSettings settings;
+        auto settings=RuntimeDiscovery::depthSettings();
         settings.setValue("camera/managedWidth", width);
         settings.setValue("camera/managedModel", model);
         if (!m_userStopped) {
@@ -542,7 +544,7 @@ RvSessionController::RvSessionController(QObject *parent,const QString &deviceSt
         }
     });
 
-    m_assist=new RvAssistDepth(this);
+    m_assist=new RvAssistDepth(this,m_inference);
     connect(m_assist,&RvAssistDepth::inferenceUnavailable,this,&RvSessionController::hostInferenceUnavailable);
     m_assist->setInputRotationDegrees(effectiveHostInputRotation(m_device));
     m_assist->setEnabled(hostHdAssist());
@@ -735,6 +737,11 @@ bool RvSessionController::controlledSource() const
     return isControlledSource(QUrl(m_streamUrl.trimmed()),m_device.host);
 }
 
+bool RvSessionController::controlProcessActive() const
+{
+    return m_previewControl->state() != QProcess::NotRunning;
+}
+
 bool RvSessionController::validConfiguration(const Configuration &candidate)
 {
     return candidate.model == "Native"
@@ -784,15 +791,33 @@ void RvSessionController::reloadDeviceProfiles()
     if(m_tunerExclusive){setState(tr("dToF Parameter Tuning"),tr("Stop dToF tuning before selecting another device."));return;}
     stop();
     try {
-        RvDeviceStore store(m_deviceStorePath);m_device=store.active();m_deviceError.clear();
-        m_streamUrl=m_device.streamUrl(m_config.cameraWidth==2304&&m_dtofMode<0);
-        if(m_assist){m_assist->cancel(tr("Device changed"));m_assist->setInputRotationDegrees(effectiveHostInputRotation(m_device));}
-        m_hasConfirmedConfig=false;m_confirmedBoot.clear();m_deviceRevision.clear();m_dtofReceipt={};
-        m_captureOwner={};
-        setState(tr("Stopped"), m_device.id.isEmpty()
-            ? tr("Connect a device using USB one-click connection in Device Manager.")
-            : tr("Device selected; click Start when ready."));
-    }catch(const std::exception &e){m_deviceError=QString::fromUtf8(e.what());setState(tr("Error"),m_deviceError);}
+        applyDeviceProfile(RvDeviceStore(m_deviceStorePath).active());
+    }catch(const std::exception &e){m_deviceError=QString::fromUtf8(e.what());setState(tr("Error"),m_deviceError);
+        emit deviceChanged();emit configurationChanged();}
+}
+
+bool RvSessionController::selectDevice(const QString &id)
+{
+    if (m_destroying || !m_userStopped || busy()) return false;
+    for (const auto &profile : RvDeviceStore(m_deviceStorePath).profiles()) {
+        if (profile.id != id) continue;
+        stop();
+        applyDeviceProfile(profile);
+        return true;
+    }
+    return false;
+}
+
+void RvSessionController::applyDeviceProfile(const RvDeviceProfile &device)
+{
+    m_device=device;m_deviceError.clear();
+    m_streamUrl=m_device.streamUrl(m_config.cameraWidth==2304&&m_dtofMode<0);
+    if(m_assist){m_assist->cancel(tr("Device changed"));m_assist->setInputRotationDegrees(effectiveHostInputRotation(m_device));}
+    m_hasConfirmedConfig=false;m_confirmedBoot.clear();m_deviceRevision.clear();m_dtofReceipt={};
+    m_captureOwner={};
+    setState(tr("Stopped"), m_device.id.isEmpty()
+        ? tr("Connect a device using USB one-click connection in Device Manager.")
+        : tr("Device selected; click Start when ready."));
     emit deviceChanged();emit configurationChanged();
 }
 
@@ -804,7 +829,7 @@ int RvSessionController::effectiveHostInputRotation(const RvDeviceProfile &devic
     // Keep the former depth-panel choice until this device is saved in Device Manager.
     if(device.inputRotation<0)return device.inputRotation;
     bool valid=false;
-    const int legacy=QSettings().value(legacyHostInputRotationKey(device)).toInt(&valid);
+    const int legacy=RuntimeDiscovery::depthSettings().value(legacyHostInputRotationKey(device)).toInt(&valid);
     return valid&&(legacy==0||legacy==180)?legacy:device.inputRotation;
 }
 QImage RvSessionController::cameraInCalibrationFrame(const QImage &image) const {
@@ -814,7 +839,7 @@ int RvSessionController::assistInputRotationDegrees() const {return m_assist?m_a
 QString RvSessionController::assistHostModel() const {return m_assist?m_assist->hostModel():QStringLiteral("unidepth");}
 QString RvSessionController::hostInferencePreflightError() const
 {
-    return RvAssistDepth::preflightError(assistHostModel());
+    return RvAssistDepth::preflightError(assistHostModel(),m_inference);
 }
 void RvSessionController::setAssistDepthEnabled(bool enabled)
 {
@@ -877,14 +902,14 @@ void RvSessionController::selectImagingScheme(const QString& scheme,const RvDtof
         m_assist->setEnabled(false);
         m_dtofMode=boardMode;m_dtofOptions=nativeCaptureOptions(settings);m_dtofSettings=settings;m_dtofReceipt={};
         m_config=withCameraWidth(2304);m_streamUrl=m_device.streamUrl();
-        QSettings().setValue("depth/imagingScheme",scheme);emit dtofCandidateSelectionChanged();
+        RuntimeDiscovery::depthSettings().setValue("depth/imagingScheme",scheme);emit dtofCandidateSelectionChanged();
         if(!m_userStopped)submitConfiguration(m_config,true,true);
         else{emit configurationChanged();updateState();}
         return;
     }
     if(!RvAssistDepth::supportsHostModel(selected))return;
     if(!m_userStopped){
-        const auto problem=RvAssistDepth::preflightError(selected);
+        const auto problem=RvAssistDepth::preflightError(selected,m_inference);
         if(!problem.isEmpty()){emit hostInferenceUnavailable(problem,{});emit configurationChanged();return;}
     }
     if(!RvAssistDepth::hostModelAvailable(selected)){
@@ -901,7 +926,7 @@ void RvSessionController::selectImagingScheme(const QString& scheme,const RvDtof
         &&m_dtofOptions==options&&m_rtspStatusReady&&m_hdFrameClock.isValid()&&m_hdFrameClock.elapsed()<3000
         &&dtofBoardReceipt(m_dtofReceipt,m_dtofMode,m_dtofToken,m_dtofOptions);
     if(!m_userStopped){beginImagingSwitch(scheme,!keepCapture);if(!m_imagingSwitchActive||m_userStopped)return;}
-    QSettings().setValue("depth/imagingScheme",scheme);
+    RuntimeDiscovery::depthSettings().setValue("depth/imagingScheme",scheme);
     m_hostAssistSelected=true;
     if(keepCapture){
         // Renew the host inference state using the same capture generation.
@@ -946,7 +971,7 @@ void RvSessionController::beginImagingSwitch(const QString &scheme,bool boardRes
     const int hostMs=5500;
     const int fallback=scheme.startsWith("board_")?12000:hostMs+(boardRestart?9500:0);
     const QString key="depth/imagingSwitchMs/"+m_device.id+"/"+(boardRestart?"capture/":"host/")+scheme;
-    m_imagingSwitchEstimateMs=std::clamp(QSettings().value(key,fallback).toInt(),1000,60000);
+    m_imagingSwitchEstimateMs=std::clamp(RuntimeDiscovery::depthSettings().value(key,fallback).toInt(),1000,60000);
     m_imagingSwitchActive=true;m_imagingSwitchClock.restart();
     emit imagingSwitchStarted(scheme,m_imagingSwitchEstimateMs);
 }
@@ -960,7 +985,7 @@ void RvSessionController::finishImagingSwitch()
         {"board_restart",m_imagingSwitchBoardRestart},{"capture_generation",m_dtofToken},{"boot_id",m_dtofReceipt["boot_id"]}};
     if(elapsed>=100&&elapsed<=60000){
         const QString key="depth/imagingSwitchMs/"+m_device.id+"/"+(m_imagingSwitchBoardRestart?"capture/":"host/")+scheme;
-        QSettings settings;const int prior=settings.value(key,int(elapsed)).toInt();
+        auto settings=RuntimeDiscovery::depthSettings();const int prior=settings.value(key,int(elapsed)).toInt();
         settings.setValue(key,std::clamp(int(.65*prior+.35*elapsed),1000,60000));
     }
     emit imagingSwitchFinished(scheme,elapsed);
@@ -1869,6 +1894,8 @@ void RvSessionController::presentHostHdVideo()
     setProperty("rvSourceWidth",2304);setProperty("rvSourceHeight",1296);setProperty("rvDecodedSequence",s.sequence);
     setProperty("rvEncodedSequence",m_lastEncodedFrame);setProperty("rvPresentedFrames",property("rvPresentedFrames").toULongLong()+1);
     const auto epoch=m_presentationEpoch;emit cameraFrameReady(s.image);
+    if(m_userStopped||epoch!=m_presentationEpoch)return;
+    emit videoFrameStamped(s.image, sourceSequence, s.receivedNs, m_dtofToken);
     if(m_userStopped||epoch!=m_presentationEpoch)return;
     if(!hostHdAssist()||!assistDepthEnabled()){
         if(!m_waitingForSelectedFrame)

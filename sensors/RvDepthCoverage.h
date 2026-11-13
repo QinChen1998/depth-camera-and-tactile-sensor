@@ -1,4 +1,5 @@
 #pragma once
+#include "../sdk/DepthSdkExports.h"
 #include <QtCore/QByteArray>
 #include <QtCore/QJsonObject>
 #include <QtCore/QRect>
@@ -14,6 +15,6 @@ struct DepthField {
 // Color range, native validity and selected correction points do not define it.
 // Decode metric values and derive the viewport in a single scan.
 // Native depth and other finite arrays can be valid without a host field.
-bool decodeDepth(const QByteArray &depth,const QJsonObject &metadata,
+DCTS_DEPTH_INTERNAL bool decodeDepth(const QByteArray &depth,const QJsonObject &metadata,
                  std::vector<float> &values,DepthField &field);
 }

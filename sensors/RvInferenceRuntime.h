@@ -1,4 +1,5 @@
 #pragma once
+#include "../sdk/DepthSdkExports.h"
 #include <QByteArray>
 #include <QJsonArray>
 #include <QJsonObject>
@@ -8,16 +9,16 @@
 
 namespace RvInferenceRuntime {
 inline constexpr auto Int8Sha="7dc50150c210b75e72fac35b45967ef874d85e9a883040223dbd5ebd4e01d63d";
-bool validBackend(const QString &id);
+DCTS_DEPTH_INTERNAL bool validBackend(const QString &id);
 bool isOpenVino(const QString &id);
 QString provider(const QString &id);
-QString backendName(const QString &id);
+DCTS_DEPTH_INTERNAL QString backendName(const QString &id);
 QJsonObject identity(const QString &id);
-bool validGraphMetadata(const QJsonObject &metadata);
+DCTS_DEPTH_INTERNAL bool validGraphMetadata(const QJsonObject &metadata);
 QByteArray fileSha256(const QString &path);
 QJsonObject verifyCompatibleRuntime();
 void checkTensorRtCudaDevice();
-int writeEnumeration(const QString &reportPath);
+DCTS_DEPTH_INTERNAL int writeEnumeration(const QString &reportPath);
 }
 
 class RvOpenVinoModel {

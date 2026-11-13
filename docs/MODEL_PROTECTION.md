@@ -134,7 +134,7 @@ Release/Debug 各通过 28 个合成场景，其中 19 份有效深度、单目�
 ./tools/installer/prepare-sandbox.ps1 -BuildDirectory (Join-Path $PWD 'x64/validation/installer_release')
 ```
 
-复用已暂存载荷时，构建脚本校验成像菜单及两个桌面程序的 SHA256。旧载荷需从当前源码重新暂存。
+复用已暂存载荷时，构建脚本校验成像菜单、上位机、深度 SDK DLL 及独立推理 worker 的 SHA256。旧载荷需从当前源码重新暂存。
 
 安装程序命名为 `触想工作台-内测版-v<版本>-x64.exe`，并与 SHA256 校验文件一同保存在构建目录的 `delivery/`。只从该目录选取交付文件。`private_build/` 是内部构建目录，包含明文副本、当次生成的密钥材料和中间产物。安装版固定要求保护清单，安装后的用户配置位于 `%LOCALAPPDATA%/DepthCameraAndTactileSensor/config`。普通开发版继续读本项目独立配置和明文模型包。
 

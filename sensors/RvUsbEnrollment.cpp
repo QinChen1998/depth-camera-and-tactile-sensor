@@ -1,15 +1,11 @@
 #include "RvUsbEnrollment.h"
-#include "RvImportDiagnostics.h"
 #include "RvInferenceSettings.h"
 #include <QtCore/QJsonArray>
-#include <QtCore/QTemporaryDir>
 #include <QtCore/QDateTime>
 #include <QtCore/QFile>
-#include "RvDeviceManagerDialog.h"
 #include "RvSessionController.h"
 #include "RvTunerController.h"
 #include "../RuntimeDiscovery.h"
-#include "../SensorMainWindow.h"
 
 #include <QtCore/QCoreApplication>
 #include <QtCore/QDir>
@@ -21,10 +17,6 @@
 #include <QtCore/QStandardPaths>
 #include <QtCore/QSettings>
 #include <QtCore/QTimer>
-#include <QtWidgets/QApplication>
-#include <QtWidgets/QMainWindow>
-#include <QtWidgets/QMessageBox>
-#include <QtWidgets/QStatusBar>
 #include <functional>
 #include <optional>
 #include <stdexcept>
@@ -127,7 +119,7 @@ QString encodedPowerShell(const QString &script)
 
 QString findAdb()
 {
-    const auto installed = QDir(QCoreApplication::applicationDirPath()).filePath("platform-tools/adb.exe");
+    const auto installed = QDir(RuntimeDiscovery::runtimeDirectory()).filePath("platform-tools/adb.exe");
     return QFileInfo::exists(installed) ? installed : QStandardPaths::findExecutable("adb.exe");
 }
 
@@ -322,15 +314,16 @@ ip -4 addr show dev usb0 | grep -q 'inet 172\.32\.0\.93/16 '
 class RvUsbEnrollment final : public QObject {
     Q_DECLARE_TR_FUNCTIONS(RvUsbEnrollment)
 public:
-    RvUsbEnrollment(RvSessionController *session, SensorMainWindow *window)
-        : QObject(window), m_session(session), m_window(window), m_adb(findAdb())
+    RvUsbEnrollment(RvSessionController *session, QObject *owner, RvUsbEnrollmentHooks hooks, bool watch)
+        : QObject(owner), m_session(session), m_hooks(std::move(hooks)), m_adb(findAdb())
     {
         m_poll.setInterval(2500);
         m_timeout.setSingleShot(true);
         connect(&m_poll, &QTimer::timeout, this, [this] { scan(false); });
-        connect(RvInferenceSettings::instance(), &RvInferenceSettings::detectionFinished, this, [this] { scan(false); });
-        connect(window, &SensorMainWindow::usbDeviceConnectionRequested, this,
-                [this](RvDeviceManagerDialog *dialog) { connectFromManager(dialog); });
+        connect(session->inferenceSettings(), &RvInferenceSettings::detectionFinished, this, [this, watch] {
+            if (watch) scan(false);
+            else resumeDeferredStart();
+        });
         connect(&m_timeout, &QTimer::timeout, this, [this] {
             m_processStatus = "timeout";
             m_process.kill();
@@ -344,8 +337,10 @@ public:
         connect(&m_process, &QProcess::finished, this, [this](int code, QProcess::ExitStatus status) {
             completed(status == QProcess::NormalExit ? code : -1);
         });
-        m_poll.start();
-        QTimer::singleShot(0, this, [this] { scan(false); });
+        if (watch) {
+            m_poll.start();
+            QTimer::singleShot(0, this, [this] { scan(false); });
+        }
     }
     ~RvUsbEnrollment() override
     {
@@ -356,13 +351,68 @@ public:
         }
     }
 
+    bool busy() const { return m_prompting || m_result || m_manualRequest || m_checkOnly; }
+    QJsonObject status() const
+    {
+        return {{"state", m_usbState}, {"phase", m_phase}, {"error", m_usbError},
+                {"check_id", qint64(m_confirmedId)}, {"device_id", m_board.existing || m_added ? m_board.profile.id : QString()},
+                {"runtime_replaced", m_receipt["runtime_replaced"].toBool()}};
+    }
+    bool check()
+    {
+        if (!idle() || busy()) return false;
+        m_confirmedIdentity = {};
+        m_confirmedId = 0;
+        m_checkOnly = true;
+        m_automatic = true;
+        m_usbState = "checking";
+        m_usbError.clear();
+        m_adb = findAdb();
+        if (m_adb.isEmpty()) adbMissing();
+        else scan(false);
+        return true;
+    }
+    bool enrollChecked(quint64 id, bool startAfter)
+    {
+        if (!idle() || busy() || id == 0 || id != m_confirmedId) return false;
+        if (m_session->stopRevision() != m_confirmedStopRevision
+            || RvDeviceStore(m_session->deviceStorePath()).revision() != m_confirmedRegistryRevision) {
+            m_confirmedId = 0;
+            m_confirmedIdentity = {};
+            m_usbState = "cancelled";
+            notify();
+            return false;
+        }
+        auto identity = std::exchange(m_confirmedIdentity, {});
+        m_confirmedId = 0;
+        return beginEnrollment(identity, startAfter, m_confirmedRegistryRevision);
+    }
+    bool beginEnrollment(const QJsonObject &identity, bool startAfter = true, const QString &expectedRevision = {})
+    {
+        if (!canOffer() || m_session->busy() || m_session->automaticConnecting() || busy()) return false;
+        m_adb = findAdb();
+        cancelDeferredStart();
+        m_expectedIdentity = identity;
+        m_expectedRegistryRevision = expectedRevision;
+        m_startAfter = startAfter;
+        m_automatic = false;
+        m_added = false;
+        m_manualRequest = true;
+        m_usbState = "enrolling";
+        m_usbError.clear();
+        if (m_hooks.started) m_hooks.started();
+        if (m_adb.isEmpty()) adbMissing();
+        else scan(true);
+        return true;
+    }
+
 private:
     using Result = std::function<void(int, const QByteArray &)>;
     using Stage = RvSessionController::AutomaticConnectionStage;
 
     bool canOffer() const
     {
-        return m_session && m_window->isVisible() && !m_session->tuner()->shutdownPending();
+        return m_session && !m_session->tuner()->shutdownPending() && (!m_hooks.canOffer || m_hooks.canOffer());
     }
     bool idle() const
     {
@@ -371,13 +421,12 @@ private:
     bool operationAllowed() const
     {
         return idle() && m_session->stopRevision()==m_stopRevision
-            && (!m_automatic || m_session->automaticStartAllowed(m_board.profile.id));
+            && (!m_automatic || m_checkOnly || m_session->automaticStartAllowed(m_board.profile.id));
     }
     bool canOfferAutomatically() const
     {
-        if (!canOffer() || m_session->busy()) return false;
-        const auto *dialog = m_window->findChild<RvDeviceManagerDialog *>();
-        return !QApplication::activeModalWidget() && !(dialog && dialog->isVisible());
+        return canOffer() && !m_session->busy()
+            && (!m_hooks.canOfferAutomatically || m_hooks.canOfferAutomatically());
     }
     struct DeferredStart {
         RvDeviceProfile profile;
@@ -406,7 +455,7 @@ private:
         if (!m_deferredStart || m_result) return;
         const auto start=*m_deferredStart;
         if (!startStillCurrent(start)) { cancelDeferredStart(); return; }
-        if (m_session->assistDepthEnabled() && RvInferenceSettings::instance()->detecting()) return;
+        if (m_session->assistDepthEnabled() && m_session->inferenceSettings()->detecting()) return;
 
         const QJsonObject identity{{"serial",start.profile.serial},{"boot_id",start.boot},
             {"public_key",start.profile.publicKey},{"transport",start.transport}};
@@ -418,42 +467,44 @@ private:
                     throw std::runtime_error("USB attachment changed");
             } catch (const std::exception &) {
                 cancelDeferredStart();
-                m_window->statusBar()->showMessage(tr("The RV1103 connection changed. Reconnect the board and try again."),10000);
+                if (m_hooks.status) m_hooks.status(tr("The RV1103 connection changed. Reconnect the board and try again."));
                 return;
             }
             runNetwork(true,false,[this,start](int status,const QByteArray &){
                 if (status!=0 || !startStillCurrent(start)) { cancelDeferredStart(); return; }
-                if (m_session->assistDepthEnabled() && RvInferenceSettings::instance()->detecting()) return;
+                if (m_session->assistDepthEnabled() && m_session->inferenceSettings()->detecting()) return;
                 m_deferredStart.reset();
                 m_session->startAutomatically(true,start.boot);
             });
         });
     }
-    QWidget *promptParent() const
+    void notify()
     {
-        return m_requester ? static_cast<QWidget *>(m_requester.data()) : m_window;
+        if (m_hooks.changed) m_hooks.changed();
     }
-    void connectFromManager(RvDeviceManagerDialog *dialog)
+    void finishOperation()
     {
-        if (!canOffer() || m_session->busy() || m_session->automaticConnecting() || m_prompting || m_result) {
-            QMessageBox::information(dialog, tr("Connect via USB"),
-                tr("Wait for the current device operation to finish, then try again."));
-            return;
+        if (m_checkOnly) {
+            if (m_usbState == "checking") m_usbState = "cancelled";
+            m_checkOnly = false;
         }
-        m_adb = findAdb();
-        if (m_adb.isEmpty()) {
-            RvImportDiagnostics::showFailure(dialog,"usb_enrollment",
-                tr("ADB was not found. Place adb.exe and its DLLs in the platform-tools folder next to the application."),
-                {{"phase","find_adb"}});
-            return;
+        if (m_manualRequest) {
+            if (m_usbState == "enrolling") m_usbState = m_added ? "enrolled" : "cancelled";
+            m_manualRequest = false;
+            if (m_hooks.finished) m_hooks.finished(m_added, m_receipt["runtime_replaced"].toBool());
         }
-        cancelDeferredStart();
-        m_requester = dialog;
-        m_expectedIdentity=dialog->property("rvUsbExpectedIdentity").toJsonObject();
-        m_automatic = false;
-        m_added = false;
-        dialog->beginUsbEnrollment();
-        scan(true);
+        notify();
+    }
+    void adbMissing()
+    {
+        m_phase = "find_adb";
+        m_started = QDateTime::currentDateTimeUtc();
+        m_board = {};
+        m_serial.clear();
+        m_history = {};
+        m_receipt = {};
+        fail(tr("ADB was not found. Place adb.exe and its DLLs in the platform-tools folder next to the application."));
+        finishOperation();
     }
     void run(const QString &program, const QStringList &args, int timeout, Result result,
              const QProcessEnvironment &environment = QProcessEnvironment::systemEnvironment())
@@ -462,6 +513,7 @@ private:
         m_processStatus.clear();
         m_process.setProcessEnvironment(environment);
         m_timeout.start(timeout);
+        notify();
         m_process.start(program, args);
     }
     void completed(int code)
@@ -493,15 +545,12 @@ private:
         if (callback) callback(code, output);
         if (!m_result && m_automatic && m_session && m_session->automaticConnectionStage() == Stage::CheckingDevice)
             m_session->setAutomaticConnectionStage(Stage::Idle);
-        if (!m_result && m_requester) {
-            const auto dialog = std::exchange(m_requester, {});
-            dialog->finishUsbEnrollment(m_added);
-        }
+        if (!m_result) finishOperation();
     }
     void scan(bool manual)
     {
         if (!manual && m_deferredStart) { resumeDeferredStart(); return; }
-        if (!manual && (m_requester || m_adb.isEmpty() || m_prompting || m_result || !canOfferAutomatically())) return;
+        if (!manual && (m_manualRequest || m_adb.isEmpty() || m_prompting || m_result || !canOfferAutomatically())) return;
         m_started = QDateTime::currentDateTimeUtc();
         m_automatic = !manual;
         m_added = false;
@@ -514,7 +563,7 @@ private:
         m_phase = "adb_device_discovery";
         run(m_adb, {"devices", "-l"}, 6000, [this, manual](int code, const QByteArray &output) {
             if (code != 0) {
-                if (manual) fail(tr("Could not list USB devices with ADB."));
+                if (manual || m_checkOnly) fail(tr("Could not list USB devices with ADB."));
                 return;
             }
             const auto discovery=discoverAdb(output);
@@ -522,12 +571,12 @@ private:
             if (serial.isEmpty()) {
                 m_seen.clear();
                 m_notice.clear();
-                if (manual) fail(adbIssueMessage(discovery.issue));
+                if (manual || m_checkOnly) fail(adbIssueMessage(discovery.issue));
                 return;
             }
             const auto attachment = serial + "/" + transport;
             if (!manual) {
-                if (!canOfferAutomatically() || attachment == m_seen) return;
+                if (!canOfferAutomatically() || (!m_checkOnly && attachment == m_seen)) return;
             } else if (!canOffer()) return;
             m_serial = serial;
             m_transport = transport;
@@ -535,7 +584,7 @@ private:
             shell(probeCommand, [this, attachment, manual](int status, const QByteArray &probe) {
                 if (manual ? !canOffer() : !canOfferAutomatically()) return;
                 if (status != 0) {
-                    if (manual) fail(tr("Could not read the RV1103 identity over USB."));
+                    if (manual || m_checkOnly) fail(tr("Could not read the RV1103 identity over USB."));
                     return;
                 }
                 try {
@@ -544,9 +593,12 @@ private:
                     if(manual && !confirmedIdentityMatches(m_expectedIdentity,identity,m_transport))
                         throw std::runtime_error("The confirmed USB device changed; reconnect it and try again.");
                     RvDeviceStore store(m_session->deviceStorePath());
+                    if (manual && !m_expectedRegistryRevision.isEmpty() && store.revision() != m_expectedRegistryRevision)
+                        throw std::runtime_error("Device registry changed after USB inspection.");
+                    m_discoveryRegistryRevision = store.revision();
                     m_board = enrollmentBoard(identity,store.profiles());
                 } catch (const std::exception &error) {
-                    if (manual) {
+                    if (manual || m_checkOnly) {
                         fail(tr("RV1103 setup unavailable: %1").arg(QString::fromUtf8(error.what())));
                         return;
                     }
@@ -555,8 +607,7 @@ private:
                     // without repeating the status message for this attachment.
                     if (m_notice != attachment) {
                         m_notice = attachment;
-                        if (auto *main = qobject_cast<QMainWindow *>(m_window))
-                            main->statusBar()->showMessage(tr("RV1103 setup unavailable: %1").arg(QString::fromUtf8(error.what())), 10000);
+                        if (m_hooks.status) m_hooks.status(tr("RV1103 setup unavailable: %1").arg(QString::fromUtf8(error.what())));
                     }
                     return;
                 }
@@ -567,7 +618,7 @@ private:
                 runNetwork(true,false,[this,attachment,manual](int code,const QByteArray &) {
                     if (code != 0) {
                         m_seen.clear();
-                        if (manual) fail(tr("Could not configure the RV1103 USB network adapter."));
+                        if (manual || m_checkOnly) fail(tr("Could not configure the RV1103 USB network adapter."));
                         return; // No prompt or failed-import dialog while absent.
                     }
                     if(manual ? !canOffer() : !canOfferAutomatically())return;
@@ -575,6 +626,7 @@ private:
                     if(m_session->stopRevision()!=m_discoveryStopRevision)return;
                     if(manual)prepare(false);
                     else if(!m_board.existing)offerSetup(false);
+                    else if(m_checkOnly)prepare(true);
                     else {
                         // A Stop during this attachment is never undone.
                         m_session->deviceUnreachable(m_board.profile.id);
@@ -598,11 +650,34 @@ private:
     }
     void offerSetup(bool existingDevice,bool networkSetup=false)
     {
+        if (m_checkOnly) {
+            finishCheck(networkSetup ? "network_required" : existingDevice ? "update_required" : "registration_required");
+            return;
+        }
         m_prompting = true;
         m_session->setAutomaticConnectionStage(Stage::Idle);
-        m_window->offerUsbSetup(existingDevice,networkSetup,{{"serial",m_serial},{"boot_id",m_board.boot},
-            {"public_key",m_board.profile.publicKey},{"transport",m_transport}});
+        if (m_hooks.offer) m_hooks.offer(existingDevice, networkSetup, usbIdentity());
         m_prompting = false;
+    }
+    QJsonObject usbIdentity() const
+    {
+        return {{"serial", m_serial}, {"boot_id", m_board.boot},
+                {"public_key", m_board.profile.publicKey}, {"transport", m_transport}};
+    }
+    void finishCheck(const QString &state)
+    {
+        if (m_session->stopRevision() != m_discoveryStopRevision) return;
+        try {
+            if (RvDeviceStore(m_session->deviceStorePath()).revision() != m_discoveryRegistryRevision)
+                throw std::runtime_error("Device registry changed during USB inspection.");
+            m_confirmedIdentity = usbIdentity();
+            m_confirmedId = ++m_nextCheckId;
+            m_confirmedStopRevision = m_discoveryStopRevision;
+            m_confirmedRegistryRevision = m_discoveryRegistryRevision;
+            m_usbState = state;
+        } catch (const std::exception &error) {
+            fail(QString::fromUtf8(error.what()));
+        }
     }
     void prepare(bool automatic)
     {
@@ -625,7 +700,7 @@ private:
                 // The image may have finished setting usb0 up since discovery.
                 m_board=current;
             } catch (const std::exception &) {
-                if(m_automatic)m_seen.clear();
+                if(m_automatic&&!m_checkOnly)m_seen.clear();
                 else fail(tr("The RV1103 connection changed. Reconnect the board and try again."));
                 return;
             }
@@ -657,7 +732,7 @@ private:
         m_phase = elevated ? "windows_rndis_configuration_elevated" : "windows_rndis_configuration";
         runNetwork(false,elevated,[this, elevated](int code, const QByteArray &) {
                 if (!operationAllowed()) return;
-                if (code == 11 && m_automatic) { m_seen.clear(); return; }
+                if (code == 11 && m_automatic && !m_checkOnly) { m_seen.clear(); return; }
                 if (!elevated && code == 10) {
                     if(m_automatic)offerSetup(true,true);
                     else configureNetwork(true);
@@ -665,6 +740,7 @@ private:
                 }
                 if (code != 0) { fail(tr("Could not configure the RV1103 USB network adapter.")); return; }
                 if (!boardAddressReady(m_board)) {
+                    if (m_automatic) { offerSetup(true,true); return; }
                     m_phase = "board_usb_ipv4_configuration";
                     shell(configureBoardCommand(m_board), [this](int status, const QByteArray &) {
                         if (status != 0) { fail(tr("Could not assign an IPv4 address to the RV1103.")); return; }
@@ -684,6 +760,8 @@ private:
             m_board.boot, m_board.bootstrap ? QStringLiteral("fresh") : QStringLiteral("installed")};
         try {
             RvDeviceStore store(m_session->deviceStorePath());m_registryRevision=store.revision();
+            if ((m_checkOnly || !m_expectedRegistryRevision.isEmpty()) && m_registryRevision != m_discoveryRegistryRevision)
+                throw std::runtime_error("Device registry changed during USB setup.");
             if(m_board.existing)args<<"--device-store"<<store.path()<<"--device-revision"<<m_registryRevision<<"--device-id"<<m_board.profile.id;
         }catch(const std::exception &error){fail(QString::fromUtf8(error.what()));return;}
         run(worker.executable, args,
@@ -700,7 +778,11 @@ private:
                     if(code==0 && parse.error==QJsonParseError::NoError) {
                         const auto inspection=inspectReceipt(receipt,m_board);
                         if(inspection==RuntimeInspection::Update) { offerSetup(true); return; }
-                        if(inspection==RuntimeInspection::Ready) { registerAndStart(); return; }
+                        if(inspection==RuntimeInspection::Ready) {
+                            if (m_checkOnly) finishCheck("ready");
+                            else registerAndStart();
+                            return;
+                        }
                     }
                     const auto error=receipt["setup_error"].toString();
                     fail(error.isEmpty() ? tr("RV1103 verification failed. Check its factory login, calibration and USB connection.")
@@ -716,7 +798,6 @@ private:
                                          : tr("RV1103 setup unavailable: %1").arg(error));
                     return;
                 }
-                if(m_requester)m_requester->setProperty("rvUsbRuntimeReplaced",receipt["runtime_replaced"].toBool());
                 m_phase = "device_profile_registration";
                 registerAndStart();
             }, RuntimeDiscovery::nativeWorkerEnvironment(worker.executable));
@@ -732,12 +813,15 @@ private:
             if(m_board.existing)for(auto &entry:updated)if(entry.id==profile.id)entry=profile;
             store.save(updated,profile.id);
             m_added=true;
-            if(!m_board.existing)QSettings().remove(RvSessionController::legacyHostInputRotationKey(profile));
+            if(!m_board.existing)RuntimeDiscovery::depthSettings().remove(RvSessionController::legacyHostInputRotationKey(profile));
             // Reload calls Stop once. Any additional Stop revokes this start.
             const DeferredStart start{profile,m_board.boot,m_transport,store.revision(),m_stopRevision+1};
             m_session->reloadDeviceProfiles();
-            if (!startStillCurrent(start)) return;
-            if (m_session->assistDepthEnabled() && RvInferenceSettings::instance()->detecting()) {
+            if ((!m_automatic && !m_startAfter) || !startStillCurrent(start)) return;
+            auto *inference = m_session->inferenceSettings();
+            if (m_session->assistDepthEnabled() && !inference->started() && !inference->detecting())
+                inference->detectDevices();
+            if (m_session->assistDepthEnabled() && inference->detecting()) {
                 m_deferredStart=start;
                 m_session->setAutomaticConnectionStage(Stage::PreparingInference);
             } else m_session->startAutomatically(true,start.boot);
@@ -745,6 +829,11 @@ private:
     }
     void fail(const QString &message)
     {
+        if (m_checkOnly || m_manualRequest) {
+            m_usbState = "error";
+            m_usbError = message;
+        }
+        if (!m_hooks.failure) return;
         m_prompting = true;
         QJsonObject details{{"phase",m_phase},{"started_utc",m_started.toString(Qt::ISODateWithMs)},
             {"serial",m_serial},{"boot_id",m_board.boot},{"usb_address_before_setup",m_board.address},
@@ -753,46 +842,64 @@ private:
             {"inference_input_degrees",m_board.profile.inputRotation},{"profile_registered",m_added},
             {"process_history",m_history},{"board_receipt",m_receipt}};
         if (!m_board.profile.publicKey.isEmpty()) details["ssh_fingerprint"]=m_board.profile.fingerprint();
-        if (m_automatic) {
-            // Background detection must not interrupt a disconnected startup
-            // or a hot unplug. Explicit USB setup still reports actionable errors.
-            const auto directory=QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation);
-            RvImportDiagnostics::writeReport(QDir(directory).filePath("DctsDiagnostics/rv1103"),
-                                            "usb_enrollment",message,details);
-            m_window->statusBar()->showMessage(message,10000);
-            m_prompting=false;
-            return;
-        }
-        RvImportDiagnostics::showFailure(promptParent(),"usb_enrollment",message,details);
+        m_hooks.failure(message, details, m_automatic && !m_checkOnly);
         m_prompting = false;
     }
 
     QPointer<RvSessionController> m_session;
-    QPointer<RvDeviceManagerDialog> m_requester;
-    SensorMainWindow *m_window;
+    RvUsbEnrollmentHooks m_hooks;
     QString m_adb, m_seen, m_notice, m_serial, m_transport, m_phase, m_processStatus, m_registryRevision;
     QDateTime m_started;
     QJsonArray m_history;
     QJsonObject m_receipt;
-    QJsonObject m_expectedIdentity;
+    QJsonObject m_expectedIdentity, m_confirmedIdentity;
+    QString m_discoveryRegistryRevision, m_expectedRegistryRevision, m_confirmedRegistryRevision;
+    QString m_usbState = "idle", m_usbError;
     Board m_board;
     std::optional<DeferredStart> m_deferredStart;
     bool m_prompting = false, m_added = false;
     bool m_automatic=false;
+    bool m_checkOnly=false, m_manualRequest=false, m_startAfter=true;
     quint64 m_stopRevision=0;
     quint64 m_discoveryStopRevision=0;
+    quint64 m_nextCheckId=0, m_confirmedId=0, m_confirmedStopRevision=0;
     QTimer m_poll, m_timeout;
     QProcess m_process;
     Result m_result;
 };
 
-void watchRvUsbDevices(RvSessionController *session, SensorMainWindow *window)
+RvUsbEnrollment *createRvUsbEnrollment(RvSessionController *session, QObject *owner, RvUsbEnrollmentHooks hooks, bool watch)
 {
-    if (!session || qEnvironmentVariable("RV_TEST_OFFLINE_ONLY") == "1") return;
-    new RvUsbEnrollment(session, window);
+    if (!session || qEnvironmentVariable("RV_TEST_OFFLINE_ONLY") == "1") return nullptr;
+    return new RvUsbEnrollment(session, owner, std::move(hooks), watch);
 }
 
-QJsonObject checkRvUsbEnrollment()
+bool beginRvUsbEnrollment(RvUsbEnrollment *operation, const QJsonObject &identity)
+{
+    return operation && operation->beginEnrollment(identity);
+}
+
+bool checkRvUsbDevice(RvUsbEnrollment *operation)
+{
+    return operation && operation->check();
+}
+
+bool enrollCheckedRvUsbDevice(RvUsbEnrollment *operation, quint64 checkId, bool startAfter)
+{
+    return operation && operation->enrollChecked(checkId, startAfter);
+}
+
+bool rvUsbOperationBusy(const RvUsbEnrollment *operation)
+{
+    return operation && operation->busy();
+}
+
+QJsonObject rvUsbOperationStatus(const RvUsbEnrollment *operation)
+{
+    return operation ? operation->status() : QJsonObject{{"state", "idle"}, {"check_id", 0}};
+}
+
+QJsonObject checkRvUsbEnrollmentCore()
 {
     const QString serial = "1234567890abcdef";
     const QByteArray attached = serial.toLatin1() + " device product:occam transport_id:2\r\n";
@@ -823,20 +930,9 @@ QJsonObject checkRvUsbEnrollment()
     const auto rejects = [](auto check) {
         try { check(); return false; } catch (const std::exception &) { return true; }
     };
-    QTemporaryDir temp;
-    const auto report=RvImportDiagnostics::writeReport(temp.filePath("diagnostics"),"test_usb_setup","test failure",
-        {{"phase","adb_identity_and_delivery_probe"},{"serial",serial}});
-    QFile reportFile(report);
-    const auto diagnostic=reportFile.open(QIODevice::ReadOnly)
-        ? QJsonDocument::fromJson(reportFile.readAll()).object() : QJsonObject();
     const QJsonObject confirmedIdentity{{"serial",serial},{"boot_id",usbIdentity.boot},
         {"public_key",usbIdentity.key},{"transport","2"}};
     return {
-        {"USB_IMPORT_DIAGNOSTIC_REPORT_WRITTEN", temp.isValid() && diagnostic["operation"]=="test_usb_setup"
-            && diagnostic["reason"]=="test failure" && diagnostic["details"].toObject()["serial"]==serial
-            && diagnostic["details"].toObject()["phase"]=="adb_identity_and_delivery_probe"},
-        {"USB_IMPORT_DIAGNOSTIC_WRITE_FAILURE_HANDLED", temp.isValid()
-            && RvImportDiagnostics::writeReport(report,"test_usb_setup","test failure",{}).isEmpty()},
         {"USB_SILENT_SUCCESS_RECEIPT_ACCEPTED", stripShellReceipt(silentReceipt) && silentReceipt.isEmpty()},
         {"USB_PROBE_PAYLOAD_RETAINED", stripShellReceipt(probeReceipt) && probeReceipt.trimmed() == "identity"},
         {"USB_MISSING_COMPLETION_RECEIPT_REJECTED", !stripShellReceipt(failureReceipt)},

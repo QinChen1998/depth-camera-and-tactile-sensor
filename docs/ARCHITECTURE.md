@@ -24,7 +24,8 @@
 flowchart TD
     Main[main.cpp] --> Window[SensorMainWindow]
     Window --> Tactile[磁触觉显示与串口源]
-    Window --> Session[RvSessionController 共享成像会话]
+    Window --> SDK[DctsDepthSdk.dll]
+    SDK --> Session[RvSessionController 共享成像会话]
     Session --> Camera[原视频页面]
     Session --> Depth[深度页面]
     Session --> Tuner[dToF 调参控制器]
@@ -33,12 +34,12 @@ flowchart TD
     Control --> Board[设备端服务与传感器]
     Board --> Streams[视频与原生 dToF 接收]
     Streams --> Session
-    Session --> Assist[主程序的 rv-assist-worker 子进程]
+    Session --> Assist[DctsInferenceWorker.exe 子进程]
     Assist --> ORT[ORT TensorRT-RTX 模型推理与全局尺度校正]
     ORT --> Session
 ```
 
-`SensorMainWindow` 创建一个共享 `RvSessionController`，深度页面、原视频页面和 dToF 调参模块围绕同一个设备会话工作。不能为每个页面各自启动一套采集服务。板端仅运行受信任档案对应的 F6 原生 dToF 采集、状态服务和 H.265 视频。原生程序接收 TMF9/SPI 数据；不加载模型，不依赖 RKNN 或模型解密库。
+`SensorMainWindow` 通过 SDK 的 Qt 适配接口取得共享 `RvSessionController`。深度页面、原视频页面和 dToF 调参模块围绕同一个设备会话工作。独立 Windows C/C++ 调用方可经同一个 DLL 的 C ABI 使用成像、设备管理和 USB 登记。板端仅运行受信任档案对应的 F6 原生 dToF 采集、状态服务和 H.265 视频。原生程序接收 TMF9/SPI 数据。[Windows x64 深度图 SDK](DEPTH_SDK_WINDOWS.md)
 
 设备档案的可选布尔值 `temporary_fov_calibration` 默认关闭，仅在明确选择时向采集进程传递 `DCTS_PROCESSING_FOV`。SPI 驱动先读取并保留真实寄存器值，再用指定射线表重建 XYZ，IPC 的处理 FOV 与这些坐标一致。原 `sensor_readback.json` 始终记录传感器原值，另以原子写入的 `.calibration.json` 保存真实 FOV、处理 FOV、临时标志及 `dtof_<generation>`。控制 worker 与共享会话均验证该回执的本次身份；主机元数据保留此区别，界面不显示临时标定状态提示。未开启时不覆盖处理 FOV，继续严格拒绝不匹配的标定。
 

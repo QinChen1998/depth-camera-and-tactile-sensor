@@ -23,7 +23,7 @@ if(-not $work.StartsWith($validation+'\',[StringComparison]::OrdinalIgnoreCase))
 if($Version -notmatch '^\d+\.\d+\.\d+(\.\d+)?$'){throw 'Invalid installer version.'}
 $payload=Join-Path $work 'payload'
 $exe='触想工作台.exe'
-$desktopFiles=@($exe,'DctsInferenceWorker.exe')
+$desktopFiles=@($exe,'DctsDepthSdk.dll','DctsInferenceWorker.exe')
 $imagingSchemes=(Get-Content -LiteralPath (Join-Path $project 'DCTS_APP.json') -Raw | ConvertFrom-Json).imaging_schemes
 $expectedImagingSchemes='host_unidepth_rgb672_vga_fp16_tof48_b','board_native_tof48','board_native_tof48_high_accuracy'
 if(($imagingSchemes -join ',') -cne ($expectedImagingSchemes -join ',')){throw 'Unsupported desktop imaging menu.'}
@@ -108,15 +108,17 @@ if(-not $UseStagedPayload){
         (Join-Path $project 'translations/hand_zh_CN.ts'),'-qm',(Join-Path $project 'translations/hand_zh_CN.qm'))
     Invoke-Native $toolchain.MSBuild @(
         (Join-Path $project 'Depth Camera and Tactile Sensor.sln'),'/t:Build','/p:Configuration=Release','/p:Platform=x64',
-        "/p:QtInstall=$qt",'/p:DctsInstallerBuild=true','/p:NativeWorkersBuild=true',"/p:OutDir=$desktop/","/p:IntDir=$work/obj/",
+        "/p:QtInstall=$qt",'/p:DctsInstallerBuild=true','/p:NativeWorkersBuild=true',"/p:OutDir=$desktop/","/p:DctsIntermediateRoot=$work/obj",
         '/m:2','/nologo','/v:minimal',"/flp:logfile=$work/build.log;verbosity=normal")
 
     New-Item -ItemType Directory -Path $payload | Out-Null
     Copy-Item -LiteralPath (Join-Path $desktop $exe) -Destination $payload
+    Copy-Relative $desktop $payload 'DctsDepthSdk.dll'
     Copy-Relative $desktop $payload 'DctsInferenceWorker.exe'
     Invoke-Native (Join-Path $qt 'bin/windeployqt.exe') @(
         '--release','--qmldir',(Join-Path $project 'qml'),'--no-translations','--no-compiler-runtime',
-        '--skip-plugin-types','qmltooling','--exclude-plugins','qtvirtualkeyboardplugin',(Join-Path $payload $exe))
+        '--skip-plugin-types','qmltooling','--exclude-plugins','qtvirtualkeyboardplugin',
+        (Join-Path $payload $exe),(Join-Path $payload 'DctsDepthSdk.dll'))
     Get-ChildItem -LiteralPath (Join-Path $payload 'qml') -Filter '*.qmltypes' -Recurse -File |
         ForEach-Object {Remove-Item -LiteralPath $_.FullName}
     Get-ChildItem -LiteralPath $toolchain.RedistDirectories[0] -Filter '*.dll' | Copy-Item -Destination $payload

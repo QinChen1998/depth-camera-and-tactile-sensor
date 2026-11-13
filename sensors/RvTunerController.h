@@ -9,7 +9,7 @@
 #include <functional>
 #include <memory>
 class RvSessionController;
-class RvTunerController final:public QObject {
+class DCTS_DEPTH_INTERNAL RvTunerController final:public QObject {
     Q_OBJECT
 public:
     enum State {Idle,Reading,Preflight,Handover,Running,Applying,Saving,Stopping,Fault};Q_ENUM(State)

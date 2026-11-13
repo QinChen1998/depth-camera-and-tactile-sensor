@@ -1,4 +1,5 @@
 #pragma once
+#include "../sdk/DepthSdkExports.h"
 #include "RvCalibration.h"
 #include <QtCore/QJsonObject>
 #include <QtCore/QString>
@@ -6,7 +7,7 @@
 
 // User-managed trust is separate from the immutable worker payload manifest.
 // A session takes a value snapshot; editing the store cannot change an in-flight command.
-struct RvDeviceProfile {
+struct DCTS_DEPTH_INTERNAL RvDeviceProfile {
     QString id, name, host, serial, publicKey, username = QStringLiteral("root");
     QString calibration=QLatin1String(RvCalibration::Id), lastConnected;
     int sshPort = 22, inputRotation = -1, cameraMountRotation = 0;
@@ -23,7 +24,7 @@ struct RvDeviceProfile {
     bool ready() const { return fov() > 0 && inputRotation >= 0; }
 };
 
-class RvDeviceStore {
+class DCTS_DEPTH_INTERNAL RvDeviceStore {
 public:
     explicit RvDeviceStore(QString path = defaultPath());
     static QString defaultPath();

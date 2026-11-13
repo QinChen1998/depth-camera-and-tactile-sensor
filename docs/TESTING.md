@@ -27,7 +27,9 @@ python tools/run_offline_tests.py --configuration Debug --qt-root E:/Qt/6.11.1/m
 python -m unittest discover -s tests -p 'test_*.py' -v
 ```
 
-默认构建原生控制 worker，并同步部署 Qt、QML、视频插件。主工程在导入 Qt props 前设置 `IntDir`，qmake/MOC/RCC 中间文件进入 `x64/obj_<配置>/`。主推理进程使用同一构建复制的 `DctsInferenceWorker.exe`；不要用中文主程序文件名直接驱动 TensorRT 二进制 IPC。
+默认构建深度 SDK、独立推理 worker、C 示例和原生控制 worker，并同步部署 Qt、QML、视频插件。各项目在导入 Qt props 前设置独立的 `IntDir`，qmake/MOC/RCC 中间文件位于 `x64/obj_<配置>/`。主机推理验证使用 `DctsInferenceWorker.exe`。
+
+Windows SDK 的独立 ABI 回归使用 `tests/test_depth_sdk_abi.py --dll <SDK DLL> --qt-bin <Qt bin> --output <新验证目录>`。它使用合成档案验证同进程单会话、换板选择、线程约束、两次打开关闭和离线保护。
 
 离线脚本仅允许以下八组，按需用 `--flags <标志> ...` 选择子集：
 

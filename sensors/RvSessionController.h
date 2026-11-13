@@ -15,6 +15,7 @@
 #include "RvPhotonFrame.h"
 #include "RvDtofCandidates.h"
 #include "RvDeviceStore.h"
+#include "../sdk/DepthSdkExports.h"
 
 class LanguageManager;
 class SensorMainWindow;
@@ -29,6 +30,7 @@ class RvCameraStream;
 class RvHdVideoStream;
 class RvDtofBoardStream;
 class RvAssistDepth;
+class RvInferenceSettings;
 class RvTunerController;
 class LanguageManager;
 class SensorMainWindow;
@@ -36,17 +38,19 @@ struct RtspVlcBackend;
 
 // One RV device session, independent of either display widget. All public calls
 // and signals run on its owner thread; decoding keeps only a bounded mailbox.
-class RvSessionController final : public QObject
+class DCTS_DEPTH_INTERNAL RvSessionController final : public QObject
 {
     Q_OBJECT
 public:
     enum class AutomaticConnectionStage { Idle, CheckingDevice, PreparingInference, StartingCapture, WaitingForDepth };
 
-    explicit RvSessionController(QObject *parent = nullptr,const QString &deviceStorePath=RvDeviceStore::defaultPath());
+    explicit RvSessionController(QObject *parent = nullptr,const QString &deviceStorePath=RvDeviceStore::defaultPath(),
+                                 RvInferenceSettings *inference=nullptr);
     ~RvSessionController() override;
     QString deviceStorePath() const {return m_deviceStorePath;}
     RvDeviceProfile deviceProfile() const {return m_device;}
     void reloadDeviceProfiles();
+    bool selectDevice(const QString &id);
     int cameraMountRotationDegrees() const {return m_device.cameraMountRotation;}
     QImage cameraInCalibrationFrame(const QImage &image) const;
 
@@ -63,8 +67,11 @@ public:
     AutomaticConnectionStage automaticConnectionStage() const { return m_automaticConnectionStage; }
     bool automaticConnecting() const { return m_automaticConnectionStage != AutomaticConnectionStage::Idle; }
     RvTunerController *tuner() const {return m_tuner;}
+    RvInferenceSettings *inferenceSettings() const {return m_inference;}
     bool userStopped() const { return m_userStopped; }
     bool retainingRecoveryDisplay() const { return !m_destroying && !m_userStopped && m_recoveryDisplayTimer.isActive(); }
+    bool waitingForReconnect() const { return m_reconnectTimer.isActive(); }
+    bool controlProcessActive() const;
     QString stateText() const { return m_stateText; }
     QString detailText() const { return m_detailText; }
     double videoFps() const { return m_videoFps; }
@@ -120,6 +127,7 @@ signals:
     void configurationChanged();
     void stateChanged();
     void cameraFrameReady(const QImage &image);
+    void videoFrameStamped(const QImage &image,quint64 sequence,qint64 decodedMonotonicNs,const QString &captureGeneration);
     void streamCleared();
     void recoveryDisplayExpired();
     void depthSnapshotReady(const QByteArray &depth, const QJsonObject &metadata, const QImage &camera);
@@ -136,6 +144,8 @@ signals:
     void imagingSwitchAborted(const QString &reason);
 
 private:
+    void applyDeviceProfile(const RvDeviceProfile &device);
+    RvInferenceSettings *m_inference;
     friend int runPortSmokeTests(SensorMainWindow &,LanguageManager &,const QString &);
     bool testHostHdPreparation();
     friend class RvTunerController;
@@ -147,7 +157,6 @@ private:
     bool m_tunerExclusive=false;
     QJsonObject m_captureOwner;
     friend int runRvDtofCandidatesTests(const QString &reportPath);
-    friend int runRvAssistDepthTests(const QString &reportPath);
     friend int runRvImagingSwitchTests(const QString &reportPath);
     struct Configuration {
         int cameraWidth = 576;

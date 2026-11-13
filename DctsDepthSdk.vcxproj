@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003" DefaultTargets="Build" ToolsVersion="17.0">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|x64"><Configuration>Debug</Configuration><Platform>x64</Platform></ProjectConfiguration>
+    <ProjectConfiguration Include="Release|x64"><Configuration>Release</Configuration><Platform>x64</Platform></ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <ProjectGuid>{DB83F39C-8A21-4BAC-9D5A-350B160C7D47}</ProjectGuid>
+    <Keyword>QtVS_v304</Keyword>
+    <RootNamespace>DctsDepthSdk</RootNamespace>
+    <WindowsTargetPlatformVersion>10.0.22621.0</WindowsTargetPlatformVersion>
+    <QtMsBuild>$(UserProfile)\AppData\Local\QtMsBuild</QtMsBuild>
+  </PropertyGroup>
+  <Import Project="tools\QtDevelopment.props"/>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props"/>
+  <PropertyGroup Label="Configuration">
+    <ConfigurationType>DynamicLibrary</ConfigurationType>
+    <PlatformToolset>v143</PlatformToolset>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props"/>
+  <PropertyGroup>
+    <OutDir>$(MSBuildProjectDirectory)\x64\$(Configuration)\</OutDir>
+    <DctsIntermediateRoot Condition="'$(DctsIntermediateRoot)' == ''">$(MSBuildProjectDirectory)\x64\obj_$(Configuration)</DctsIntermediateRoot>
+    <IntDir>$(DctsIntermediateRoot)\depth_sdk\</IntDir>
+    <TargetName>DctsDepthSdk</TargetName>
+  </PropertyGroup>
+  <Import Project="$(QtMsBuild)\qt_defaults.props"/>
+  <PropertyGroup Label="QtSettings">
+    <QtModules>core;gui;widgets;network;multimedia;concurrent</QtModules>
+    <QtBuildConfig Condition="'$(Configuration)' == 'Debug'">debug</QtBuildConfig>
+    <QtBuildConfig Condition="'$(Configuration)' == 'Release'">release</QtBuildConfig>
+  </PropertyGroup>
+  <Import Project="$(QtMsBuild)\Qt.props"/>
+  <ItemDefinitionGroup>
+    <ClCompile>
+      <LanguageStandard>stdcpp17</LanguageStandard>
+      <MultiProcessorCompilation>true</MultiProcessorCompilation>
+      <WarningLevel>Level3</WarningLevel>
+      <ExceptionHandling>Sync</ExceptionHandling>
+      <AdditionalOptions>/utf-8 /Zc:__cplusplus %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalIncludeDirectories>$(ProjectDir)third_party\ffmpeg_7_1_3;$(ProjectDir)dependency_sources\openvino\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>NOMINMAX;DCTS_DEPTH_SDK_BUILD;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+    <Link>
+      <AdditionalDependencies>bcrypt.lib;advapi32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <AdditionalOptions>/PDBALTPATH:%_PDB% %(AdditionalOptions)</AdditionalOptions>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(DctsInstallerBuild)' == 'true'">
+    <ClCompile><PreprocessorDefinitions>DCTS_INSTALLER_BUILD;%(PreprocessorDefinitions)</PreprocessorDefinitions></ClCompile>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)' == 'Release'">
+    <ClCompile><Optimization>MaxSpeed</Optimization><DebugInformationFormat>ProgramDatabase</DebugInformationFormat></ClCompile>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)' == 'Debug'">
+    <ClCompile><Optimization>Disabled</Optimization><DebugInformationFormat>ProgramDatabase</DebugInformationFormat></ClCompile>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <ClCompile Include="sdk\DepthSdk.cpp"/>
+    <ClCompile Include="RuntimeDiscovery.cpp">
+      <PreprocessorDefinitions Condition="'$(DctsUseCudaEp)' != 'true' or '$(DctsInstallerBuild)' == 'true'">DCTS_TENSORRT_RTX;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+    <ClCompile Include="sensors\RvAssistDepth.cpp">
+      <PreprocessorDefinitions Condition="'$(DctsUseCudaEp)' != 'true' or '$(DctsInstallerBuild)' == 'true'">DCTS_TENSORRT_RTX;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+    <ClCompile Include="sensors\RvAssistFusion.cpp"/>
+    <ClCompile Include="sensors\RvInferenceRuntime.cpp"/>
+    <ClCompile Include="sensors\RvInferenceSettings.cpp"/>
+    <ClCompile Include="sensors\RvDepthCoverage.cpp"/>
+    <ClCompile Include="sensors\RvDepthDiagnostic.cpp"/>
+    <ClCompile Include="sensors\RvDeviceStore.cpp"/>
+    <ClCompile Include="sensors\RvDtofBoardStream.cpp"/>
+    <ClCompile Include="sensors\RvDtofCandidates.cpp"/>
+    <ClCompile Include="sensors\RvSessionController.cpp"/>
+    <ClCompile Include="sensors\RvTunerController.cpp"/>
+    <ClCompile Include="sensors\RvTunerProtocol.cpp"/>
+    <ClCompile Include="sensors\RvUsbEnrollment.cpp"/>
+    <ClInclude Include="sdk\DepthSdk.h"/>
+    <ClInclude Include="sdk\DepthSdkExports.h"/>
+    <ClInclude Include="sdk\DepthSdkQt.h"/>
+    <ClInclude Include="RuntimeDiscovery.h"/>
+    <ClInclude Include="sensors\RvAssistFusion.h"/>
+    <ClInclude Include="sensors\RvInferenceRuntime.h"/>
+    <ClInclude Include="sensors\RvDepthCoverage.h"/>
+    <ClInclude Include="sensors\RvDepthDiagnostic.h"/>
+    <ClInclude Include="sensors\RvDeviceStore.h"/>
+    <ClInclude Include="sensors\RvDtofBoardStream.h"/>
+    <ClInclude Include="sensors\RvDtofCandidates.h"/>
+    <ClInclude Include="sensors\RvTunerProtocol.h"/>
+    <ClInclude Include="sensors\RvUsbEnrollment.h"/>
+    <QtMoc Include="sensors\RvAssistDepth.h"/>
+    <QtMoc Include="sensors\RvInferenceSettings.h"/>
+    <QtMoc Include="sensors\RvSessionController.h"/>
+    <QtMoc Include="sensors\RvTunerController.h"/>
+    <QtRcc Include="Component_depth.qrc"/>
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets"/>
+  <Import Project="$(QtMsBuild)\qt.targets"/>
+</Project>

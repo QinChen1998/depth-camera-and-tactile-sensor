@@ -11,20 +11,23 @@
 
 namespace RuntimeDiscovery {
 namespace {
+QString sdkRuntimeDirectory, sdkSettingsFile;
+
 QString absolute(const QString &path) {
-    return path.trimmed().isEmpty()?QString():QDir::cleanPath(QDir(QCoreApplication::applicationDirPath()).absoluteFilePath(QDir::fromNativeSeparators(path)));
+    return path.trimmed().isEmpty()?QString():QDir::cleanPath(QDir(runtimeDirectory()).absoluteFilePath(QDir::fromNativeSeparators(path)));
 }
 QJsonObject runtimeOverrides() {
-    QFile file(QDir(QCoreApplication::applicationDirPath()).filePath("runtime-paths.json"));
+    QFile file(QDir(runtimeDirectory()).filePath("runtime-paths.json"));
     if(!file.open(QIODevice::ReadOnly)||file.size()>65536)return {};
     return QJsonDocument::fromJson(file.readAll()).object();
 }
 QString overrideValue(const QString &name) {
-    if(qEnvironmentVariableIsSet(name.toLatin1().constData()))return absolute(qEnvironmentVariable(name.toLatin1().constData()));
+    if(sdkRuntimeDirectory.isEmpty()&&qEnvironmentVariableIsSet(name.toLatin1().constData()))
+        return absolute(qEnvironmentVariable(name.toLatin1().constData()));
     return absolute(runtimeOverrides().value(name).toString());
 }
 QString configError() {
-    QFile file(QDir(QCoreApplication::applicationDirPath()).filePath("runtime-paths.json"));
+    QFile file(QDir(runtimeDirectory()).filePath("runtime-paths.json"));
     if(!file.exists())return {};
     if(!file.open(QIODevice::ReadOnly)||file.size()>65536)return "Cannot read runtime-paths.json";
     QJsonParseError error;const auto document=QJsonDocument::fromJson(file.readAll(),&error);
@@ -33,7 +36,7 @@ QString configError() {
     return {};
 }
 QString nativeExecutable(const char *name,const QString &root,const QString &directory,const QString &file) {
-    if(qEnvironmentVariableIsSet(name))return absolute(qEnvironmentVariable(name));
+    if(sdkRuntimeDirectory.isEmpty()&&qEnvironmentVariableIsSet(name))return absolute(qEnvironmentVariable(name));
     if(runtimeOverrides().contains(QLatin1String(name)))return absolute(runtimeOverrides()[QLatin1String(name)].toString());
 #ifdef QT_DEBUG
     const QString configuration="Debug";
@@ -43,7 +46,22 @@ QString nativeExecutable(const char *name,const QString &root,const QString &dir
     return QDir(root).filePath(directory+'/'+configuration+"/runtime/"+file);
 }
 }
+void setSdkPaths(const QString &directory, const QString &settingsFile) {
+    sdkRuntimeDirectory=directory;
+    sdkSettingsFile=settingsFile;
+}
+QSettings depthSettings() {
+    if (sdkSettingsFile.isEmpty()) return QSettings();
+    return QSettings(sdkSettingsFile,QSettings::IniFormat);
+}
+QString runtimeDirectory() {
+    return sdkRuntimeDirectory.isEmpty()?QCoreApplication::applicationDirPath():sdkRuntimeDirectory;
+}
+QString inferenceWorker() {
+    return QDir(runtimeDirectory()).filePath("DctsInferenceWorker.exe");
+}
 QString applicationRoot() {
+    if (!sdkRuntimeDirectory.isEmpty()) return sdkRuntimeDirectory;
     QDir directory(QCoreApplication::applicationDirPath());
     for(int i=0;i<4;++i){if(directory.exists("Depth Camera and Tactile Sensor.vcxproj")||directory.exists("DCTS_APP.json"))return directory.absolutePath();directory.cdUp();}
     return QCoreApplication::applicationDirPath();
@@ -66,6 +84,7 @@ QStringList vlcDirectories() {
     const auto configured = overrideValue("RTSP_VLC_DIR");
     if (!configured.isEmpty()) return {configured};
     QStringList directories{QDir(applicationRoot()).filePath("vlc")};
+    if (!sdkRuntimeDirectory.isEmpty()) return directories;
     for (const auto *key : {"HKEY_CURRENT_USER\\Software\\VideoLAN\\VLC", "HKEY_LOCAL_MACHINE\\Software\\VideoLAN\\VLC"}) {
         QSettings registry(QString::fromLatin1(key), QSettings::NativeFormat);
         directories.append(registry.value("InstallDir").toString());
