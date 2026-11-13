@@ -10,6 +10,7 @@
 #include "sensors/RvDeviceStore.h"
 #include "sensors/RvUsbEnrollment.h"
 #include <QApplication>
+#include <QDebug>
 #include <QDir>
 #include <QFile>
 #include <QIcon>
@@ -29,6 +30,7 @@ int runRvAssistRecoveryTests(const QString &);
 int runRvTunerTests(const QString &);
 int runLiveValidation(SensorMainWindow &,const QString &,int);
 int runImagingSwitchValidation(SensorMainWindow&,const QString&);
+int runPointCloudLiveValidation(SensorMainWindow &, const QString &);
 int runHostAssistLiveValidation(SensorMainWindow &,const QString &);
 int runHostThermalLiveValidation(SensorMainWindow &,const QString &);
 int runUsbEnrollmentLiveValidation(SensorMainWindow &,const QString &);
@@ -124,9 +126,13 @@ int main(int argc,char **argv)
     const bool hostThermalLive=flag=="--host-thermal-live-validation";
     const bool usbEnrollmentLive=flag=="--usb-enrollment-live-validation";
     const bool imagingSwitchLive=flag=="--imaging-switch-validation";
-    const bool live=usbEnrollmentLive||hostAssistLive||hostThermalLive||imagingSwitchLive||flag=="--live-validation";
+    const bool pointCloudLive=flag=="--point-cloud-live-validation";
+    const bool live=usbEnrollmentLive||hostAssistLive||hostThermalLive||imagingSwitchLive||pointCloudLive||flag=="--live-validation";
     if(live&&(qEnvironmentVariable("DCTS_LIVE_ENABLE")!="1"||qEnvironmentVariable("DCTS_LIVE_SERIAL").isEmpty()
-        ||(!usbEnrollmentLive&&!hostAssistLive&&!hostThermalLive&&qEnvironmentVariable("DCTS_ALLOW_SAVED_TOF_SWITCH")!="1")||qEnvironmentVariable("RV_TEST_OFFLINE_ONLY")=="1"))return 3;
+        ||(!usbEnrollmentLive&&!hostAssistLive&&!hostThermalLive&&qEnvironmentVariable("DCTS_ALLOW_SAVED_TOF_SWITCH")!="1")||qEnvironmentVariable("RV_TEST_OFFLINE_ONLY")=="1")){
+        qWarning("Live validation requires explicit enablement, a device identity, and the applicable mode-switch authorization.");
+        return 3;
+    }
     const bool testing=!flag.isEmpty();std::unique_ptr<QTemporaryDir> temporary;
     if(testing){
 #ifdef DCTS_INSTALLER_BUILD
@@ -136,7 +142,10 @@ int main(int argc,char **argv)
 #endif
         QDir().mkpath(parent);
         temporary=std::make_unique<QTemporaryDir>(parent+"/settings-XXXXXX");
-        if(!temporary->isValid())return 3;
+        if(!temporary->isValid()){
+            qWarning() << "Cannot create isolated test settings:" << temporary->errorString();
+            return 3;
+        }
     }
     if(live){
         // Explicitly gated live tests may read an existing development profile
@@ -145,11 +154,18 @@ int main(int argc,char **argv)
         const auto preferences="/preferences/DepthCameraAndTactileSensor/DepthCameraAndTactileSensor.ini";
         QDir().mkpath(temporary->path()+"/preferences/DepthCameraAndTactileSensor");
         if(!QFile::copy(source+"/devices.json",temporary->path()+"/devices.json")
-            ||!QFile::copy(source+preferences,temporary->path()+preferences))return 3;
+            ||!QFile::copy(source+preferences,temporary->path()+preferences)){
+            qWarning("Cannot copy the registered devices and preferences into isolated live-test settings.");
+            return 3;
+        }
         if(!usbEnrollmentLive){
             RvDeviceStore store(temporary->path()+"/devices.json");QString selected;
             for(const auto &device:store.profiles())if(device.serial==qEnvironmentVariable("DCTS_LIVE_SERIAL"))selected=device.id;
-            if(selected.isEmpty())return 3;store.save(store.profiles(),selected);
+            if(selected.isEmpty()){
+                qWarning("The requested device was not found in the registered live-test profiles.");
+                return 3;
+            }
+            store.save(store.profiles(),selected);
         }
     }
     configureSettings(testing?temporary->path():configurationDirectory(),
@@ -184,6 +200,7 @@ int main(int argc,char **argv)
     if(hostAssistLive)return runHostAssistLiveValidation(window,report);
     if(hostThermalLive)return runHostThermalLiveValidation(window,report);
     if(imagingSwitchLive)return runImagingSwitchValidation(window,report);
+    if(pointCloudLive)return runPointCloudLiveValidation(window,report);
     if(live)return runLiveValidation(window,report,300);
     if(flag=="--port-ui-smoke-test"){
         const int result=runPortSmokeTests(window,language,report);

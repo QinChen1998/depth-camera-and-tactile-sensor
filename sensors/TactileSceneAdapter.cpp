@@ -3,7 +3,6 @@
 #include "TactileHistory.h"
 #include <algorithm>
 #include <cmath>
-#include <cstring>
 namespace {
 QVariantMap pressureArrow(const tactile::Force &force,double scale,double maximum,bool reverseZ=false) {
     auto value=TactileSceneAdapter::arrow({force.x,force.y,reverseZ?force.z:-force.z},scale,maximum);
@@ -11,22 +10,6 @@ QVariantMap pressureArrow(const tactile::Force &force,double scale,double maximu
     value["offset"]=QVariant::fromValue(QVector3D());
     return value;
 }
-}
-TactileInstanceBuffer::TactileInstanceBuffer(QObject *owner) { QObject::setParent(owner); }
-void TactileInstanceBuffer::setEntries(const QVector<InstanceTableEntry> &entries) {
-    const qsizetype bytes=entries.size()*sizeof(InstanceTableEntry);
-    if(bytes==m_buffer.size()&&(!bytes||std::memcmp(entries.constData(),m_buffer.constData(),size_t(bytes))==0))return;
-    m_buffer.resize(bytes);
-    if(bytes)std::memcpy(m_buffer.data(),entries.constData(),size_t(bytes));
-    m_count=entries.size();markDirty();
-}
-QByteArray TactileInstanceBuffer::getInstanceBuffer(int *count) {
-    if(count)*count=m_count;
-    return m_buffer;
-}
-QQuick3DInstancing::InstanceTableEntry TactileInstanceBuffer::entry(const QVector3D &position,
-    const QVector3D &scale,const QQuaternion &rotation,const QColor &color) {
-    return calculateTableEntryFromQuaternion(position,scale,rotation,color);
 }
 TactileSceneAdapter::TactileSceneAdapter(QObject *parent):QObject(parent),
     m_interpolatedPoints(new TactileInstanceBuffer(this)),

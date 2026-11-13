@@ -1,4 +1,9 @@
 <RCC>
+  <qresource prefix="/qml">
+    <file alias="RvPointCloudView.qml">qml/RvPointCloudView.qml</file>
+    <file alias="RvCloudPoint.vert">qml/RvCloudPoint.vert</file>
+    <file alias="RvCloudPoint.frag">qml/RvCloudPoint.frag</file>
+  </qresource>
   <qresource prefix="/camera">
     <file alias="dtof_m48_geometry_f2.bin">assets/camera/dtof_m48_geometry_f2.bin</file>
     <file alias="dtof_m48_geometry.bin">assets/camera/dtof_m48_geometry.bin</file>

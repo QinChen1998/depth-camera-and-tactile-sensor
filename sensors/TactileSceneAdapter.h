@@ -1,4 +1,5 @@
 #pragma once
+#include "SceneInstanceBuffer.h"
 #include "TactileFrame.h"
 #include <cmath>
 #include <QObject>
@@ -6,24 +7,8 @@
 #include <QQuaternion>
 #include <QVector3D>
 #include <QPalette>
-#include <QtQuick3D/QQuick3DInstancing>
 
-// Interpolated glyphs share a few meshes instead of creating a QML scene per point.
-class TactileInstanceBuffer final : public QQuick3DInstancing {
-    Q_OBJECT
-    Q_PROPERTY(int count READ count NOTIFY instanceTableChanged)
-public:
-    explicit TactileInstanceBuffer(QObject *owner);
-    int count() const { return m_count; }
-    void setEntries(const QVector<InstanceTableEntry> &entries);
-    static InstanceTableEntry entry(const QVector3D &position,const QVector3D &scale,
-        const QQuaternion &rotation,const QColor &color);
-protected:
-    QByteArray getInstanceBuffer(int *count) override;
-private:
-    QByteArray m_buffer;
-    int m_count=0;
-};
+using TactileInstanceBuffer = SceneInstanceBuffer;
 // Read-only QML presentation snapshot. No controller, source, or motion authority.
 class TactileSceneAdapter final : public QObject {
     Q_OBJECT

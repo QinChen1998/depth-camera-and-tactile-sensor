@@ -6,6 +6,7 @@
 #include "sensors/RtspCameraPage.h"
 #include "sensors/RvDeviceManagerDialog.h"
 #include "sensors/RvInferenceSettings.h"
+#include "sensors/RvPointCloudWidget.h"
 #include "sensors/RvTunerController.h"
 #include "sensors/TactileVisualizationWidget.h"
 #include <QApplication>
@@ -81,8 +82,13 @@ SensorMainWindow::SensorMainWindow(LanguageManager *language, QWidget *parent)
     m_cameraDock=new QDockWidget(this);m_cameraDock->setObjectName("rtspCameraDock");
     m_camera=new RtspCameraPage(m_cameraDock);m_camera->setSessionController(m_session);
     m_cameraDock->setWidget(m_camera);
+    m_pointCloudDock = new QDockWidget(this);
+    m_pointCloudDock->setObjectName("pointCloudDock");
+    auto *pointCloud = new RvPointCloudWidget(m_session, m_pointCloudDock);
+    m_pointCloudDock->setWidget(pointCloud);
+    connect(m_pointCloudDock, &QDockWidget::visibilityChanged, pointCloud, &RvPointCloudWidget::setRenderingActive);
     connect(m_session,&RvSessionController::dtofCandidateSelectionChanged,this,&SensorMainWindow::updateCameraVisibility);
-    m_docks={m_tactile,m_depthDock,m_cameraDock};
+    m_docks={m_tactile,m_depthDock,m_pointCloudDock,m_cameraDock};
     for(auto *dock:m_docks)dock->setAllowedAreas(Qt::AllDockWidgetAreas);
     connect(m_session->tuner(),&RvTunerController::shutdownFinished,this,[this]{
         if(m_closing){m_tunerCloseReady=true;QTimer::singleShot(0,this,&QWidget::close);}
@@ -231,7 +237,8 @@ void SensorMainWindow::resetLayout()
     addDockWidget(Qt::LeftDockWidgetArea,m_tactile);
     addDockWidget(Qt::RightDockWidgetArea,m_depthDock);
     splitDockWidget(m_depthDock,m_cameraDock,Qt::Vertical);
-    m_tactile->show();m_depthDock->show();m_cameraDock->show();m_depthDock->raise();
+    tabifyDockWidget(m_depthDock, m_pointCloudDock);
+    m_tactile->show();m_depthDock->show();m_pointCloudDock->show();m_cameraDock->show();m_depthDock->raise();
     resizeDocks({m_tactile,m_depthDock},{780,880},Qt::Horizontal);
     resizeDocks({m_depthDock,m_cameraDock},{480,480},Qt::Vertical);
     updateCameraVisibility();
@@ -278,6 +285,7 @@ void SensorMainWindow::retranslate()
 {
     setWindowTitle(QApplication::applicationDisplayName() + QStringLiteral("（内测版）"));
     m_tactile->setWindowTitle(tr("Magnetic tactile sensors"));m_depthDock->setWindowTitle(tr("Depth Map"));
+    m_pointCloudDock->setWindowTitle(tr("Point Cloud"));
     m_cameraDock->setWindowTitle(tr("Camera raw video"));
     m_file->setTitle(tr("File"));m_exit->setText(tr("Exit"));m_view->setTitle(tr("View"));
     m_reset->setText(tr("Reset layout"));m_presets->setTitle(tr("Layout Presets"));

@@ -2,11 +2,11 @@
 
 主机推理新增独立设备层，见 [UniDepth 推理设备选择](MULTI_BACKEND_INFERENCE.md)。`RvInferenceSettings` 管理异步检测、实际模型试运行、用户选择和 CPU 回退；`RvInferenceRuntime` 管理硬件候选、固定模型身份、运行库指纹和原生 OpenVINO 会话。`RvAssistDepth` 继续承担预处理、H 矫正与独立 worker 生命周期。TensorRT ORT 与兼容 ORT／OpenVINO 在子进程中隔离，不能在 GUI 进程混载同名运行库。
 
-本项目是独立的 Windows x64 传感器上位机，主窗口提供磁触觉、深度图和摄像头原视频。dToF 运行预设由成像方案选择。本文描述当前日常版本的架构。当前保护实现及安装包约定见 [模型保护](MODEL_PROTECTION.md)，维护约束见工作区的 AGENTS.md（仅本地保存）。
+本项目是独立的 Windows x64 传感器上位机，主窗口提供磁触觉、深度图、点云和摄像头原视频。dToF 运行预设由成像方案选择。本文描述当前日常版本的架构。当前保护实现及安装包约定见 [模型保护](MODEL_PROTECTION.md)，维护约束见工作区的 AGENTS.md（仅本地保存）。
 
 ## 产品边界
 
-主窗口提供磁触觉、深度图、原视频三个模块，以及设备管理、渲染、语言、停靠和布局预设。深度图提供以下三个方案；LiteSR、Tiny 和其他退役选择迁移到 H，已退役模式拒绝启动。
+主窗口提供四个模块，以及设备管理、渲染、语言、停靠和布局预设。深度图提供以下三个方案；LiteSR、Tiny 和其他退役选择迁移到 H，已退役模式拒绝启动。
 
 | 显示名称 | 产品入口 ID | 推理和处理位置 |
 |---|---|---|
@@ -27,6 +27,7 @@ flowchart TD
     Window --> Session[RvSessionController 共享成像会话]
     Session --> Camera[原视频页面]
     Session --> Depth[深度页面]
+    Session --> PointCloud[辅助深度和原生 ToF 点云]
     Session --> Tuner[dToF 调参控制器]
     Session --> Control[RvControlWorker.exe]
     Tuner --> Control
@@ -45,7 +46,7 @@ flowchart TD
 | 入口或文件 | 职责 |
 |---|---|
 | `main.cpp` | 应用初始化、独立配置、离线测试分发、主机推理 worker 分发 |
-| `SensorMainWindow.*` | 三个模块与菜单、布局恢复、异步停止和退出等待 |
+| `SensorMainWindow.*` | 模块与菜单、布局恢复、异步停止和退出等待 |
 | `TactileDockWidget.*`、`sensors/TactileVisualizationWidget.*` | 磁触觉操作、曲线、三维显示与串口连接 |
 | `sensors/TactileSerialSource.*` | 串口测量、设备型号识别及有界自动置零 |
 | `sensors/TactileSceneAdapter.*`、`TactileSurfaceModel.*`、`qml/` | 三维场景数据与表面资源 |
@@ -54,11 +55,14 @@ flowchart TD
 | `sensors/RvAssistDepth.*` | 原生模型会话、worker IPC、模型输入方向、预测逆恢复和融合调用 |
 | `sensors/RvAssistFusion.*`、`RvDepthDiagnostic.*`、`RvDepthCoverage.*` | 米制融合、尺度连续性、校正点和同帧诊断 |
 | `sensors/RvDepthView.*`、`DepthMapWidget.*`、`RtspCameraPage.*` | 深度与视频显示、悬停数值、显示设置和快照 |
+| `sensors/RvPointCloudWidget.*`、`qml/RvPointCloudView.qml` | 辅助深度和原生 ToF 反投影、点云显示和视角操作 |
 | `sensors/RvDeviceStore.*`、`RvDeviceManagerDialog.*` | 受信任设备档案、固定默认标定和输入方向 |
 | `sensors/RvUsbEnrollment.*` | USB ADB 发现、用户确认、板端与 RNDIS 网卡配网、受信任档案登记 |
 | `sensors/RvTunerController.*`、`RvTunerWidget.*`、`RvTunerProtocol.*` | 独占调参、异步操作、停止、长期参数保存 |
 | `RvControlWorker.cpp`、`RvControlProtocol.*` | 原生 libssh2/OpenSSL 控制、身份校验与板端服务操作 |
 | `RuntimeDiscovery.*` | 应用根目录、运行时覆盖路径、worker 清单和依赖校验 |
+
+点云与深度图共享成像会话。48×32 档订阅 `tofFrameReady`，通过 F6 GEO2 射线和相机平移得到原生测点的 XYZ。上位机辅助推理档订阅 `assistDepthSnapshotReady`，用已恢复至标定网格的 640×480 相机 Z 和对应内参逐像素反投影。后台一次转换一帧，转换期间保留最新待处理帧。Qt Quick 3D 用实例化圆片绘制有效像素，着色器在屏幕空间按设定点径展开，Z 色标使用点云自己的设置。两种数据源都使用 X 向右、Y 向上、前方为负 Z 的场景坐标。停采、切档或过期时清空数据并保留视角。
 
 主机模型 worker 使用同一构建产出的 ASCII 文件名 `DctsInferenceWorker.exe`，以 `--rv-assist-worker` 启动 `QCoreApplication` 和二进制 IPC。`RuntimeDiscovery::NativeWorkerResult` 返回原生 `RvControlWorker.exe` 的路径和校验错误，`nativeWorkerEnvironment()` 限制设备控制进程的 DLL/Qt 环境；没有 Python 回退。
 

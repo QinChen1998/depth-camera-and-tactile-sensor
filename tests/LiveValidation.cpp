@@ -2,21 +2,27 @@
 #include <QtWidgets/QDockWidget>
 #include "../SensorMainWindow.h"
 #include "../sensors/DepthMapWidget.h"
+#include "../sensors/DepthColorScale.h"
 #include "../sensors/RvDepthView.h"
 #include "../sensors/RvCameraView.h"
 #include "../sensors/RvInferenceRuntime.h"
 #include "../sensors/RvTunerController.h"
 #include "../sensors/RvUsbEnrollment.h"
 #include "../sensors/RvDeviceManagerDialog.h"
+#include "../sensors/SceneInstanceBuffer.h"
 #include <QApplication>
 #include <QAction>
 #include <QComboBox>
 #include <QtEndian>
 #include <cstring>
 #include <QDateTime>
+#include <QDoubleSpinBox>
 #include <QLabel>
 #include <QMessageBox>
 #include <QPushButton>
+#include <QQuickItem>
+#include <QQuickWidget>
+#include <QWheelEvent>
 #include <QElapsedTimer>
 #include <QEventLoop>
 #include <QFile>
@@ -414,4 +420,213 @@ int runImagingSwitchValidation(SensorMainWindow &window,const QString &path){
     session->stop();const bool stopped=waitFor([&]{return !session->busy();},35000);waitFor([]{return false;},1500);
     report["normal_stop"]=stopped;report["late_depth_results"]=late;report["passed"]=all&&stages.size()==7&&stopped&&late==0;
     save(path,report);window.close();return report["passed"].toBool()?0:2;
+}
+
+int runPointCloudLiveValidation(SensorMainWindow &window, const QString &path)
+{
+    auto *session = window.session();
+    if (qEnvironmentVariable("DCTS_LIVE_ENABLE") != "1"
+        || qEnvironmentVariable("DCTS_ALLOW_SAVED_TOF_SWITCH") != "1"
+        || qEnvironmentVariable("RV_TEST_OFFLINE_ONLY") == "1"
+        || session->deviceProfile().serial != qEnvironmentVariable("DCTS_LIVE_SERIAL")) {
+        save(path, {{"passed", false}, {"detail", "The live device does not match the session's registered profile"}});
+        return 3;
+    }
+
+    auto *dock = window.findChild<QDockWidget *>("pointCloudDock");
+    auto *view = window.findChild<QQuickWidget *>("rvPointCloudView");
+    auto *instances = window.findChild<SceneInstanceBuffer *>("rvPointCloudInstances");
+    auto *depthInstances = window.findChild<SceneInstanceBuffer *>("rvPointCloudDepthInstances");
+    auto *diameter = window.findChild<QDoubleSpinBox *>("rvPointCloudPointDiameter");
+    auto *colorMinimum = window.findChild<QDoubleSpinBox *>("rvPointCloudColorMinimum");
+    auto *colorMaximum = window.findChild<QDoubleSpinBox *>("rvPointCloudColorMaximum");
+    auto *applyRange = window.findChild<QPushButton *>("rvPointCloudColorApply");
+    auto *menu = window.findChild<QComboBox *>("rvDepthModel");
+    auto *start = window.findChild<QPushButton *>("rvDepthStart");
+    auto *stop = window.findChild<QPushButton *>("rtspCameraStop");
+    if (!dock || !view || !instances || !depthInstances || !diameter || !colorMinimum || !colorMaximum
+        || !applyRange || !menu || !start || !stop) {
+        save(path, {{"passed", false}, {"detail", "The required point-cloud or shared capture controls are missing"}});
+        return 3;
+    }
+    dock->show();
+    dock->raise();
+    if (!waitFor([&] { return view->status() == QQuickWidget::Ready; }, 3000)) {
+        save(path, {{"passed", false}, {"detail", "Point cloud QML did not load"}});
+        return 2;
+    }
+
+    QJsonArray stages;
+    QJsonObject report{{"passed", false}};
+    QString previousGeneration;
+    bool all = true;
+    const QString hostScheme = QStringLiteral("host_") + QLatin1String(RvCameraView::UniDepthVgaNative16);
+    const auto cloudCleared = [&] { return instances->count() == 0 && depthInstances->count() == 0; };
+    const auto cameraDistance = [&] { return view->rootObject()->property("cameraDistance").toDouble(); };
+    const auto coloredPixels = [](const QImage &image) {
+        // The unlit points are saturated; the neutral grid and muted axes are below this threshold.
+        int count = 0;
+        for (int y = 0; y < image.height(); ++y) {
+            const auto *line = reinterpret_cast<const QRgb *>(image.constScanLine(y));
+            for (int x = 0; x < image.width(); ++x) {
+                const auto rgb = line[x];
+                count += std::max({qRed(rgb), qGreen(rgb), qBlue(rgb)})
+                    - std::min({qRed(rgb), qGreen(rgb), qBlue(rgb)}) > 125;
+            }
+        }
+        return count;
+    };
+    double manualDistance = cameraDistance();
+    for (const auto &scheme : {hostScheme, QStringLiteral("board_native_tof48"), QStringLiteral("board_native_tof48_high_accuracy")}) {
+        QObject scope;
+        const bool assisted = scheme == hostScheme;
+        const int expectedMode = scheme == "board_native_tof48" ? RvCaptureContract::Native48 : RvCaptureContract::Native48HighAccuracy;
+        int frames = 0, videoFrames = 0, peakPoints = 0;
+        qint64 lastSequence = 0;
+        QString generation;
+        bool invalid = false;
+        QObject::connect(session, &RvSessionController::cameraFrameReady, &scope, [&] { ++videoFrames; });
+        const auto observeFrame = [&](const QString &token, qint64 sequence) {
+            if (generation.isEmpty())
+                generation = token;
+            invalid |= token != generation || sequence <= lastSequence;
+            lastSequence = sequence;
+            ++frames;
+        };
+        if (assisted) {
+            QObject::connect(session, &RvSessionController::assistDepthSnapshotReady, &scope,
+                [&](const QByteArray &depth, const QJsonObject &metadata) {
+                    const auto &profile = RvCameraView::profile(session->assistHostModel());
+                    invalid |= metadata["width"] != 640 || metadata["height"] != 480
+                        || metadata["depth_unit"] != "camera-Z_m_float32"
+                        || metadata["depth_K"].toArray() != RvCameraView::intrinsics(profile)
+                        || depth.size() != profile.depthBytes() || instances->count() != 0;
+                    observeFrame(metadata["source_generation"].toString(), metadata["frame_id"].toInteger());
+                });
+        } else {
+            QObject::connect(session, &RvSessionController::tofFrameReady, &scope, [&](const RvTofFrame &frame) {
+                if (frame.metadata["candidate_mode"] != expectedMode)
+                    return;
+                invalid |= frame.columns() != 48 || frame.rows() != 32;
+                int valid = 0;
+                for (int index = 0; index < frame.sampleCount(); ++index)
+                    valid += frame.valid(index) && frame.rangeUq2(index) > 0;
+                invalid |= instances->count() != valid || depthInstances->count() != 0;
+                peakPoints = std::max(peakPoints, valid);
+                observeFrame(frame.metadata["generation"].toString(), frame.metadata["tof_sequence"].toInteger());
+            });
+        }
+
+        const int index = menu->findData(scheme);
+        if (index < 0) {
+            all = false;
+            break;
+        }
+        menu->setCurrentIndex(index);
+        QMetaObject::invokeMethod(menu, "activated", Qt::DirectConnection, Q_ARG(int, index));
+        const bool clearedOnSelection = cloudCleared();
+        if (session->userStopped())
+            start->click();
+        const bool ready = waitFor([&] {
+            if (assisted)
+                peakPoints = std::max(peakPoints, depthInstances->count());
+            return session->userStopped() || (frames >= 18 && videoFrames >= 18
+                && (assisted ? depthInstances->count() >= 1536 : instances->count() > 0)
+                && !session->busy() && !session->imagingSwitchActive());
+        }, assisted ? 95000 : 60000) && !session->userStopped() && session->currentImagingScheme() == scheme;
+        if (assisted)
+            invalid |= peakPoints > 640 * 480;
+        QJsonObject display;
+        int rendered = 0;
+        if (ready) {
+            const auto screenshot = view->grabFramebuffer().convertToFormat(QImage::Format_RGB32);
+            rendered = coloredPixels(screenshot);
+            if (assisted) {
+                const bool savedImage = screenshot.save(path + ".assisted.png");
+                const double originalDiameter = diameter->value();
+                const double originalMinimum = colorMinimum->value();
+                const double originalMaximum = colorMaximum->value();
+                const int pointCount = depthInstances->count();
+                diameter->setValue(1.0);
+                const int smallCoverage = coloredPixels(view->grabFramebuffer().convertToFormat(QImage::Format_RGB32));
+                const bool sameCount = pointCount == depthInstances->count();
+                diameter->setValue(originalDiameter);
+                const bool diameterChanged = diameter->isVisible() && sameCount && smallCoverage < rendered;
+
+                colorMinimum->setValue(.1);
+                colorMaximum->setValue(1.8);
+                applyRange->click();
+                const bool rangeApplied = waitFor([&] {
+                    if (applyRange->isEnabled() || depthInstances->count() < 4)
+                        return false;
+                    int changedColors = 0;
+                    for (int n = 1; n <= 3; ++n) {
+                        const int index = depthInstances->count() * n / 4;
+                        const float z = -depthInstances->instancePosition(index).z() / 1000.f;
+                        const QRgb actual = depthInstances->instanceColor(index).rgb();
+                        const QRgb expected = DepthColorScale::color(z, .1, 1.8);
+                        const auto close = [](int a, int b) { return std::abs(a - b) <= 1; };
+                        if (!close(qRed(actual), qRed(expected)) || !close(qGreen(actual), qGreen(expected))
+                            || !close(qBlue(actual), qBlue(expected)))
+                            return false;
+                        changedColors += expected != DepthColorScale::color(z, originalMinimum, originalMaximum);
+                    }
+                    return changedColors > 0;
+                }, 2000);
+                colorMinimum->setValue(originalMinimum);
+                colorMaximum->setValue(originalMaximum);
+                applyRange->click();
+
+                const QPoint center = view->rect().center();
+                QWheelEvent wheel(center, view->mapToGlobal(center), {}, QPoint(0, 120),
+                                  Qt::NoButton, Qt::NoModifier, Qt::NoScrollPhase, false);
+                QApplication::sendEvent(view, &wheel);
+                const double zoomed = cameraDistance();
+                const bool wheelZoomed = zoomed < manualDistance;
+                const int nextFrame = frames + 3;
+                const bool viewHeld = waitFor([&] { return frames >= nextFrame; }, 5000)
+                    && cameraDistance() == zoomed;
+                manualDistance = zoomed;
+                display = {{"point_diameter_px", originalDiameter}, {"color_minimum_m", originalMinimum},
+                    {"color_maximum_m", originalMaximum}, {"colored_pixels", rendered}, {"colored_pixels_at_1px", smallCoverage},
+                    {"diameter_changes_screen_coverage", diameterChanged}, {"color_range_applied", rangeApplied},
+                    {"manual_zoom", wheelZoomed}, {"zoom_preserved_on_new_frames", viewHeld}, {"framebuffer_saved", savedImage}};
+                invalid |= !diameterChanged || !rangeApplied || !wheelZoomed || !viewHeld || !savedImage;
+            } else {
+                const bool viewHeld = cameraDistance() == manualDistance;
+                display["zoom_preserved_on_switch"] = viewHeld;
+                invalid |= !viewHeld || diameter->isVisible();
+            }
+        }
+        const bool passed = ready && clearedOnSelection && !invalid && rendered && !generation.isEmpty()
+            && generation != previousGeneration;
+        stages.append(QJsonObject{{"scheme", scheme}, {"passed", passed}, {"ready", ready},
+            {"cleared_on_selection", clearedOnSelection},
+            {assisted ? "calibrated_depth_frames_valid" : "same_frame_points_match", !invalid && frames > 0},
+            {"rendered_cloud", rendered > 0}, {"display", display},
+            {assisted ? "assisted_frames" : "raw_frames", frames}, {"video_frames", videoFrames},
+            {"maximum_points", peakPoints}, {"state", session->stateText()}, {"detail", session->detailText()}});
+        report["stages"] = stages;
+        save(path, report);
+        if (!passed) {
+            all = false;
+            break;
+        }
+        previousGeneration = generation;
+    }
+    QObject stopScope;
+    int late = 0;
+    QObject::connect(session, &RvSessionController::tofFrameReady, &stopScope, [&] { ++late; });
+    QObject::connect(session, &RvSessionController::assistDepthSnapshotReady, &stopScope, [&] { ++late; });
+    stop->click();
+    const bool clearedOnStop = cloudCleared();
+    const bool stopped = waitFor([&] { return session->userStopped() && !session->busy(); }, 35000);
+    waitFor([] { return false; }, 1200);
+    report["normal_stop"] = stopped;
+    report["cleared_on_stop"] = clearedOnStop && cloudCleared();
+    report["late_frames"] = late;
+    report["passed"] = all && stages.size() == 3 && stopped && report["cleared_on_stop"].toBool() && late == 0;
+    const bool saved = save(path, report);
+    window.close();
+    return saved && report["passed"].toBool() ? 0 : 2;
 }

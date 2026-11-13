@@ -10,6 +10,7 @@
     <ClCompile Include="LanguageManager.cpp"/>
     <ClCompile Include="TactileDockWidget.cpp"/>
     <ClCompile Include="sensors\DepthMapWidget.cpp"/>
+    <ClCompile Include="sensors\RvPointCloudWidget.cpp"/>
     <ClCompile Include="sensors\ImageDisplaySettings.cpp"/>
     <ClCompile Include="sensors\RtspCameraPage.cpp"/>
     <ClCompile Include="sensors\RvAssistDepth.cpp"/>
@@ -54,6 +55,9 @@
     <ClInclude Include="UiStyle.h"/>
     <ClInclude Include="sensors\DepthColorScale.h"/>
     <QtMoc Include="sensors\DepthMapWidget.h"/>
+    <ClInclude Include="sensors\DockableQuick3DWidget.h"/>
+    <QtMoc Include="sensors\RvPointCloudWidget.h"/>
+    <QtMoc Include="sensors\SceneInstanceBuffer.h"/>
     <ClInclude Include="sensors\DepthPost.h"/>
     <ClInclude Include="sensors\DepthSnapshot.h"/>
     <QtMoc Include="sensors\ImageDisplaySettings.h"/>
@@ -94,6 +98,9 @@
     <ResourceCompile Include="SensorApp.rc"/>
     <QtRcc Include="SensorResources.qrc"/>
     <QtRcc Include="Component_depth.qrc"/>
+    <None Include="qml\RvPointCloudView.qml"/>
+    <None Include="qml\RvCloudPoint.vert"/>
+    <None Include="qml\RvCloudPoint.frag"/>
     <QtRcc Include="Component_tactile.qrc"/>
   </ItemGroup>
   <ItemGroup>

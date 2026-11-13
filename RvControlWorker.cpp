@@ -765,10 +765,9 @@ int run(const QStringList &input) {
         require(mode==RvCaptureContract::NativeHd?effective.fp16Native16Compatible():effective.nativeCompatible(),
                 "Automatic dToF preset is incompatible with the requested imaging mode");
         if(captureOnly){
-            QJsonParseError parse;const auto capabilities=QJsonDocument::fromJson(connection.execute("LD_LIBRARY_PATH=/root/r144_depth:/oem/usr/lib /root/dtof_candidates_20261009/native_hd_gui --native-capabilities"),&parse).object();
-            require(parse.error==QJsonParseError::NoError&&capabilities["native_capture_protocol"]==RvCaptureContract::NativeCaptureProtocolV2
-                &&capabilities["m16"]==true&&capabilities["m48"]==true&&capabilities["model_inference"]==false&&capabilities["photon_enabled"]==false
-                &&capabilities["fov"]==(deviceStore?device.fov():RvCalibration::Fov),"Native16 capture runtime unavailable or calibration differs; no capture command was issued.");
+            const auto capabilities=connection.execute("LD_LIBRARY_PATH=/root/r144_depth:/oem/usr/lib /root/dtof_candidates_20261009/native_hd_gui --native-capabilities");
+            require(matchesNativeCaptureCapabilities(capabilities, deviceStore ? device.fov() : RvCalibration::Fov),
+                    "Native16 capture runtime unavailable or calibration differs; no capture command was issued.");
         }
         const auto action=coordinatorCandidateAction(recovery,legacyCoordinatorProfile());
         const int sessionFov=deviceStore?device.fov():RvCalibration::Fov;
