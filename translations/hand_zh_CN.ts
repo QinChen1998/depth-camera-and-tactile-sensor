@@ -3073,6 +3073,80 @@ Range %6 mm (radial) | SNR %7 | slot %8 | Signal %9 | Noise encoded %10</source>
       <message><source>Too few stationary dToF anchors for a background scale update</source><translation>静止背景 ToF 点不足，暂不更新全局尺度</translation></message>
 </context>
   <context>
+    <name>RvPointCloudView</name>
+    <message>
+      <source>Grid step %1 m</source>
+      <translation>网格间距 %1 m</translation>
+    </message>
+  </context>
+  <context>
+    <name>RvPointCloudWidget</name>
+    <message>
+      <source>Reset view</source>
+      <translation>重置视角</translation>
+    </message>
+    <message>
+      <source>Point diameter</source>
+      <translation>点径</translation>
+    </message>
+    <message>
+      <source>Z color range</source>
+      <translation>Z 色标</translation>
+    </message>
+    <message>
+      <source>Color minimum (m)</source>
+      <translation>色标下限（米）</translation>
+    </message>
+    <message>
+      <source>Color maximum (m)</source>
+      <translation>色标上限（米）</translation>
+    </message>
+    <message>
+      <source>Apply</source>
+      <translation>应用</translation>
+    </message>
+    <message>
+      <source>Point cloud view</source>
+      <translation>点云视图</translation>
+    </message>
+    <message>
+      <source>Drag to rotate, middle-drag to pan, and scroll to zoom.</source>
+      <translation>左键拖动旋转，中键拖动平移，滚轮缩放。</translation>
+    </message>
+    <message>
+      <source>3D view unavailable</source>
+      <translation>三维视图不可用</translation>
+    </message>
+    <message>
+      <source>F6 point cloud calibration unavailable</source>
+      <translation>F6 点云标定不可用</translation>
+    </message>
+    <message>
+      <source>48×32 ToF · %1 / %2 points</source>
+      <translation>48×32 ToF · %1 / %2 点</translation>
+    </message>
+    <message>
+      <source>%1×%2 assisted depth · %3 / %4 points</source>
+      <translation>%1×%2 辅助深度 · %3 / %4 点</translation>
+    </message>
+    <message>
+      <source>Select an imaging scheme in Depth Map.</source>
+      <translation>请在「深度图」中选择成像方案。</translation>
+    </message>
+    <message>
+      <source>Start capture in Depth Map or Camera raw video.</source>
+      <translation>请在「深度图」或「摄像头原视频」中开始采集。</translation>
+    </message>
+    <message>
+      <source>Waiting for a fresh assisted depth frame...</source>
+      <translation>等待新的辅助深度帧…</translation>
+    </message>
+    <message>
+      <source>Waiting for a fresh 48×32 ToF frame...</source>
+      <translation>等待新的 48×32 ToF 帧…</translation>
+    </message>
+  </context>
+  <context>
     <name>SensorMainWindow</name>
     <message>
       <source>RV1103 connection</source>
@@ -3105,6 +3179,10 @@ Range %6 mm (radial) | SNR %7 | slot %8 | Signal %9 | Noise encoded %10</source>
     <message>
       <source>Depth Map</source>
       <translation>深度图</translation>
+    </message>
+    <message>
+      <source>Point Cloud</source>
+      <translation>点云</translation>
     </message>
     <message>
       <source>Camera raw video</source>

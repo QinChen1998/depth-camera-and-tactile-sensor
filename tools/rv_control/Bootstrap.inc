@@ -159,10 +159,20 @@ bool ensureUsbRuntime(Ssh &connection, const QDir &runtime, const QString &boot)
             manifest+=tunerHash(file.bytes).toLatin1()+"  "+file.relative.toLatin1()+"\n";
         }
         upload("files.sha256",manifest,false);
-        phase="board preflight, native capture verification and activation";
-        const auto capabilities=QJsonDocument::fromJson(connection.execute(command("activate"),75000,setup)).object();
-        require(nativeCaptureCapabilities(capabilities,device.fov()),
-            "Installed board capture capabilities differ from the bundled runtime");
+        phase="staged capture capability check";
+        const auto capabilities = connection.execute(
+            "LD_LIBRARY_PATH=" + shellQuote(stage + "/depth:/oem/usr/lib:/usr/lib") + " "
+            + shellQuote(stage + "/candidate/native_hd_gui") + " --native-capabilities"
+            " || { echo 'DTOF_ERROR: The Native16 capture program could not start on this firmware.'; exit 2; }");
+        QJsonParseError parse;
+        const auto parsedCapabilities = QJsonDocument::fromJson(capabilities, &parse);
+        require(parse.error == QJsonParseError::NoError && nativeCaptureCapabilities(parsedCapabilities.object(), device.fov()),
+                "The native capture program did not report the required F6, Native16, Native48 and hole-fill capabilities.");
+        // Bind activation to the exact receipt already parsed on the host.
+        setup.replace("@NATIVE_CAPABILITIES_SHA@", tunerHash(capabilities).toLatin1());
+        phase="board preflight, capture check and activation";
+        require(connection.execute(command("activate"), 75000, setup) == capabilities,
+                "The activated native capture capability receipt differs from the validated receipt.");
     } catch (const std::exception &error) {
         // Keep staging and rollback evidence on failure, including interrupted
         // SSH uploads. Never delete the last copy of an earlier deployment.
@@ -201,6 +211,28 @@ QJsonArray usbRuntimeInspectionSelfTest()
     fixture.session=RvTuner::patchScript(fixture.session,settings,true);
     QJsonArray checks;
     const auto check=[&](const QString &name,bool ok){require(ok,name);checks.append(QJsonObject{{"name",name},{"passed",true}});};
+    const QJsonObject capabilities{
+        {"native_capture_protocol", RvCaptureContract::NativeCaptureProtocolV2}, {"fov", 6},
+        {"model_inference", false}, {"photon_enabled", false}, {"m8", false}, {"m16", true}, {"m48", true},
+        {"native_hole_fill_protocol", RvCaptureContract::NativeHoleFillProtocol}};
+    auto extended = capabilities;
+    extended["optional_capability"] = true;
+    check("usb_native_capabilities_accept_extended_receipts",
+          nativeCaptureCapabilities(capabilities, 6) && nativeCaptureCapabilities(extended, 6));
+    const auto changedCapabilityRejected = [&](const QString &key, const QJsonValue &value) {
+        auto changed = extended;
+        changed[key] = value;
+        return !nativeCaptureCapabilities(changed, 6);
+    };
+    check("usb_native_capabilities_reject_wrong_required_fields",
+          changedCapabilityRejected("native_capture_protocol", "unknown")
+          && changedCapabilityRejected("fov", 2)
+          && changedCapabilityRejected("m8", true)
+          && changedCapabilityRejected("m16", false)
+          && changedCapabilityRejected("m48", QStringLiteral("true"))
+          && changedCapabilityRejected("model_inference", true)
+          && changedCapabilityRejected("photon_enabled", QJsonValue(QJsonValue::Undefined))
+          && changedCapabilityRejected("native_hole_fill_protocol", QJsonValue(QJsonValue::Undefined)));
     const auto plan=usbRuntimePlan(fixture,runtime);
     check("usb_complete_runtime_match_accepted",usbRuntimeMatches(fixture,runtime));
     fixture.state="0";

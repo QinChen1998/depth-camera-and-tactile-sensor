@@ -14,7 +14,9 @@ BOOT = '11111111-2222-3333-4444-555555555555'
 CAPABILITIES = ('{"native_capture_protocol":"native-m48-m16-m8-v2","fov":6,'
                 '"model_inference":false,"photon_enabled":false,"m8":false,'
                 '"m16":true,"m48":true,"native_hole_fill_protocol":"native48-hole-fill-v1"}')
+EXTENDED_CAPABILITIES = CAPABILITIES[:-1] + ',"optional_capability":true}'
 SCRIPT = Path(__file__).resolve().parents[1] / 'tools/rv_control/bootstrap/install.sh'
+NATIVE_LAUNCHER = SCRIPT.parents[2] / 'rv_capture/payload/native_gui.sh'
 
 
 def shell_path(path):
@@ -110,9 +112,13 @@ class BoardBootstrapTests(unittest.TestCase):
         self.script = self.write('install-fixture.sh',
                                  'PATH=' + shell_path(self.root / 'commands') + ':/usr/bin:/bin:$PATH\n' + script)
 
-    def run_setup(self, action='preflight', serial=SERIAL, mode='fresh', fov='6', **variables):
+    def run_setup(self, action='preflight', serial=SERIAL, mode='fresh', fov='6',
+                  validated_capabilities=CAPABILITIES, **variables):
+        receipt_hash = hashlib.sha256((validated_capabilities + '\n').encode()).hexdigest()
+        script = self.script.read_bytes().replace(b'@NATIVE_CAPABILITIES_SHA@', receipt_hash.encode())
+        execution = self.write('install-validated.sh', script)
         environment = dict(os.environ, DCTS_FIXTURE_ROOT=shell_path(self.root), **variables)
-        result = subprocess.run([self.bash, '--noprofile', '--norc', shell_path(self.script),
+        result = subprocess.run([self.bash, '--noprofile', '--norc', shell_path(execution),
                                  action, serial, BOOT, shell_path(self.stage), mode, fov], env=environment,
                                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=15)
         return result.returncode, result.stdout.decode(errors='replace')
@@ -235,14 +241,23 @@ class BoardBootstrapTests(unittest.TestCase):
         self.assertIn('Native16 capture program could not start', output)
         self.assertEqual((self.root/'root/r144_depth/tmf8829_ext').read_text(), 'old capture driver\n')
 
-    def test_usb_repair_rejects_an_old_capture_program_before_replacement(self):
+    def test_usb_repair_accepts_extended_native_capability_receipt(self):
         self.existing_runtime()
-        old_capabilities = CAPABILITIES.split(',"native_hole_fill_protocol"')[0] + '}'
-        self.write('stage/candidate/native_hd_gui', '#!/bin/sh\nprintf \'%s\\n\' \'' + old_capabilities + '\'\n', True)
+        self.write('stage/candidate/native_hd_gui',
+                   '#!/bin/sh\nprintf \'%s\\n\' \'' + EXTENDED_CAPABILITIES + '\'\n', True)
+        code, output = self.run_setup('activate', mode='repair', validated_capabilities=EXTENDED_CAPABILITIES)
+        self.assertEqual((code, output.strip()), (0, EXTENDED_CAPABILITIES))
+        self.assertEqual((self.root/'root/r144_depth/tmf8829_ext').read_bytes(), self.new_driver)
+
+    def test_usb_repair_rejects_changed_native_capability_receipt_before_replacement(self):
+        self.existing_runtime()
+        self.write('stage/candidate/native_hd_gui',
+                   '#!/bin/sh\nprintf \'%s\\n\' \'' + EXTENDED_CAPABILITIES + '\'\n', True)
         code, output = self.run_setup('activate', mode='repair')
         self.assertNotEqual(code, 0, output)
-        self.assertIn('expected calibration and hole-fill capabilities', output)
+        self.assertIn('capability receipt changed after validation', output)
         self.assertEqual((self.root/'root/r144_depth/tmf8829_ext').read_text(), 'old capture driver\n')
+        self.assertFalse((self.root/'run/dcts-board-install.lock').exists())
 
     def test_usb_repair_checks_entire_upload_manifest_before_replacement(self):
         self.existing_runtime()
@@ -353,6 +368,26 @@ class BoardBootstrapTests(unittest.TestCase):
         code, output = self.run_setup(BOOTSTRAP_ACTIVE_TOF='1')
         self.assertNotEqual(code, 0)
         self.assertIn('Stop the active ToF', output)
+
+    def test_native_launcher_passes_mode_generation_and_options(self):
+        self.write('root/dtof_candidates_20261009/native_hd_gui',
+                   '#!/bin/sh\n[ "$#" = 4 ] || exit 2\nprintf "%s %s %s %s\\n" "$@"\n', True)
+        for asset in ('root/r144_depth/camera_rtsp_config.awk',
+                      'root/r144_depth/no_route_monitor.so'):
+            self.write(asset, 'fixture\n')
+        launcher = NATIVE_LAUNCHER.read_text(encoding='utf-8')
+        fixture_root = shell_path(self.root)
+        launcher = re.sub(r'(?<![A-Za-z0-9_./])/(?:root|oem|userdata)(?=/)',
+                          lambda match: fixture_root + match[0], launcher)
+        fixture = self.write('native-launcher-fixture.sh', launcher)
+        generation = '0123456789abcdef0123456789abcdef'
+        for mode in ('14', '24', '25'):
+            with self.subTest(mode=mode):
+                process = subprocess.run([self.bash, shell_path(fixture), 'serve', mode, generation, '1,1'],
+                                         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=15)
+                self.assertEqual(process.returncode, 0, process.stdout.decode(errors='replace'))
+                self.assertEqual(process.stdout.decode().splitlines(),
+                                 [f'validate {mode} {generation} 1,1', f'gui {mode} {generation} 1,1'])
 
 
 class CameraTakeoverTests(unittest.TestCase):

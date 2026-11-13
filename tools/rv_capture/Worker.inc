@@ -3,7 +3,7 @@ const QString BoardCandidateDir="/root/dtof_candidates_20261009";
 bool nativeCaptureCapabilities(const QJsonObject& capabilities,int fov){
     return capabilities["native_capture_protocol"]==RvCaptureContract::NativeCaptureProtocolV2
         &&capabilities["native_hole_fill_protocol"]==RvCaptureContract::NativeHoleFillProtocol
-        &&capabilities["fov"]==fov&&capabilities["m16"]==true&&capabilities["m48"]==true
+        &&capabilities["fov"]==fov&&capabilities["m8"]==false&&capabilities["m16"]==true&&capabilities["m48"]==true
         &&capabilities["model_inference"]==false&&capabilities["photon_enabled"]==false;
 }
 struct NativeCapturePayload {
@@ -77,7 +77,8 @@ QJsonArray boardPreparationSelfTest(){
     }
     const auto installer=readFile(runtime.filePath("rv1103_bootstrap/install.sh"));
     check("fresh_import_checks_native_capabilities",installer.contains("--native-capabilities"));
-    check("fresh_import_requires_hole_fill_protocol",installer.contains(RvCaptureContract::NativeHoleFillProtocol));
+    check("fresh_import_binds_validated_native_capabilities",
+          installer.contains("@NATIVE_CAPABILITIES_SHA@") && installer.contains("digest \"$stage/native.json\""));
     check("fresh_import_retains_rollback",installer.contains("committed=0")&&installer.contains("if [ \"$committed\" = 0 ]; then")&&installer.contains("installed_candidate=1"));
     return checks;
 }

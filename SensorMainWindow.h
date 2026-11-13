@@ -44,7 +44,7 @@ private:
     TactileDockWidget *m_tactile=nullptr;
     DepthMapWidget *m_depth;
     RtspCameraPage *m_camera;
-    QDockWidget *m_depthDock, *m_cameraDock;
+    QDockWidget *m_depthDock, *m_cameraDock, *m_pointCloudDock;
     void updateCameraVisibility();
     QPointer<RvDeviceManagerDialog> m_devices;
     QVector<QDockWidget *> m_docks;

@@ -33,7 +33,7 @@ python -m unittest discover -s tests -p 'test_*.py' -v
 
 | 标志 | 覆盖范围 |
 |---|---|
-| `port-ui-smoke-test` | 三模块、成像入口、默认配置、方向、米制快照与显示分离 |
+| `port-ui-smoke-test` | 四个模块、成像入口、方向、米制快照、点云坐标、独立点径和色标、停靠和清屏 |
 | `rv-tuner-test` | 调参协议、互斥、异步停止、板端模式、Native16 分片与同帧校验 |
 | `tactile-serial-test` | 串口协议、型号、零点、失败与恢复 |
 | `tactile-visualization-test` | 触觉显示、面板可见性、选择、曲线和断开 |
@@ -43,6 +43,8 @@ python -m unittest discover -s tests -p 'test_*.py' -v
 | `rv-usb-enrollment-test` | USB 身份、地址规划、已有设备复用、完整检查回执、设置交接身份及登记准入 |
 
 脚本清除继承的 RV/DCTS/Python/Qt 覆盖，强制 `RV_TEST_OFFLINE_ONLY=1`，TEMP/TMP 指向本轮输出的 `tmp/`。调参测试只使用本机 TCP 回环；需要允许本机回环连接，不会打开真实设备。连接失败/超时不能冒充协议拒绝通过负例。QtMsBuild 需要读取本机 Qt 注册表；访问被沙箱拒绝时应修正运行环境，不改模型或设备参数。
+
+`--point-cloud-live-validation <绝对报告.json>` 使用已登记的 RV1103 依次运行 480×640 上位机辅助推理、48×32 普通和高精度档，核对辅助深度帧的标定网格、原生同帧有效点数、Qt Quick 3D 绘制、点径、色标、滚轮和停采清屏。它使用与成像切换专项相同的设备身份及授权环境变量，保存计数、状态及 480×640 点云视口截图。
 
 判定同时检查退出码、报告存在、有独立 PASS 断言且无 FAIL。统计不把 `BYPASS` 字符串或 `RESULT PASS` 汇总行当作新断言。Python 测试覆盖缺报告、空报告、仅汇总、FAIL、非零退出、环境隔离和非离线命令拒绝。
 

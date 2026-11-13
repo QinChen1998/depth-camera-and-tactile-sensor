@@ -203,8 +203,8 @@ sh "$stage/depth/ensure-spi.sh"
 export LD_LIBRARY_PATH="$stage/depth:/oem/usr/lib:/usr/lib"
 "$stage/candidate/native_hd_gui" --native-capabilities > "$stage/native.json" ||
  fail 'The Native16 capture program could not start on this firmware.'
-grep -qx "{\"native_capture_protocol\":\"native-m48-m16-m8-v2\",\"fov\":$fov,\"model_inference\":false,\"photon_enabled\":false,\"m8\":false,\"m16\":true,\"m48\":true,\"native_hole_fill_protocol\":\"native48-hole-fill-v1\"}" "$stage/native.json" ||
- fail 'The native capture program did not report the expected calibration and hole-fill capabilities.'
+[ "$(digest "$stage/native.json")" = '@NATIVE_CAPABILITIES_SHA@' ] ||
+ fail 'The native capture capability receipt changed after validation.'
 [ "$(digest "$oem")" = "$oem_sha" ] || fail 'The factory startup script changed during setup.'
 if ! exists "$backup"; then ln "$oem" "$backup";saved_oem=1; fi
 cp -p "$oem" "$stage/oem-before"

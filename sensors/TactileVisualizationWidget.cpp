@@ -4,7 +4,7 @@
 #include <QtCore/QFile>
 #include "TactileSceneAdapter.h"
 #include "TactileSurfaceModel.h"
-#include <QQuickWidget>
+#include "DockableQuick3DWidget.h"
 #include <QQuickItem>
 #include <QQmlEngine>
 #include <QQmlError>
@@ -264,27 +264,6 @@ private:
     QVariantAnimation m_animation;
 };
 
-class TactileQuickWidget final : public QQuickWidget {
-public:
-    using QQuickWidget::QQuickWidget;
-    std::function<void()> renderWindowChanged;
-protected:
-    bool event(QEvent *event) override {
-        if(event->type()!=QEvent::WindowChangeInternal || !rootObject())return QQuickWidget::event(event);
-        // Qt 6.11.1 replaces the offscreen QQuickWindow when docking. Its
-        // Quick 3D scene manager cannot safely migrate the old spatial nodes.
-        // Recreate this small display scene only at this boundary, preserving
-        // camera/UI state and the existing adapter, source and history.
-        const auto url=source();QVariantMap state;
-        for(const auto *name:{"display","orbitYaw","orbitPitch","cameraDistance","cameraPan","inspectedPoint"})state[name]=rootObject()->property(name);
-        setSource({});
-        const bool handled=QQuickWidget::event(event);
-        setInitialProperties(state);setSource(url);
-        if(renderWindowChanged)renderWindowChanged();
-        return handled;
-    }
-};
-
 class TactileScale final : public QWidget {
 public:
     explicit TactileScale(QWidget *parent=nullptr):QWidget(parent){setFixedHeight(32);}
@@ -394,7 +373,9 @@ TactileVisualizationWidget::TactileVisualizationWidget(QWidget *parent) : QWidge
     connect(renderSettings,&RenderingSettings::lowCostRenderingChanged,this,[this,renderSettings]{
         m_adapter->setLowCostRendering(renderSettings->lowCostRendering());
     });
-    auto *quick=new TactileQuickWidget(left);m_canvas=quick;m_canvas->setObjectName("tactileQuickView");m_canvas->setMinimumSize(260,260);m_canvas->setResizeMode(QQuickWidget::SizeRootObjectToView);m_canvas->setFocusPolicy(Qt::StrongFocus);
+    auto *quick = new DockableQuick3DWidget(left,
+        {"display", "orbitYaw", "orbitPitch", "cameraDistance", "cameraPan", "inspectedPoint"});
+    m_canvas=quick;m_canvas->setObjectName("tactileQuickView");m_canvas->setMinimumSize(260,260);m_canvas->setResizeMode(QQuickWidget::SizeRootObjectToView);m_canvas->setFocusPolicy(Qt::StrongFocus);
     m_canvas->setInitialProperties({{"display",QVariant::fromValue(m_adapter)}});m_canvas->setClearColor(m_adapter->background());
     m_viewError=new QLabel;m_viewError->setObjectName("tactileViewError");m_viewError->setWordWrap(true);m_viewError->hide();leftLayout->addWidget(m_viewError);
     connect(m_canvas,&QQuickWidget::statusChanged,this,[this](QQuickWidget::Status status){
