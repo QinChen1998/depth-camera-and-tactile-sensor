@@ -129,6 +129,7 @@
     <ClInclude Include="TactileDockWidget.h"/>
     <ClInclude Include="UiStyle.h"/>
     <ClInclude Include="sensors\DepthColorScale.h"/>
+    <ClInclude Include="sensors\PointCloudColorScale.h"/>
     <QtMoc Include="sensors\DepthMapWidget.h"/>
     <ClInclude Include="sensors\DockableQuick3DWidget.h"/>
     <QtMoc Include="sensors\RvPointCloudWidget.h"/>
@@ -176,6 +177,9 @@
     <None Include="qml\RvPointCloudView.qml"/>
     <None Include="qml\RvCloudPoint.vert"/>
     <None Include="qml\RvCloudPoint.frag"/>
+    <None Include="qml\RvCloudNativePoint.vert"/>
+    <None Include="qml\RvCloudMesh.vert"/>
+    <None Include="qml\RvCloudMesh.frag"/>
     <QtRcc Include="Component_tactile.qrc"/>
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets"/>

@@ -4,7 +4,9 @@
 #include "../TactileDockWidget.h"
 #include "../RenderingSettings.h"
 #include "RvDeviceFixture.h"
+#include "../sensors/DepthColorScale.h"
 #include "../sensors/DepthMapWidget.h"
+#include "../sensors/PointCloudColorScale.h"
 #include "../sensors/RvAssistDepth.h"
 #include "../sensors/RvAssistFusion.h"
 #include "../sensors/RvCameraView.h"
@@ -32,6 +34,7 @@
 #include <QMenuBar>
 #include <QMessageBox>
 #include <QProcess>
+#include <QQuick3DGeometry>
 #include <QQuickItem>
 #include <QQuickWidget>
 #include <QPushButton>
@@ -80,6 +83,13 @@ int runPortSmokeTests(SensorMainWindow &window,LanguageManager &language,const Q
         check("PALETTE_ALL_HUE_BOUNDARIES_MATCH_QT",hues);
         check("PALETTE_RANGE_AND_INVALID_PIXELS_MATCH_QT",ranges);
     }
+    check("POINT_CLOUD_JET_MATCHES_ORBBEC_RGB_SAMPLES", PointCloudColorScale::jet(0.) == qRgb(0, 0, 127)
+        && PointCloudColorScale::jet(64. / 255.) == qRgb(0, 128, 255)
+        && PointCloudColorScale::jet(.5) == qRgb(127, 255, 127)
+        && PointCloudColorScale::jet(.75) == qRgb(255, 127, 0)
+        && PointCloudColorScale::jet(1.) == qRgb(127, 0, 0));
+    check("POINT_CLOUD_JET_CLAMPS_OUT_OF_RANGE_Z", PointCloudColorScale::color(.005) == qRgb(0, 0, 127)
+        && PointCloudColorScale::color(4.) == qRgb(127, 0, 0));
     settle(900);
     const auto docks=window.findChildren<QDockWidget *>(QString(),Qt::FindDirectChildrenOnly);
     check("EXACTLY_FOUR_MODULES",docks.size()==4);
@@ -148,7 +158,11 @@ int runPortSmokeTests(SensorMainWindow &window,LanguageManager &language,const Q
             auto *view = dock->findChild<QQuickWidget *>("rvPointCloudView");
             auto *instances = dock->findChild<SceneInstanceBuffer *>("rvPointCloudInstances");
             auto *depthInstances = dock->findChild<SceneInstanceBuffer *>("rvPointCloudDepthInstances");
+            auto *mesh = dock->findChild<QQuick3DGeometry *>("rvPointCloudMeshGeometry");
+            auto *displayMode = dock->findChild<QComboBox *>("rvPointCloudDisplayMode");
             auto *status = dock->findChild<QLabel *>("rvPointCloudStatus");
+            auto *legend = dock->findChild<QLabel *>("rvPointCloudColorLegend");
+            auto *accumulate = dock->findChild<QPushButton *>("rvPointCloudAccumulate");
             auto *reset = dock->findChild<QPushButton *>("rvPointCloudReset");
             auto *diameter = dock->findChild<QDoubleSpinBox *>("rvPointCloudPointDiameter");
             auto *colorMinimum = dock->findChild<QDoubleSpinBox *>("rvPointCloudColorMinimum");
@@ -156,13 +170,25 @@ int runPortSmokeTests(SensorMainWindow &window,LanguageManager &language,const Q
             auto *applyRange = dock->findChild<QPushButton *>("rvPointCloudColorApply");
             check("POINT_CLOUD_CAPTURE_PROMPT", status && status->text() == "Start capture in Depth Map or Camera raw video.");
             check("POINT_CLOUD_QML_READY", depthInstances && view && view->status() == QQuickWidget::Ready);
+            if (view && view->status() == QQuickWidget::Error)
+                for (const auto &error : view->errors())
+                    out << error.toString() << '\n';
+            check("POINT_CLOUD_DISPLAY_MODE_DEFAULTS_TO_POINTS", mesh && displayMode && displayMode->isEnabled()
+                && displayMode->currentText() == "Points" && displayMode->count() == 2 && mesh->indexData().isEmpty());
+            check("POINT_CLOUD_ACCUMULATION_DISABLED_FOR_ASSISTED", accumulate && accumulate->isCheckable()
+                && !accumulate->isChecked() && !accumulate->isEnabled());
             check("POINT_CLOUD_ASSISTED_DISPLAY_DEFAULTS", diameter && colorMinimum && colorMaximum && applyRange
                 && diameter->isVisible() && diameter->value() == 2.4 && colorMinimum->value() == .01
                 && colorMaximum->value() == 3.0 && !applyRange->isEnabled());
+            const auto ramp = legend ? legend->pixmap().toImage() : QImage{};
+            check("POINT_CLOUD_LEGEND_USES_JET", ramp.size() == QSize(256, 1)
+                && ramp.pixel(0, 0) == qRgb(0, 0, 127) && ramp.pixel(64, 0) == qRgb(0, 128, 255)
+                && ramp.pixel(255, 0) == qRgb(127, 0, 0));
             if (instances && depthInstances && view && view->status() == QQuickWidget::Ready
-                && diameter && colorMinimum && colorMaximum && applyRange) {
+                && mesh && displayMode && accumulate && diameter && colorMinimum && colorMaximum && applyRange) {
                 session->selectImagingScheme("board_native_tof48", {});
-                check("POINT_CLOUD_ASSISTED_CONTROLS_HIDDEN_FOR_NATIVE", !diameter->isVisible());
+                check("POINT_CLOUD_NATIVE_SHOWS_SHARED_RANGE_AND_HIDES_ASSISTED_DIAMETER", !diameter->isVisible()
+                    && colorMinimum->isVisible() && colorMaximum->isVisible());
                 const QString generation(32, 'a');
                 RvTofFrame frame;
                 frame.samples = QByteArray(48 * 32 * 4, 0);
@@ -202,6 +228,9 @@ int runPortSmokeTests(SensorMainWindow &window,LanguageManager &language,const Q
                 check("POINT_CLOUD_F6_XYZ_SKIPS_INVALID_AND_ZERO", instances->count() == 2
                     && (instances->instancePosition(0) - expected(2)).length() < .001f
                     && (instances->instancePosition(1) - expected(32 * 48 - 1)).length() < .001f);
+                check("POINT_CLOUD_NATIVE_JET_USES_PROJECTED_Z", instances->count() == 2
+                    && instances->instanceColor(0).rgb() == PointCloudColorScale::color(-expected(2).z() / 1000.)
+                    && instances->instanceColor(0).rgb() != PointCloudColorScale::color(frame.distanceMm(2) / 1000.));
 
                 const auto cameraDistance = [&] { return view->rootObject()->property("cameraDistance").toDouble(); };
                 const double initialDistance = cameraDistance();
@@ -212,12 +241,100 @@ int runPortSmokeTests(SensorMainWindow &window,LanguageManager &language,const Q
                         && view->rootObject()->property("cameraTarget").value<QVector3D>() == initialTarget
                         && view->rootObject()->property("gridStepMm").toDouble() == initialGridStep;
                 };
+                const auto meshVisible = [&] { return view->rootObject()->property("meshVisible").toBool(); };
+                const auto framebufferHasColor = [&](QRgb rgb) {
+                    const auto image = view->grabFramebuffer().convertToFormat(QImage::Format_RGB32);
+                    for (int y = 0; y < image.height(); ++y) {
+                        const auto *line = reinterpret_cast<const QRgb *>(image.constScanLine(y));
+                        for (int x = 0; x < image.width(); ++x)
+                            if (line[x] == rgb)
+                                return true;
+                    }
+                    return false;
+                };
+                const auto triangleCount = [&] { return mesh->indexData().size() / (3 * sizeof(quint32)); };
+                const auto meshPosition = [&](int index) {
+                    float xyz[3]{};
+                    const qsizetype offset = qsizetype(index) * mesh->stride();
+                    const auto vertices = mesh->vertexData();
+                    if (offset + qsizetype(sizeof(xyz)) <= vertices.size())
+                        std::memcpy(xyz, vertices.constData() + offset, sizeof(xyz));
+                    return QVector3D(xyz[0], xyz[1], xyz[2]);
+                };
+                const auto meshColor = [&](int index) -> QRgb {
+                    const auto vertices = mesh->vertexData();
+                    const qsizetype offset = qsizetype(index) * mesh->stride() + sizeof(QVector3D);
+                    float rgba[4]{};
+                    if (offset + qsizetype(sizeof(rgba)) <= vertices.size())
+                        std::memcpy(rgba, vertices.constData() + offset, sizeof(rgba));
+                    return qRgb(qRound(rgba[0] * 255), qRound(rgba[1] * 255), qRound(rgba[2] * 255));
+                };
+                const auto waitForTriangles = [&](qsizetype expectedCount) {
+                    QElapsedTimer timer;
+                    timer.start();
+                    while (triangleCount() != expectedCount && timer.elapsed() < 2000)
+                        settle(10);
+                    return triangleCount() == expectedCount;
+                };
                 sample(32 * 48 - 1, 22000, 1);
                 frame.metadata["tof_sequence"] = 2;
                 emit session->tofFrameReady(frame);
                 settle(30);
                 check("POINT_CLOUD_FRAME_DOES_NOT_REFIT", checkFixedView() && instances->count() == 2
                     && (instances->instancePosition(1) - expected(32 * 48 - 1)).length() < .001f);
+
+                const auto sendPointFrame = [&](int number) {
+                    sample(2, quint16(3000 + number * 20), 1);
+                    frame.metadata["frame_id"] = number + 2;
+                    frame.metadata["tof_sequence"] = number + 2;
+                    frame.metadata["tof_timestamp_ns"] = number + 2;
+                    emit session->tofFrameReady(frame);
+                    return expected(2);
+                };
+                const auto matchesNativePoint = [&](int index, const QVector3D &position) {
+                    return (instances->instancePosition(index) - position).length() < .001f;
+                };
+                const auto waitForNativePoints = [&](int pointCount, const QVector3D &oldest, const QVector3D &latest) {
+                    const auto matches = [&] {
+                        return instances->count() == pointCount && matchesNativePoint(0, oldest)
+                            && matchesNativePoint(pointCount - 2, latest);
+                    };
+                    QElapsedTimer timer;
+                    timer.start();
+                    while (!matches() && timer.elapsed() < 2000)
+                        settle(10);
+                    return matches();
+                };
+                const auto first = expected(2);
+                check("POINT_CLOUD_ACCUMULATION_AVAILABLE_FOR_NATIVE", accumulate->isEnabled() && !accumulate->isChecked());
+                accumulate->click();
+                const auto second = sendPointFrame(1);
+                check("POINT_CLOUD_ACCUMULATES_FRAMES", accumulate->isChecked() && waitForNativePoints(4, first, second));
+                const auto third = sendPointFrame(2);
+                QVector3D newest;
+                for (int number = 3; number < 100; ++number)
+                    newest = sendPointFrame(number);
+                check("POINT_CLOUD_ACCUMULATION_KEEPS_100_FRAMES", waitForNativePoints(200, first, newest));
+                newest = sendPointFrame(100);
+                check("POINT_CLOUD_ACCUMULATION_FRAME_101_EVICTS_FRAME_1", waitForNativePoints(200, second, newest));
+                newest = sendPointFrame(101);
+                check("POINT_CLOUD_ACCUMULATION_FRAME_102_EVICTS_FRAME_2", waitForNativePoints(200, third, newest));
+                const auto colorBefore = instances->instanceColor(0);
+                initialPresentation->setColorRange(1, 3);
+                check("POINT_CLOUD_NATIVE_IGNORES_DEPTH_MAP_COLOR_RANGE", instances->count() == 200
+                    && matchesNativePoint(0, third) && instances->instanceColor(0) == colorBefore);
+                initialPresentation->setColorRange(.01, 3);
+                colorMinimum->setValue(1.0);
+                applyRange->click();
+                check("POINT_CLOUD_ACCUMULATION_RECOLORS_HISTORY", instances->count() == 200
+                    && matchesNativePoint(0, third) && instances->instanceColor(0).rgb() == qRgb(0, 0, 127)
+                    && instances->instanceColor(0) != colorBefore);
+                colorMinimum->setValue(.01);
+                applyRange->click();
+                newest = sendPointFrame(102);
+                accumulate->click();
+                check("POINT_CLOUD_ACCUMULATION_OFF_RESTORES_LATEST_FRAME", !accumulate->isChecked()
+                    && instances->count() == 2 && matchesNativePoint(0, newest) && checkFixedView());
 
                 const auto zoom = [&](int delta) {
                     const QPoint center = view->rect().center();
@@ -234,6 +351,7 @@ int runPortSmokeTests(SensorMainWindow &window,LanguageManager &language,const Q
 
                 QQuickItem *scene = view->rootObject();
                 scene->setProperty("orbitYaw", 42);
+                sendPointFrame(103);
                 dock->setFloating(true);
                 settle(100);
                 check("POINT_CLOUD_FLOAT_PRESERVES_VIEW", view->status() == QQuickWidget::Ready && view->rootObject()
@@ -260,7 +378,75 @@ int runPortSmokeTests(SensorMainWindow &window,LanguageManager &language,const Q
                 emit session->tofFrameReady(frame);
                 check("POINT_CLOUD_SCHEME_CHANGE_PRESERVES_MANUAL_ZOOM", instances->count() == 2
                     && cameraDistance() == manualDistance);
+                accumulate->click();
+                const auto highAccuracyFirst = expected(2);
+                frame.metadata["raw_age_ms"] = 975;
+                const auto highAccuracyLatest = sendPointFrame(104);
+                const bool highAccuracyAccumulated = waitForNativePoints(4, highAccuracyFirst, highAccuracyLatest);
+                settle(50);
+                check("POINT_CLOUD_HIGH_ACCURACY_ACCUMULATES_ACROSS_LIVE_FRAME_EXPIRY", accumulate->isEnabled()
+                    && accumulate->isChecked() && highAccuracyAccumulated && instances->count() == 4);
+                accumulate->click();
+                check("POINT_CLOUD_ACCUMULATION_OFF_CLEARS_EXPIRED_FRAME", instances->count() == 0);
+                frame.metadata["raw_age_ms"] = 0;
+                sendPointFrame(105);
+                accumulate->click();
+                session->stop();
+                check("POINT_CLOUD_ACCUMULATION_CLEARS_ON_STOP", instances->count() == 0);
+                accumulate->click();
+
+                const int meshCell = 15 * 48 + 4;
+                const auto nativePatch = [&](double zMm) {
+                    for (int i : {meshCell, meshCell + 1, meshCell + 2,
+                                  meshCell + 48, meshCell + 49, meshCell + 50}) {
+                        const double target = zMm + ((i - meshCell) % 48 == 2 ? 800. : 0.);
+                        const auto range = (target - 1000. * cal.translation[2]) / cal.cameraRays[i][2];
+                        sample(i, quint16(qRound(range * 4.)), 1);
+                    }
+                };
+                frame.samples.fill(0);
+                nativePatch(800.);
+                emit session->tofFrameReady(frame);
+                auto *sceneRoot = view->rootObject();
+                const auto formerTarget = sceneRoot->property("cameraTarget");
+                const auto patchCenter = (expected(meshCell) + expected(meshCell + 49)) * .5f;
+                sceneRoot->setProperty("cameraTarget", patchCenter);
+                const auto zColor = PointCloudColorScale::color(-expected(meshCell).z() / 1000.);
+                const QRgb nativeJet = instances->instanceColor(0).rgb();
+                check("POINT_CLOUD_NATIVE_POINTS_RENDER_JET", nativeJet == zColor
+                    && framebufferHasColor(nativeJet));
+                displayMode->setCurrentIndex(1);
+                check("POINT_CLOUD_HIGH_ACCURACY_MESH_USES_PROJECTED_Z_AND_BREAKS_AT_STEP", meshVisible()
+                    && triangleCount() == 2 && instances->count() == 0
+                    && (meshPosition(0) - expected(meshCell)).length() < .001f && cameraDistance() == manualDistance);
+                check("POINT_CLOUD_NATIVE_MESH_MATCHES_POINTS_JET", meshColor(0) == nativeJet
+                    && framebufferHasColor(nativeJet));
+                sceneRoot->setProperty("cameraTarget", formerTarget);
+                session->selectImagingScheme("board_native_tof48", {});
+                frame.metadata["candidate_mode"] = 24;
+                sample(meshCell, 0, 0);
+                emit session->tofFrameReady(frame);
+                check("POINT_CLOUD_NATIVE_MESH_LEAVES_HOLES", displayMode->isEnabled() && meshVisible()
+                    && triangleCount() == 1 && (meshPosition(0) - expected(meshCell + 1)).length() < .001f);
+                accumulate->click();
+                for (int number = 1; number <= 100; ++number) {
+                    nativePatch(800. + number);
+                    frame.metadata["tof_sequence"] = 200 + number;
+                    emit session->tofFrameReady(frame);
+                }
+                check("POINT_CLOUD_ACCUMULATED_MESH_EVICTS_OLDEST_FRAME", waitForTriangles(200)
+                    && std::abs(meshPosition(0).z() + 801.f) <= .13f);
+                dock->setFloating(true);
+                settle(100);
+                check("POINT_CLOUD_FLOAT_PRESERVES_MESH_AND_HISTORY", view->status() == QQuickWidget::Ready
+                    && meshVisible() && triangleCount() == 200 && cameraDistance() == manualDistance);
+                dock->setFloating(false);
+                dock->raise();
+                displayMode->setCurrentIndex(0);
+                check("POINT_CLOUD_MESH_SWITCH_PRESERVES_POINT_HISTORY", !meshVisible()
+                    && triangleCount() == 0 && instances->count() == 600);
                 session->selectImagingScheme(visibleHostScheme, {});
+                check("POINT_CLOUD_ASSISTED_SWITCH_DISARMS_ACCUMULATION", !accumulate->isEnabled() && !accumulate->isChecked());
                 emit session->tofFrameReady(frame);
                 check("POINT_CLOUD_IGNORES_PREVIOUS_GRID", instances->count() == 0);
 
@@ -308,7 +494,7 @@ int runPortSmokeTests(SensorMainWindow &window,LanguageManager &language,const Q
                 check("POINT_CLOUD_ASSISTED_CAMERA_Z_XYZ_SKIPS_INVALID", hasSparseDepth
                     && matchesDepth(depthInstances->instancePosition(0), 4, 2, .75f)
                     && matchesDepth(depthInstances->instancePosition(1), 636, 478, 1.75f));
-                const QRgb originalColor = DepthColorScale::color(.75f, .01, 3.0);
+                const QRgb originalColor = qRgb(0, 124, 255);
                 check("POINT_CLOUD_ASSISTED_COLORS_BY_CAMERA_Z", hasSparseDepth
                     && depthInstances->instanceColor(0).rgb() == originalColor);
 
@@ -332,7 +518,7 @@ int runPortSmokeTests(SensorMainWindow &window,LanguageManager &language,const Q
                     && applyRange->isEnabled() && colorMaximum->value() == 2.0);
                 const QVector3D nearPosition = depthInstances->instancePosition(0);
                 applyRange->click();
-                const QRgb recolored = DepthColorScale::color(.75f, .2, 2.0);
+                const QRgb recolored = qRgb(0, 184, 255);
                 QElapsedTimer colorWait;
                 colorWait.start();
                 while (depthInstances->instanceColor(0).rgb() != recolored && colorWait.elapsed() < 2000)
@@ -376,12 +562,87 @@ int runPortSmokeTests(SensorMainWindow &window,LanguageManager &language,const Q
                 check("POINT_CLOUD_ASSISTED_DIAMETER_CHANGES_SCREEN_COVERAGE", hasDiscFrame
                     && defaultCoverage > 100 && coloredPixels() > defaultCoverage);
 
+                depth.fill(0);
+                for (int y : {150, 151}) {
+                    setDepth(220, y, .8f);
+                    setDepth(221, y, .8f);
+                    setDepth(222, y, 1.6f);
+                }
+                setDepth(220, 150, std::numeric_limits<float>::quiet_NaN());
+                displayMode->setCurrentIndex(1);
+                emit session->assistDepthSnapshotReady(depth, metadata, {});
+                check("POINT_CLOUD_ASSISTED_MESH_PRESERVES_CAMERA_Z_AND_LEAVES_GAPS", waitForTriangles(1)
+                    && meshVisible() && count() == 0 && !diameter->isEnabled() && !accumulate->isEnabled()
+                    && matchesDepth(meshPosition(0), 221, 150, .8f)
+                    && meshColor(0) == PointCloudColorScale::color(.8f, .2, 2.0));
+
+                // Use a wide enough transition that each local Z step used to pass the mesh limit.
+                constexpr int surfaceWidth = 20, transitionWidth = 11, surfaceHeight = 28;
+                constexpr int surfaceStartX = 220, surfaceStartY = 150;
+                const auto putSurface = [&](int column, int row, float z, bool transpose) {
+                    setDepth(surfaceStartX + (transpose ? row : column),
+                             surfaceStartY + (transpose ? column : row), z);
+                };
+                const qsizetype surfaceTriangles = 4 * (surfaceWidth - 1) * (surfaceHeight - 1);
+                const int surfacePoints = 2 * surfaceWidth * surfaceHeight;
+                for (const bool transpose : {false, true}) {
+                    depth.fill(0);
+                    for (int row = 0; row < surfaceHeight; ++row) {
+                        for (int x = 0; x < surfaceWidth; ++x) {
+                            putSurface(x, row, .8f, transpose);
+                            putSurface(x + surfaceWidth + transitionWidth, row, 1.22f, transpose);
+                        }
+                        for (int x = 0; x < transitionWidth; ++x)
+                            putSurface(surfaceWidth + x, row, .8f + .035f * (x + 1), transpose);
+                    }
+                    displayMode->setCurrentIndex(1);
+                    emit session->assistDepthSnapshotReady(depth, metadata, {});
+                    check(transpose ? "POINT_CLOUD_MESH_CUTS_VERTICAL_DEPTH_TRANSITION"
+                                    : "POINT_CLOUD_MESH_CUTS_HORIZONTAL_DEPTH_TRANSITION",
+                        waitForTriangles(surfaceTriangles) && mesh->vertexData().size() == surfacePoints * mesh->stride());
+                    displayMode->setCurrentIndex(0);
+                    check(transpose ? "POINT_CLOUD_POINTS_SKIP_VERTICAL_DEPTH_TRANSITION"
+                                    : "POINT_CLOUD_POINTS_SKIP_HORIZONTAL_DEPTH_TRANSITION",
+                        waitForCount(surfacePoints) && depthInstances->instancePosition(0).z() == -800.f
+                        && depthInstances->instancePosition(surfacePoints - 1).z() == -1220.f);
+                }
+
+                depth.fill(0);
+                for (int row = 0; row < 36; ++row)
+                    for (int x = 0; x < 48; ++x)
+                        putSurface(x, row, 1.f / (1.34f - .012f * x), false);
+                emit session->assistDepthSnapshotReady(depth, metadata, {});
+                check("POINT_CLOUD_POINTS_KEEP_SLANTED_PLANE", waitForCount(48 * 36));
+
+                depth.fill(0);
+                for (int row = 0; row < 36; ++row)
+                    for (int x = 0; x < 41; ++x)
+                        putSurface(x, row, x == 20 ? .55f : 1.4f, false);
+                emit session->assistDepthSnapshotReady(depth, metadata, {});
+                check("POINT_CLOUD_POINTS_KEEP_THIN_FOREGROUND", waitForCount(41 * 36)
+                    && depthInstances->instancePosition(20).z() == -550.f);
+
                 for (int y = 0; y < 480; ++y)
                     for (int x = 0; x < 640; ++x)
                         setDepth(x, y, 1.f);
+                displayMode->setCurrentIndex(1);
                 emit session->assistDepthSnapshotReady(depth, metadata, {});
+                const qsizetype fullMeshTriangles = 2 * (profile.outputWidth - 1) * (profile.outputHeight - 1);
+                const bool hasFullMesh = waitForTriangles(fullMeshTriangles);
+                check("POINT_CLOUD_ASSISTED_MESH_RENDERS_ALL_GRID_CELLS", hasFullMesh && meshVisible()
+                    && mesh->vertexData().size() == pixels * mesh->stride() && coloredPixels() > 1000);
+                const QRgb meshJet = meshColor(0);
+                check("POINT_CLOUD_ASSISTED_MESH_RENDERS_JET", meshJet == qRgb(70, 255, 184)
+                    && framebufferHasColor(meshJet));
+
+                displayMode->setCurrentIndex(0);
+                displayMode->setCurrentIndex(1);
+                displayMode->setCurrentIndex(0);
                 check("POINT_CLOUD_ASSISTED_FULL_RESOLUTION", waitForCount(pixels) && instances->count() == 0
+                    && triangleCount() == 0 && !meshVisible() && diameter->isEnabled()
                     && status && status->text().contains("640×480 assisted depth · 307200 / 307200"));
+                check("POINT_CLOUD_ASSISTED_POINTS_MATCH_MESH_JET", depthInstances->instanceColor(0).rgb() == meshJet
+                    && framebufferHasColor(meshJet));
                 dock->setFloating(true);
                 settle(100);
                 check("POINT_CLOUD_ASSISTED_FLOAT_PRESERVES_GEOMETRY_AND_ZOOM", waitForCount(pixels)
@@ -396,16 +657,22 @@ int runPortSmokeTests(SensorMainWindow &window,LanguageManager &language,const Q
                     && view->rootObject()->property("orbitYaw").toInt() == -25 && checkFixedView()
                     && diameter->value() == 4.2 && colorMaximum->value() == 2.0);
 
+                displayMode->setCurrentIndex(1);
+                const bool meshBeforeClear = waitForTriangles(fullMeshTriangles);
                 emit session->assistDepthSnapshotReady(depth, metadata, {});
                 emit session->assistDepthStreamCleared("Expired");
                 settle(75);
-                check("POINT_CLOUD_ASSISTED_CLEAR_INVALIDATES_CONVERSION", waitForCount(0));
+                check("POINT_CLOUD_ASSISTED_CLEAR_INVALIDATES_CONVERSION", meshBeforeClear && count() == 0
+                    && triangleCount() == 0 && !meshVisible());
+                displayMode->setCurrentIndex(0);
                 emit session->assistDepthSnapshotReady(depth, metadata, {});
                 const bool converted = waitForCount(pixels);
                 session->selectImagingScheme("board_native_tof48", {});
                 emit session->assistDepthSnapshotReady(depth, metadata, {});
                 settle(75);
                 check("POINT_CLOUD_NATIVE_MODE_CLEARS_AND_IGNORES_ASSISTED_DEPTH", converted && waitForCount(0));
+                check("POINT_CLOUD_SCHEME_SWITCH_KEEPS_SHARED_JET_RANGE", colorMinimum->isVisible()
+                    && colorMinimum->value() == .2 && colorMaximum->value() == 2.0 && !applyRange->isEnabled());
                 session->selectImagingScheme(visibleHostScheme, {});
             }
             window.resetLayout();

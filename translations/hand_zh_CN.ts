@@ -3098,6 +3098,42 @@ Range %6 mm (radial) | SNR %7 | slot %8 | Signal %9 | Noise encoded %10</source>
   <context>
     <name>RvPointCloudWidget</name>
     <message>
+      <source>Points</source>
+      <translation>点状</translation>
+    </message>
+    <message>
+      <source>Mesh</source>
+      <translation>网格</translation>
+    </message>
+    <message>
+      <source>Point cloud display mode</source>
+      <translation>点云显示方式</translation>
+    </message>
+    <message>
+      <source>%1 / %2 frames · %3 triangles</source>
+      <translation>%1 / %2 帧 · %3 个三角面</translation>
+    </message>
+    <message>
+      <source>%1×%2 assisted depth · %3 triangles</source>
+      <translation>%1×%2 辅助深度 · %3 个三角面</translation>
+    </message>
+    <message>
+      <source>48×32 ToF · %1 triangles</source>
+      <translation>48×32 ToF · %1 个三角面</translation>
+    </message>
+    <message>
+      <source>Accumulate point cloud</source>
+      <translation>叠加点云</translation>
+    </message>
+    <message>
+      <source>Overlay the latest 100 native ToF frames in camera coordinates.</source>
+      <translation>在相机坐标系中叠加最近 100 帧原生 ToF 点云。</translation>
+    </message>
+    <message>
+      <source>%1 / %2 frames · %3 points</source>
+      <translation>%1 / %2 帧 · %3 点</translation>
+    </message>
+    <message>
       <source>Reset view</source>
       <translation>重置视角</translation>
     </message>

@@ -282,9 +282,14 @@ class BoardBootstrapTests(unittest.TestCase):
         self.assertNotEqual(code, 0)
         self.assertIn('Stop the active ToF', output)
 
-    def test_native_launcher_passes_mode_generation_and_options(self):
+    def test_native_launcher_passes_required_empty_gui_argument(self):
         self.write('root/dtof_candidates_20261009/native_hd_gui',
-                   '#!/bin/sh\n[ "$#" = 4 ] || exit 2\nprintf "%s %s %s %s\\n" "$@"\n', True)
+                   '#!/bin/sh\n'
+                   'case "$1" in\n'
+                   '  validate) [ "$#" = 4 ] || exit 2;;\n'
+                   '  gui) [ "$#" = 5 ] && [ -z "$2" ] || exit 2;;\n'
+                   '  *) exit 2;;\n'
+                   'esac\nprintf "<%s>" "$@"\nprintf "\\n"\n', True)
         for asset in ('root/r144_depth/camera_rtsp_config.awk',
                       'root/r144_depth/no_route_monitor.so'):
             self.write(asset, 'fixture\n')
@@ -300,7 +305,8 @@ class BoardBootstrapTests(unittest.TestCase):
                                          stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=15)
                 self.assertEqual(process.returncode, 0, process.stdout.decode(errors='replace'))
                 self.assertEqual(process.stdout.decode().splitlines(),
-                                 [f'validate {mode} {generation} 1,1', f'gui {mode} {generation} 1,1'])
+                                 [f'<validate><{mode}><{generation}><1,1>',
+                                  f'<gui><><{mode}><{generation}><1,1>'])
 
 
 class CameraTakeoverTests(unittest.TestCase):

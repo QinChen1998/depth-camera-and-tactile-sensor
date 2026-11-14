@@ -218,10 +218,9 @@ int main(int argc,char **argv)
         return result?result:(preserved?0:1);
     }
     if(qEnvironmentVariable("RV_TEST_OFFLINE_ONLY")!="1")window.tactile()->display()->connectDefaultSerial();
-    // Device discovery uses only local synthetic inputs. Delay automatic RV
-    // startup until the usable inference choices are known.
-    auto *inference=RvInferenceSettings::instance();
-    QObject::connect(inference,&RvInferenceSettings::finished,&window,[&window]{watchRvUsbDevices(window.session(),&window);},Qt::SingleShotConnection);
-    QTimer::singleShot(0,inference,&RvInferenceSettings::refresh);
+    QTimer::singleShot(0, &window, [&window] {
+        RvInferenceSettings::instance()->refresh();
+        watchRvUsbDevices(window.session(), &window);
+    });
     app.setQuitOnLastWindowClosed(true);return app.exec();
 }

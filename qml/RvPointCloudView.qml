@@ -7,6 +7,7 @@ Item {
     id: root
     required property var pointInstances
     required property var depthInstances
+    required property var meshGeometry
     required property real depthPointDiameter
     required property var renderSettings
 
@@ -19,7 +20,8 @@ Item {
     property real orbitYaw: defaultOrbitYaw
     property real orbitPitch: defaultOrbitPitch
     readonly property real gridStepMm: 100
-    readonly property bool hasPoints: pointInstances.count > 0 || depthInstances.count > 0
+    property bool meshVisible: false
+    readonly property bool hasPoints: pointInstances.count > 0 || depthInstances.count > 0 || meshVisible
     readonly property var axisDirections: [Qt.vector3d(1, 0, 0), Qt.vector3d(0, -1, 0), Qt.vector3d(0, 0, -1)]
     readonly property var axisColors: ["#ce7979", "#7ca58a", "#7da7d2"]
 
@@ -62,7 +64,11 @@ Item {
             instancing: root.pointInstances
             castsShadows: false
             receivesShadows: false
-            materials: DefaultMaterial { lighting: DefaultMaterial.NoLighting; diffuseColor: "white" }
+            materials: CustomMaterial {
+                shadingMode: CustomMaterial.Unshaded
+                vertexShader: "RvCloudNativePoint.vert"
+                fragmentShader: "RvCloudMesh.frag"
+            }
         }
 
         Model {
@@ -79,6 +85,20 @@ Item {
                     root.depthPointDiameter / Math.max(1, view.effectiveTextureSize.height || view.height))
                 vertexShader: "RvCloudPoint.vert"
                 fragmentShader: "RvCloudPoint.frag"
+            }
+        }
+
+        Model {
+            objectName: "rvPointCloudMesh"
+            visible: root.meshVisible
+            geometry: root.meshGeometry
+            castsShadows: false
+            receivesShadows: false
+            materials: CustomMaterial {
+                shadingMode: CustomMaterial.Unshaded
+                cullMode: Material.NoCulling
+                vertexShader: "RvCloudMesh.vert"
+                fragmentShader: "RvCloudMesh.frag"
             }
         }
 

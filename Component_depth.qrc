@@ -3,6 +3,9 @@
     <file alias="RvPointCloudView.qml">qml/RvPointCloudView.qml</file>
     <file alias="RvCloudPoint.vert">qml/RvCloudPoint.vert</file>
     <file alias="RvCloudPoint.frag">qml/RvCloudPoint.frag</file>
+    <file alias="RvCloudNativePoint.vert">qml/RvCloudNativePoint.vert</file>
+    <file alias="RvCloudMesh.vert">qml/RvCloudMesh.vert</file>
+    <file alias="RvCloudMesh.frag">qml/RvCloudMesh.frag</file>
   </qresource>
   <qresource prefix="/camera">
     <file alias="dtof_m48_geometry_f2.bin">assets/camera/dtof_m48_geometry_f2.bin</file>

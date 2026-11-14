@@ -2,7 +2,7 @@
 #include <QtWidgets/QDockWidget>
 #include "../SensorMainWindow.h"
 #include "../sensors/DepthMapWidget.h"
-#include "../sensors/DepthColorScale.h"
+#include "../sensors/PointCloudColorScale.h"
 #include "../sensors/RvDepthView.h"
 #include "../sensors/RvCameraView.h"
 #include "../sensors/RvInferenceRuntime.h"
@@ -564,12 +564,12 @@ int runPointCloudLiveValidation(SensorMainWindow &window, const QString &path)
                         const int index = depthInstances->count() * n / 4;
                         const float z = -depthInstances->instancePosition(index).z() / 1000.f;
                         const QRgb actual = depthInstances->instanceColor(index).rgb();
-                        const QRgb expected = DepthColorScale::color(z, .1, 1.8);
+                        const QRgb expected = PointCloudColorScale::color(z, .1, 1.8);
                         const auto close = [](int a, int b) { return std::abs(a - b) <= 1; };
                         if (!close(qRed(actual), qRed(expected)) || !close(qGreen(actual), qGreen(expected))
                             || !close(qBlue(actual), qBlue(expected)))
                             return false;
-                        changedColors += expected != DepthColorScale::color(z, originalMinimum, originalMaximum);
+                        changedColors += expected != PointCloudColorScale::color(z, originalMinimum, originalMaximum);
                     }
                     return changedColors > 0;
                 }, 2000);
