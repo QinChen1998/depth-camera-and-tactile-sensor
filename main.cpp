@@ -8,6 +8,7 @@
 #include "sensors/RvInferenceRuntime.h"
 #include "sensors/RvDepthDiagnostic.h"
 #include "sensors/RvDeviceStore.h"
+#include "sensors/RvSessionController.h"
 #include "sensors/RvUsbEnrollment.h"
 #include <QApplication>
 #include <QDebug>
@@ -170,9 +171,8 @@ int main(int argc,char **argv)
     }
     configureSettings(testing?temporary->path():configurationDirectory(),
         !testing||flag=="--port-ui-smoke-test"||flag=="--inference-ui-test");
-    // USB validation observes H; normal launches retain the user's selected
-    // native/H scheme. This setting exists only in the temporary test store.
-    if(usbEnrollmentLive)QSettings().setValue("depth/imagingScheme","host_unidepth_rgb672_vga_fp16_tof16");
+    // USB validation observes G in its temporary test store.
+    if(usbEnrollmentLive)QSettings().setValue("depth/imagingScheme",QLatin1String(RvSessionController::GlobalRgbImagingScheme));
     LanguageManager language;
     if(flag=="--tactile-3d-test")return runTactile3DTests(report);
     if(flag=="--tactile-render-test")return runTactileRenderSmoke(report);
@@ -219,7 +219,7 @@ int main(int argc,char **argv)
     }
     if(qEnvironmentVariable("RV_TEST_OFFLINE_ONLY")!="1")window.tactile()->display()->connectDefaultSerial();
     QTimer::singleShot(0, &window, [&window] {
-        RvInferenceSettings::instance()->refresh();
+        RvInferenceSettings::instance()->detectDevices();
         watchRvUsbDevices(window.session(), &window);
     });
     app.setQuitOnLastWindowClosed(true);return app.exec();

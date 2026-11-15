@@ -54,22 +54,35 @@ struct RvTofFrame {
     }
     static constexpr double GlobalScaleMaxPairDeltaMs=100.;
     static constexpr const char *GlobalScaleReusePolicy="latest_native_reuse_100ms_global_scale_v1";
+    static constexpr double FreshRgbPairBudgetMs=200., PairClockUncertaintyMs=35.;
+    static constexpr char FreshRgbReusePolicy[]="bounded_software_time_pair_not_hardware_sync";
+    static bool isHostFusionExperiment(const QString &mode){return mode=="G"||mode=="B";}
     bool hasGlobalScaleReuseContract() const {
         const double delta=metadata["pair_delta_ms"].toDouble(1000),uncertainty=metadata["pair_clock_uncertainty_ms"].toDouble(-1);
-        return metadata["assist_experiment"]=="H"&&metadata["source_protocol"]=="HDA1"
+        const auto mode=metadata["assist_experiment"].toString();
+        const auto fov=metadata.contains("dtof_fov_correction")?metadata["dtof_fov_correction"]:metadata["tof_fov_correction"];
+        const bool fresh48=metadata["source_candidate_mode"]==RvCaptureContract::Native48
+            &&isHostFusionExperiment(mode)&&columns()==48&&rows()==32
+            &&metadata["pairing_policy"]==QLatin1String(FreshRgbReusePolicy)
+            &&fov.isDouble()&&fov.toDouble()>=0&&fov.toDouble()<=255&&std::floor(fov.toDouble())==fov.toDouble()
+            &&(!metadata.contains("dtof_fov_correction")||!metadata.contains("tof_fov_correction")
+                ||metadata["dtof_fov_correction"]==metadata["tof_fov_correction"])
+            &&metadata["tof_warning_flags"]==0&&std::abs(delta)+uncertainty<=FreshRgbPairBudgetMs;
+        const bool legacy=mode=="H"&&columns()==16&&rows()==16&&metadata["pairing_policy"]==QLatin1String(GlobalScaleReusePolicy)
+            &&(metadata["tof_warning_flags"]==0||metadata["tof_warning_flags"]==16)
+            &&std::abs(delta)<=GlobalScaleMaxPairDeltaMs;
+        return metadata["source_protocol"]=="HDA1"
             &&metadata["dtof_present"]==true&&metadata["work_mode"]=="rgb_tof"
-            &&metadata["pairing_policy"]==QLatin1String(GlobalScaleReusePolicy)&&(metadata["tof_warning_flags"]==0||metadata["tof_warning_flags"]==16)
-            &&std::isfinite(delta)&&std::abs(delta)<=GlobalScaleMaxPairDeltaMs
-            &&std::isfinite(uncertainty)&&uncertainty>=0&&uncertainty<=35
+            &&(fresh48||legacy)&&std::isfinite(delta)
+            &&std::isfinite(uncertainty)&&uncertainty>=0&&uncertainty<=PairClockUncertaintyMs
             &&metadata["rgb_timestamp_ns"].isDouble()&&metadata["rgb_timestamp_ns"].toDouble()>0
             &&std::abs((metadata["tof_timestamp_ns"].toDouble()-metadata["rgb_timestamp_ns"].toDouble())/1e6-delta)<=.001
             &&metadata["pair_clock_source"]=="rtcp_prft_board_realtime_monotonic";
     }
-    // H may fit the same admitted measurement against another current RGB.
-    // Default isValid() still rejects reuse for capture and all older modes.
+    // Only B, or historical H diagnostics, may reuse the same measurement.
     bool isValidForHostFusion() const {
-        const bool reuse=metadata["assist_experiment"]=="H";
-        return (!reuse||hasGlobalScaleReuseContract())&&isValid(reuse);
+        const auto mode=metadata["assist_experiment"].toString();
+        return hasGlobalScaleReuseContract()&&isValid(mode=="B"||mode=="H");
     }
     quint16 rangeUq2(int index) const { return qFromLittleEndian<quint16>(samples.constData()+index*4); }
     double distanceMm(int index) const { return rangeUq2(index)*0.25; }

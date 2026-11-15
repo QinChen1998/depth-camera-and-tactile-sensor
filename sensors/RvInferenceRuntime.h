@@ -14,8 +14,9 @@ QString provider(const QString &id);
 QString backendName(const QString &id);
 QJsonObject identity(const QString &id);
 bool validGraphMetadata(const QJsonObject &metadata);
+QByteArray fileSha256(const QString &path);
 QJsonObject verifyCompatibleRuntime();
-QJsonArray enumerateCandidates();
+void checkTensorRtCudaDevice();
 int writeEnumeration(const QString &reportPath);
 }
 

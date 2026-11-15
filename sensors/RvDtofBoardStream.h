@@ -31,7 +31,7 @@ inline QSize nativeCaptureGrid(const QJsonObject& m){
     const int mode=m["candidate_mode"].toInt(-1);
     if(!RvCaptureContract::supports(mode)||m["native_capture_protocol"]!=RvCaptureContract::NativeCaptureProtocolV2)return {};
     const QSize grid(RvCaptureContract::columns(mode),RvCaptureContract::rows(mode));
-    if(mode==RvCaptureContract::NativeHd&&!RvCameraView::isUniDepthNative16(m["requested_host_model"].toString()))return {};
+    if(mode==RvCaptureContract::NativeHd&&m["requested_host_model"]!=QLatin1String(RvCameraView::LegacyNative16Model))return {};
     return m["native_columns"]==grid.width()&&m["native_rows"]==grid.height()?grid:QSize();
 }
 inline bool dtofBoardReceipt(const QJsonObject& m,int mode,const QString& token,const QString& options){

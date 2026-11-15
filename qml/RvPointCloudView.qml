@@ -1,7 +1,6 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick3D
-import QtQuick3D.Helpers
 
 Item {
     id: root
@@ -19,9 +18,9 @@ Item {
     property real cameraDistance: defaultCameraDistance
     property real orbitYaw: defaultOrbitYaw
     property real orbitPitch: defaultOrbitPitch
-    readonly property real gridStepMm: 100
     property bool meshVisible: false
     readonly property bool hasPoints: pointInstances.count > 0 || depthInstances.count > 0 || meshVisible
+    readonly property real axisLengthMm: 100
     readonly property var axisDirections: [Qt.vector3d(1, 0, 0), Qt.vector3d(0, -1, 0), Qt.vector3d(0, 0, -1)]
     readonly property var axisColors: ["#ce7979", "#7ca58a", "#7da7d2"]
 
@@ -102,22 +101,8 @@ Item {
             }
         }
 
-        Model {
-            visible: root.hasPoints
-            x: Math.round(root.cameraTarget.x / root.gridStepMm) * root.gridStepMm
-            z: Math.round(root.cameraTarget.z / root.gridStepMm) * root.gridStepMm
-            eulerRotation.x: -90
-            castsShadows: false
-            geometry: GridGeometry {
-                horizontalLines: 16
-                verticalLines: 16
-                horizontalStep: root.gridStepMm
-                verticalStep: root.gridStepMm
-            }
-            materials: DefaultMaterial { lighting: DefaultMaterial.NoLighting; diffuseColor: "#303b48" }
-        }
-
         Repeater3D {
+            objectName: "rvPointCloudAxes"
             model: 3
             delegate: Model {
                 id: axis
@@ -125,12 +110,11 @@ Item {
                 visible: root.hasPoints
                 source: "#Cube"
                 castsShadows: false
-                readonly property real axisLength: root.gridStepMm
-                readonly property real thickness: axisLength * .014
-                position: root.axisDirections[index].times(axisLength * .5)
-                scale: Qt.vector3d(index === 0 ? axisLength : thickness,
-                                   index === 1 ? axisLength : thickness,
-                                   index === 2 ? axisLength : thickness).times(.01)
+                readonly property real thickness: root.axisLengthMm * .014
+                position: root.axisDirections[index].times(root.axisLengthMm * .5)
+                scale: Qt.vector3d(index === 0 ? root.axisLengthMm : thickness,
+                                   index === 1 ? root.axisLengthMm : thickness,
+                                   index === 2 ? root.axisLengthMm : thickness).times(.01)
                 materials: DefaultMaterial {
                     lighting: DefaultMaterial.NoLighting
                     diffuseColor: root.axisColors[axis.index]
@@ -140,10 +124,11 @@ Item {
     }
 
     Repeater {
+        objectName: "rvPointCloudAxisLabels"
         model: 3
         delegate: Text {
             required property int index
-            readonly property vector3d tip: root.axisDirections[index].times(root.gridStepMm * 1.14)
+            readonly property vector3d tip: root.axisDirections[index].times(root.axisLengthMm * 1.14)
             readonly property vector3d screenPosition: project(tip, camera.sceneTransform, view.width, view.height)
             function project(position, transform, width, height) {
                 return view.mapFrom3DScene(position)
@@ -156,15 +141,6 @@ Item {
             visible: root.hasPoints && screenPosition.z > 0
                 && x >= 0 && y >= 0 && x + width <= root.width && y + height <= root.height
         }
-    }
-
-    Text {
-        visible: root.hasPoints
-        anchors.left: parent.left
-        anchors.bottom: parent.bottom
-        anchors.margins: 10
-        color: "#a7b6c8"
-        text: qsTr("Grid step %1 m").arg((root.gridStepMm / 1000).toLocaleString(Qt.locale(), "f", 2))
     }
 
     MouseArea {

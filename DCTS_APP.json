@@ -7,7 +7,8 @@
     "camera"
   ],
   "imaging_schemes": [
-    "host_unidepth_rgb672_vga_fp16_tof16",
+    "host_unidepth_rgb672_vga_fp16_tof48_g",
+    "host_unidepth_rgb672_vga_fp16_tof48_b",
     "board_native_tof48",
     "board_native_tof48_high_accuracy"
   ],

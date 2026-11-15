@@ -83,9 +83,9 @@ DepthMapWidget::DepthMapWidget(QWidget *parent)
     m_rvModelCaption->setObjectName("rvDepthModelLabel");
     m_rvModel = new QComboBox(m_rvControls);
     m_rvModel->setObjectName("rvDepthModel");
-    if(RvAssistDepth::supportsHostModel(QLatin1String(RvCameraView::UniDepthVgaNative16))){
-        const auto scheme=QStringLiteral("host_")+QLatin1String(RvCameraView::UniDepthVgaNative16);
-        m_rvModel->addItem(scheme,scheme);
+    if(RvAssistDepth::supportsHostModel(QLatin1String(RvCameraView::UniDepthVgaNative48))){
+        m_rvModel->addItem(QString(),QLatin1String(RvSessionController::GlobalRgbImagingScheme));
+        m_rvModel->addItem(QString(),QLatin1String(RvSessionController::ReuseLatestTofImagingScheme));
     }
     m_rvModel->addItem(QString(),"board_native_tof48");
     m_rvModel->addItem(QString(),"board_native_tof48_high_accuracy");
@@ -167,6 +167,23 @@ DepthMapWidget::DepthMapWidget(QWidget *parent)
     saveControls->addWidget(fpsLabel);
     saveControls->addWidget(m_saveCamera);
     saveControls->addWidget(m_saveButton);
+    m_monocularButton=new QPushButton(this);
+    m_monocularButton->setObjectName("depthMonocularOnly");
+    m_monocularButton->setCheckable(true);
+    m_monocularButton->hide();
+    saveControls->addWidget(m_monocularButton);
+    connect(m_monocularButton,&QPushButton::toggled,this,[this](bool enabled){
+        if(m_session)m_session->setMonocularDisplay(enabled);
+    });
+    m_splitCorrectionButton=new QPushButton(this);
+    m_splitCorrectionButton->setObjectName("depthSplitCorrection");
+    m_splitCorrectionButton->setCheckable(true);
+    m_splitCorrectionButton->hide();
+    saveControls->addWidget(m_splitCorrectionButton);
+    connect(m_splitCorrectionButton,&QPushButton::toggled,this,[this](bool enabled){
+        if(m_session)m_session->setSplitCorrectionEnabled(enabled);
+        syncSessionControls();
+    });
     m_blackOutsideRange = new QCheckBox(statusRow);
     m_blackOutsideRange->setObjectName("depthBlackOutsideRange");
     m_blackOutsideRange->setChecked(m_imageSettings->blackOutsideRange());
@@ -242,15 +259,15 @@ DepthMapWidget::DepthMapWidget(QWidget *parent)
 
 int DepthMapWidget::selectedWidth() const
 {
+    if(m_depthTabs->currentIndex()==1&&m_session)return RvCameraView::outputProfile(m_session->assistHostModel()).outputWidth;
     if(m_session&&RvDtofCandidates::isNativeDepth(m_session->dtofCandidateMode()))return 48;
-    if(m_depthTabs->currentIndex()==1&&m_session)return RvCameraView::profile(m_session->assistHostModel()).outputWidth;
     return m_session ? m_session->depthWidth() : m_snapshot.metadata["width"].toInt(144);
 }
 
 int DepthMapWidget::selectedHeight() const
 {
+    if(m_depthTabs->currentIndex()==1&&m_session)return RvCameraView::outputProfile(m_session->assistHostModel()).outputHeight;
     if(m_session&&RvDtofCandidates::isNativeDepth(m_session->dtofCandidateMode()))return 32;
-    if(m_depthTabs->currentIndex()==1&&m_session)return RvCameraView::profile(m_session->assistHostModel()).outputHeight;
     if (!m_session) return m_snapshot.metadata["height"].toInt(81);
     switch (m_session->depthWidth()) {
     case 288: return 162;
@@ -304,6 +321,10 @@ void DepthMapWidget::retranslateUi()
     m_colorMaximumLabel->setText(tr("Maximum (m)"));
     m_applyColorRange->setText(tr("Apply"));
     m_saveButton->setText(tr("Save depth map"));
+    m_monocularButton->setToolTip(tr("Show the same frame before ToF correction in the depth map and point cloud."));
+    m_monocularButton->setText(m_monocularButton->isChecked()?tr("Restore corrected depth"):tr("Show monocular depth only"));
+    m_splitCorrectionButton->setToolTip(tr("Use verified distant ToF for the background and paired ToF for the near hand. Applies to the depth map and point cloud."));
+    m_splitCorrectionButton->setText(m_splitCorrectionButton->isChecked()?tr("Restore original G"):tr("Try split correction"));
     m_saveCamera->setText(tr("Save camera image too"));
     m_rvModelCaption->setText(tr("Imaging scheme:"));
     m_rvStart->setText(tr("Start"));
@@ -312,12 +333,13 @@ void DepthMapWidget::retranslateUi()
     for (auto *button : {m_rvStart, m_rvStop, m_rvReconnect})
         button->setToolTip(tr("Start, Stop and Reconnect apply to the shared camera + depth stream."));
     auto label=[this](const char* id,const QString& text){m_rvModel->setItemText(m_rvModel->findData(id),text);};
-    label("host_unidepth_rgb672_vga_fp16_tof16",tr("Host-assisted inference (640×480)"));
+    label(RvSessionController::GlobalRgbImagingScheme,tr("Host-assisted inference (G)"));
+    label(RvSessionController::ReuseLatestTofImagingScheme,tr("Host-assisted inference (B, reuse ToF)"));
     label("board_native_tof48",tr("Board inference"));
     label("board_native_tof48_high_accuracy",tr("Board inference high accuracy"));
     m_depthTabs->setTabText(0,tr("Board depth"));m_depthTabs->setTabText(1,tr("Host assisted depth"));
     m_rvModel->setAccessibleName(tr("Imaging scheme:"));
-    m_rvModel->setToolTip(tr("Host-assisted depth inference (640×480)."));
+    m_rvModel->setToolTip(tr("Host-assisted depth inference (480×640)."));
     if (m_session) m_session->retranslateState();
     m_sessionControlsKey.clear();syncSessionControls();
 }
@@ -412,6 +434,13 @@ void DepthMapWidget::setSessionController(RvSessionController *controller)
                 this, &DepthMapWidget::clearRvDepth);
         connect(m_session,&RvSessionController::dtofCandidateSelectionChanged,this,&DepthMapWidget::syncSessionControls);
         connect(m_session,&RvSessionController::assistStateChanged,this,&DepthMapWidget::syncSessionControls);
+        connect(m_session,&RvSessionController::monocularDisplayChanged,this,[this](bool enabled){
+            const QSignalBlocker block(m_monocularButton);
+            m_monocularButton->setChecked(enabled);
+            m_monocularButton->setText(enabled?tr("Restore corrected depth"):tr("Show monocular depth only"));
+            if(!m_assistCanvas->setMonocularVisible(enabled))m_assistSnapshot={};
+            updateRvPresentation();
+        });
         connect(m_session,&RvSessionController::imagingSwitchStarted,this,&DepthMapWidget::beginImagingSwitchUi);
         connect(m_session,&RvSessionController::imagingSwitchFinished,this,[this]{finishImagingSwitchUi();});
         connect(m_session,&RvSessionController::imagingSwitchAborted,this,[this]{cancelImagingSwitchUi();});
@@ -429,6 +458,7 @@ void DepthMapWidget::setSessionController(RvSessionController *controller)
             syncSessionControls();
         });
     }
+    m_assistCanvas->setMonocularVisible(m_session&&m_session->monocularDisplay());
     syncSessionControls();
 }
 
@@ -439,7 +469,8 @@ RvSessionController *DepthMapWidget::sessionController() const
 
 void DepthMapWidget::syncSessionControls()
 {
-    m_nativeTofAngle->setVisible(m_session&&RvDtofCandidates::isNativeDepth(m_session->dtofCandidateMode()));
+    m_nativeTofAngle->setVisible(m_session&&!m_session->hostHdAssist()
+        &&RvDtofCandidates::isNativeDepth(m_session->dtofCandidateMode()));
     const bool available = !m_session.isNull();
     const bool busy = available && m_session->busy();
     const bool stopped = !available || m_session->userStopped();
@@ -448,6 +479,22 @@ void DepthMapWidget::syncSessionControls()
     m_rvReconnect->setEnabled(available && !busy);
     if(m_switchUiActive&&(!m_session||m_session->userStopped()))cancelImagingSwitchUi();
     const bool assisting=m_session&&(m_session->cameraWidth()==576||m_session->hostHdAssist())&&m_session->assistDepthEnabled();
+    const bool monocular=m_session&&m_session->monocularDisplay();
+    m_monocularButton->setVisible(assisting);
+    if(monocular!=m_monocularButton->isChecked()){
+        const QSignalBlocker block(m_monocularButton);
+        m_monocularButton->setChecked(monocular);
+        m_monocularButton->setText(monocular?tr("Restore corrected depth"):tr("Show monocular depth only"));
+    }
+    const bool splitAvailable=m_session&&m_session->splitCorrectionAvailable();
+    const bool split=m_session&&m_session->splitCorrectionEnabled();
+    m_splitCorrectionButton->setVisible(splitAvailable);
+    if(split!=m_splitCorrectionButton->isChecked()){
+        const QSignalBlocker block(m_splitCorrectionButton);
+        m_splitCorrectionButton->setChecked(split);
+    }
+    const auto splitText=split?tr("Restore original G"):tr("Try split correction");
+    if(m_splitCorrectionButton->text()!=splitText)m_splitCorrectionButton->setText(splitText);
     const QStringList key{QString::number(available), QString::number(assisting),
         QString::number(m_session?m_session->dtofCandidateMode():-1), QString::number(busy), QString::number(m_switchUiActive),
         QString::number(m_session&&m_session->controlledSource()),
@@ -471,10 +518,16 @@ void DepthMapWidget::syncSessionControls()
             const auto id=m_rvModel->itemData(i).toString();
             if(id.startsWith("board_native_")){items->item(i)->setEnabled(true);items->item(i)->setToolTip(tr("Native 48×32 ToF radial depth; no neural inference."));}
             else{
-                const QString model=id=="host_assisted"?QStringLiteral("unidepth"):id.mid(5);
+                const QString model=QLatin1String(RvCameraView::UniDepthVgaNative48);
                 const bool available=RvAssistDepth::hostModelAvailable(model);
                 items->item(i)->setEnabled(offerAssist&&available);
-                items->item(i)->setToolTip(available?QString():RvAssistDepth::tr("Selected host model runtime is missing; prepare the optional runtime first"));
+                QString tooltip=RvAssistDepth::tr("Selected host model runtime is missing; prepare the optional runtime first");
+                if(available){
+                    if(id==QLatin1String(RvSessionController::ReuseLatestTofImagingScheme))
+                        tooltip=tr("RGB frames can reuse the latest eligible 48×32 ToF measurement within the 200 ms pairing budget.");
+                    else tooltip=tr("RGB frames trigger inference. Each fresh 48×32 ToF measurement can update the global scale once.");
+                }
+                items->item(i)->setToolTip(tooltip);
             }
         }
     }
@@ -527,7 +580,12 @@ void DepthMapWidget::updateRvPresentation()
 {
     if(!m_saveButton)return;
 
-    m_saveCamera->setEnabled(!m_session||!RvDtofCandidates::isNativeDepth(m_session->dtofCandidateMode()));
+    m_monocularButton->setEnabled(m_depthTabs->currentIndex()==1&&!m_switchUiActive
+        &&(m_monocularButton->isChecked()||!m_assistSnapshot.metresFloat32LE.isEmpty()));
+    m_splitCorrectionButton->setEnabled(m_session&&m_session->splitCorrectionAvailable()&&!m_session->busy()
+        &&!m_switchUiActive&&!m_session->monocularDisplay());
+    m_saveCamera->setEnabled(!m_session||m_session->hostHdAssist()
+        ||!RvDtofCandidates::isNativeDepth(m_session->dtofCandidateMode()));
     const auto &snapshot = m_depthTabs->currentIndex()==1 ? m_assistSnapshot : m_snapshot;
     m_saveButton->setEnabled(!m_switchUiActive
         && !(m_session && m_session->retainingRecoveryDisplay()) && !snapshot.metresFloat32LE.isEmpty());

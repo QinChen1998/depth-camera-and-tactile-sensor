@@ -11,9 +11,9 @@ namespace RvDepthCoverage {
 namespace {
 bool fieldIdentity(const QByteArray &depth,const QJsonObject &metadata){
     const auto model=metadata["assist_host_model"].toString();
-    const auto &profile=RvCameraView::profile(model);
+    const auto &profile=RvCameraView::outputProfile(model);
     const int width=profile.outputWidth,height=profile.outputHeight;
-    if(!RvCameraView::isWide(model)||metadata["width"]!=width||metadata["height"]!=height
+    if(!RvCameraView::isWide(model)||!RvCameraView::validOutputGrid(metadata)||metadata["width"]!=width||metadata["height"]!=height
        ||depth.size()!=profile.depthBytes()||metadata["depth_unit"]!="camera-Z_m_float32"
        ||metadata["assist_output_policy"]!=QLatin1String(RvAssistFusion::FieldOfViewPolicy)
        ||metadata["assist_camera_profile"]!="wide"||metadata["assist_output_restored_to_calibrated_grid"]!=true
@@ -43,23 +43,21 @@ DepthField scan(const QByteArray &depth,const QJsonObject &metadata,std::vector<
     if(decoded)decoded->resize(size_t(width)*height);
     auto *values=decoded?decoded->data():nullptr;
     bool nonnegative=true;
-    int count=0,left=width,top=height,right=-1,bottom=-1;
+    int count=0;
     for(int y=0;y<height;++y)for(int x=0;x<width;++x){
         const quint32 bits=qFromLittleEndian<quint32>(depth.constData()+4*(y*width+x));float z;std::memcpy(&z,&bits,4);
         if(!std::isfinite(z)){if(decoded)decoded->clear();return {};}
         if(values)values[y*width+x]=z;
         if(admitted){
             nonnegative&=z>=0;
-            if(z>0){++count;left=std::min(left,x);right=std::max(right,x);top=std::min(top,y);bottom=std::max(bottom,y);}
+            if(z>0)++count;
         }
     }
     finite=true;
     if(!admitted||!nonnegative||count==0||metadata["assist_fusion"].toObject()["fov_pixels"].toDouble(-1)!=count)return result;
-    // RGB-driven A/G/H keep one calibrated viewport across current/held scale
-    // and RGB-only output. Their positive bounding boxes move with depth and
-    // parallax; fitting those boxes produces visible zoom. B keeps its crop.
-    result.sourceRect=(metadata["assist_experiment"]=="A"||metadata["assist_experiment"]=="G"||metadata["assist_experiment"]=="H")
-        ?QRect(0,0,width,height):QRect(QPoint(left,top),QPoint(right,bottom));return result;
+    // Both schemes keep the full calibrated viewport across current and held scale.
+    result.sourceRect=QRect(0,0,width,height);
+    return result;
 }
 }
 DepthField depthField(const QByteArray &depth,const QJsonObject &metadata){bool finite=false;return scan(depth,metadata,nullptr,finite);}

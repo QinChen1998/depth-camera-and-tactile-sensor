@@ -1,4 +1,4 @@
-"""Native16/H synthetic packet fixtures; run tools/verify_port.py. No devices."""
+"""Host inference packet fixtures, including the legacy Native16 reference."""
 import hashlib
 import json
 import struct
@@ -8,7 +8,8 @@ import time
 import numpy as np
 
 VGA = 'unidepth_rgb672_vga_fp16_tof16'
-SIZES = {VGA: (672, 504, 640, 480)}
+PORTRAIT = 'unidepth_rgb672_vga_fp16_tof48'
+SIZES = {VGA: (672, 504, 640, 480), PORTRAIT: (672, 504, 480, 640)}
 REASON_BYTES = 1536
 
 
@@ -44,7 +45,7 @@ def metadata(index, fov, rotation, experiment, cols, rows, model, profile, epoch
         host_decoded_monotonic_ns=time.monotonic_ns(), boot_id='12345678-1234-1234-1234-123456789abc',
         tof_sequence=index, tof_timestamp_ns=stamp, rgb_timestamp_ns=stamp-5_000_000,
         tof_reused=False, pair_delta_ms=5., pair_clock_uncertainty_ms=35.,
-        pair_clock_source='rtcp_prft_board_realtime_monotonic', source_candidate_mode=14,
+        pair_clock_source='rtcp_prft_board_realtime_monotonic', source_candidate_mode=24 if model == PORTRAIT else 14,
         source_engine='native-hd-capture-v1', generation_source='host_presentation_epoch', source_generation='a'*32,
         dtof_width=cols, dtof_height=rows, dtof_bytes=cols*rows*4,
         dtof_format='range_uq2_u16le_snr_u8_valid_u8', dtof_range_unit='0.25_mm',
@@ -54,8 +55,11 @@ def metadata(index, fov, rotation, experiment, cols, rows, model, profile, epoch
         assist_input_rotation_degrees=rotation, assist_experiment=experiment, assist_diagnostic_capture=True)
     if result['assist_camera_profile'] == 'wide':
         result.update(assist_output_policy='dtof_geometric_fov_v1', assist_tof_fov_correction=fov)
-    if experiment == 'H':
-        result['pairing_policy'] = 'latest_native_reuse_100ms_global_scale_v1'
+    if experiment in ('H', 'G', 'B'):
+        result['pairing_policy'] = ('bounded_software_time_pair_not_hardware_sync' if model == PORTRAIT
+                                    else 'latest_native_reuse_100ms_global_scale_v1')
+    if model == PORTRAIT:
+        result['assist_model_fingerprint'] = True
     return result
 
 
@@ -144,17 +148,23 @@ def check_batch(executable, root, runtime, model, cases, environment, output):
                         'tof_reused', 'dtof_width', 'dtof_height', 'dtof_bytes'):
                 assert m.get(key) == case['metadata'].get(key), (case['name'], key)
             fit = m['assist_fusion']
-            n = 256
+            n = 1536 if model == PORTRAIT else 256
             for key in ('used_native_indices', 'global_used_native_indices', 'local_used_native_indices'):
                 assert all(type(i) is int and 0 <= i < n for i in fit.get(key, []))
             if fit.get('dtof_corrected'):
                 assert fit.get('tof_total_zones') == n
-            assert m['assist_diagnostic_native_count'] == 256
+            assert m['assist_diagnostic_native_count'] == n
             reasons = np.frombuffer(diagnostic[depth_bytes:], np.uint8).reshape(2, REASON_BYTES)
-            assert not reasons[:, 256:].any()
+            assert not reasons[:, n:].any()
             if case.get('uncorrected'):
                 assert fit.get('dtof_corrected') is False and not fit.get('used_native_indices')
             fingerprints[case['name']] = dict(depth=digest(depth), diagnostic=digest(diagnostic), mono=digest(diagnostic[:depth_bytes]))
+            if model == PORTRAIT:
+                assert m['assist_output_grid'] == 'tof_portrait_crop_v1'
+                assert m['assist_model_depth_size'] == [640, 480] and m['assist_model_crop_xywh'] == [140, 0, 360, 480]
+                assert (m['assist_native_columns'], m['assist_native_rows'], m['assist_capture_mode']) == (48, 32, 24)
+                assert m['depth_K'][2:] == [239.5, 319.5]
+                fingerprints[case['name']]['model_mono'] = m['assist_model_monocular_sha256']
             result.update(fusion=fit.get('fusion_mode'), adopted=len(fit.get('used_native_indices', [])),
                           native_measurements=n if m['dtof_present'] else 0, **fingerprints[case['name']])
         else:

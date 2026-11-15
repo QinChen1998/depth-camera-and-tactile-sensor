@@ -288,6 +288,7 @@ public:
         m_poll.setInterval(2500);
         m_timeout.setSingleShot(true);
         connect(&m_poll, &QTimer::timeout, this, [this] { scan(false); });
+        connect(RvInferenceSettings::instance(), &RvInferenceSettings::detectionFinished, this, [this] { scan(false); });
         connect(window, &SensorMainWindow::usbDeviceConnectionRequested, this,
                 [this](RvDeviceManagerDialog *dialog) { connectFromManager(dialog); });
         connect(&m_timeout, &QTimer::timeout, this, [this] {

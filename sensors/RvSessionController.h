@@ -28,6 +28,8 @@ class RvHdVideoStream;
 class RvDtofBoardStream;
 class RvAssistDepth;
 class RvTunerController;
+class SensorMainWindow;
+class LanguageManager;
 struct RtspVlcBackend;
 
 // One RV device session, independent of either display widget. All public calls
@@ -63,7 +65,14 @@ public:
     QString depthInfoText() const { return m_depthInfoText; }
     quint64 presentationEpoch() const {return m_presentationEpoch;}
     bool assistDepthEnabled() const;
-    bool hostHdAssist() const {return m_dtofMode==RvDtofCandidates::NativeHd&&m_config.cameraWidth==2304;}
+    bool hostHdAssist() const {return m_hostAssistSelected&&m_dtofMode==RvDtofCandidates::Native48&&m_config.cameraWidth==2304;}
+    static constexpr char GlobalRgbImagingScheme[]="host_unidepth_rgb672_vga_fp16_tof48_g";
+    static constexpr char ReuseLatestTofImagingScheme[]="host_unidepth_rgb672_vga_fp16_tof48_b";
+    bool monocularDisplay() const {return m_monocularDisplay;}
+    void setMonocularDisplay(bool enabled);
+    bool splitCorrectionAvailable() const;
+    bool splitCorrectionEnabled() const;
+    void setSplitCorrectionEnabled(bool enabled);
     int assistInputRotationDegrees() const;
     QString assistHostModel() const;
     QString currentImagingScheme() const;
@@ -90,7 +99,6 @@ public slots:
     void setAssistDepthEnabled(bool enabled);
     static int effectiveHostInputRotation(const RvDeviceProfile &device);
     static QString legacyHostInputRotationKey(const RvDeviceProfile &device);
-    void setAssistExperiment(const QString &mode);
     // Fresh stopped QCore test sessions only; no persisted setting or GUI mode.
     void setDepthConfiguration(int width, const QString &location, const QString &method);
     void setConfiguration(int cameraWidth, const QString &model, int depthWidth,
@@ -121,6 +129,7 @@ signals:
     void photonStreamCleared(const QString &reason);
     void depthStreamCleared(const QString &reason);
     void assistStateChanged();
+    void monocularDisplayChanged(bool enabled);
     void assistDepthSnapshotReady(const QByteArray &depth,const QJsonObject &metadata,const QImage &camera,const RvTofFrame &tof=RvTofFrame(),const QByteArray &diagnostic=QByteArray());
     void assistDepthStreamCleared(const QString &reason);
     void imagingSwitchStarted(const QString &scheme,int estimatedMs);
@@ -137,6 +146,7 @@ private:
     friend int runRvAssistDepthTests(const QString &reportPath);
     friend int runDepthorFp32PerformanceTests(const QString &reportPath);
     friend int runRvImagingSwitchTests(const QString &reportPath);
+    friend int runPortSmokeTests(SensorMainWindow &,LanguageManager &,const QString &);
     struct Configuration {
         int cameraWidth = 576;
         QString model = QStringLiteral("Native");
@@ -162,9 +172,7 @@ private:
     void prepareHostHdFrame(const QImage&,const QJsonObject&,quint64,const QByteArray&);
     void takeHostHdPrepared();
     void observeHostHdClock(const QJsonObject& metadata);
-    void dispatchHostHdMeasurement();
-    int nearestHostHdRgb(const RvTofFrame &frame,qint64 nowNs) const;
-    const RvTofFrame *latestReusableNative(qint64 rgbBoardNs,qint64 nowNs) const;
+    const RvTofFrame *pairedHostTof(qint64 rgbBoardNs,qint64 nowNs) const;
     bool prepareManagedVlc();
     void pollManagedStatus();
     void stopManagedStatus();
@@ -214,10 +222,6 @@ private:
     std::unique_ptr<HdPreparer> m_hdPreparer;
     quint64 m_hdVideoSequence=0,m_hdOutputSequence=0;
     std::deque<RvTofFrame> m_hdNativeFrames;
-    struct HdRgb {QImage image;QJsonObject source;qint64 boardNs=0;};
-    std::deque<HdRgb> m_hdRgbFrames;
-    quint64 m_hdScheduledTof=0;
-    QJsonObject m_hdPairDrops;
     qint64 m_hdRealtimeOffsetNs=0,m_hdBoardSampleNs=0,m_hdSampleReceivedNs=0;
     int m_hdClockSamples=0;
     RvAssistDepth *m_assist = nullptr;
@@ -238,6 +242,7 @@ private:
     quint64 m_presentationEpoch = 0;
     bool m_transitioning = false;
     bool m_imagingSwitchActive=false,m_imagingSwitchBoardRestart=false;
+    bool m_hostAssistSelected=false,m_monocularDisplay=false;
     int m_imagingSwitchEstimateMs=0;
     QString m_imagingSwitchScheme;
     QElapsedTimer m_imagingSwitchClock;

@@ -130,7 +130,7 @@ try {
         $prefs=Join-Path $env:LOCALAPPDATA 'DepthCameraAndTactileSensor\config\preferences\DepthCameraAndTactileSensor\DepthCameraAndTactileSensor.ini'
         Check 'preferences_in_local_appdata' (Test-Path -LiteralPath $prefs)
         Check 'first_run_zh_cn' ([bool](Select-String -LiteralPath $prefs -SimpleMatch 'language=zh_CN'))
-        Check 'first_run_host_h' ([bool](Select-String -LiteralPath $prefs -SimpleMatch 'imagingScheme=host_unidepth_rgb672_vga_fp16_tof16'))
+        Check 'first_run_host_assist' ([bool](Select-String -LiteralPath $prefs -SimpleMatch 'imagingScheme=host_unidepth_rgb672_vga_fp16_tof48_g'))
         Check 'config_outside_install_directory' (-not (Test-Path (Join-Path $app 'config')))
         Check 'close_main_window' ($process.CloseMainWindow())
         Check 'ordinary_exit_0' ($process.WaitForExit(30000) -and $process.ExitCode -eq 0)

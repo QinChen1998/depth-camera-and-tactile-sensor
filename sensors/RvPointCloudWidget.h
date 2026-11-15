@@ -48,7 +48,8 @@ private:
     };
 
     void acceptTofFrame(const RvTofFrame &frame);
-    void acceptAssistedDepth(const QByteArray &depth, const QJsonObject &metadata);
+    void acceptAssistedDepth(const QByteArray &depth, const QJsonObject &metadata, const QImage &camera,
+                             const RvTofFrame &tof, const QByteArray &diagnostic);
     void clearFrames();
     void clearTofFrame();
     void clearAssistedDepth();
@@ -61,13 +62,14 @@ private:
     void startDepthConversion();
     void finishDepthConversion();
     static DepthProjection projectDepth(const QByteArray &depth, const RvCameraView::Profile &camera,
-                                       double colorMinimum, double colorMaximum, bool mesh);
+                                       double colorMinimum, double colorMaximum, bool dynamic, bool mesh);
     void setAccumulating(bool enabled);
     void appendAccumulatedFrame();
     void clearAccumulatedFrames();
-    void recolorAccumulatedFrames();
+    void colorNativeFrame(NativeFrame &frame) const;
     void setupDisplayControls(QVBoxLayout &layout);
     void applyDepthColorRange();
+    void refreshColors();
     void updateColorLegend();
     void updateStatus();
     void retranslate();
@@ -79,9 +81,12 @@ private:
     QQuickWidget *const m_view;
     QLabel *const m_status;
     QComboBox *const m_displayMode;
+    QComboBox *const m_colorMode;
     QPushButton *const m_accumulate;
     QPushButton *const m_reset;
     QWidget *const m_diameterControls;
+    QWidget *const m_rangeControls;
+    QLabel *const m_colorLegend;
     QLabel *const m_legendMinimum;
     QLabel *const m_legendMaximum;
     QLabel *const m_diameterLabel;
@@ -95,7 +100,7 @@ private:
     QTimer m_accumulationUpdate;
     std::deque<NativeFrame> m_accumulatedFrames;
     RvTofFrame m_latestTof;
-    QByteArray m_latestDepth;
+    QByteArray m_latestDepth, m_latestMonocularDepth;
     QFutureWatcher<DepthProjection> m_depthConversion;
     quint64 m_depthEpoch = 0;
     quint64 m_conversionEpoch = 0;

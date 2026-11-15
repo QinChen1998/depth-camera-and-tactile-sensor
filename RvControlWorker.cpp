@@ -725,7 +725,7 @@ int run(const QStringList &input) {
         for(int i=5;i<args.size();++i){
             if(args[i]=="--host-model"){
                 require(hostModel.isEmpty()&&i+1<args.size(),"Invalid host model selection");hostModel=args[++i];
-                require(RvCameraView::isUniDepthNative16(hostModel),"Unsupported host model");
+                require(RvCameraView::isUniDepthNative48(hostModel)||hostModel==QLatin1String(RvCameraView::LegacyNative16Model),"Unsupported host model");
             }
             else if(args[i]=="--automatic-start"){
                 require(!automaticStart,"Duplicate automatic start option");
@@ -738,8 +738,10 @@ int run(const QStringList &input) {
         for(auto ch:token)require(QStringLiteral("0123456789abcdef").contains(ch),"Invalid candidate generation");
         RvCaptureContract::validate(mode,token.toStdString(),csv.toStdString());
         const bool captureOnly=true;
-        require(captureOnly||hostModel.isEmpty(),"Host model requires capture-only mode");
-        if(mode==RvCaptureContract::NativeHd&&hostModel.isEmpty())hostModel="unidepth_rgb672_vga_fp16_tof16";
+        if(mode==RvCaptureContract::NativeHd&&hostModel.isEmpty())hostModel=QLatin1String(RvCameraView::LegacyNative16Model);
+        require(hostModel.isEmpty()||(mode==RvCaptureContract::NativeHd&&hostModel==QLatin1String(RvCameraView::LegacyNative16Model))
+                ||(mode==RvCaptureContract::Native48&&RvCameraView::isUniDepthNative48(hostModel)),
+                "Host model does not match the native capture preset");
         require(!automaticStart||(bool(deviceStore)&&recovery.isEmpty()&&qEnvironmentVariable("RV_TEST_OFFLINE_ONLY")!="1"),
                 "Automatic start requires an online trusted device");
         if(automaticStart){pinSelectedProfile=true;automaticCameraStart=true;}

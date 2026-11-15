@@ -38,4 +38,57 @@ inline QRgb color(double cameraZ, double minimum = DefaultMinimumM, double maxim
         return qRgb(0, 0, 0);
     return jet((cameraZ - minimum) / (maximum - minimum));
 }
+
+class DynamicHistogram {
+public:
+    template <typename Samples, typename CameraZ>
+    DynamicHistogram(const Samples &samples, CameraZ cameraZ)
+    {
+        std::array<unsigned, BinCount> counts{};
+        unsigned total = 0;
+        for (const auto &sample : samples) {
+            const double mm = cameraZ(sample) * 1000.0;
+            if (mm >= MinimumMm && mm < MaximumMm + 1) {
+                ++counts[int(mm) - MinimumMm];
+                ++total;
+            }
+        }
+
+        // OrbbecViewer Dynamic equalizes the inclusive millimetre histogram,
+        // then applies the near-weighted curve before sampling Jet.
+        static const auto palette = [] {
+            std::array<QRgb, BinCount> colors;
+            for (int i = 0; i < BinCount; ++i)
+                colors[i] = colorAtFraction(double(i) / (BinCount - 1));
+            return colors;
+        }();
+        unsigned cumulative = 0;
+        for (int i = 0; i < BinCount; ++i) {
+            cumulative += counts[i];
+            const int adjusted = total ? int(float(cumulative) * BinCount / float(total) + MinimumMm) - MinimumMm : i;
+            m_colors[i] = palette[std::min(adjusted, BinCount - 1)];
+        }
+    }
+
+    QRgb color(double cameraZ) const
+    {
+        if (!std::isfinite(cameraZ) || cameraZ <= 0)
+            return qRgb(0, 0, 0);
+        const double mm = cameraZ * 1000.0;
+        if (mm < MinimumMm)
+            return jet(0);
+        return m_colors[int(std::min(mm, double(MaximumMm))) - MinimumMm];
+    }
+
+    static QRgb colorAtFraction(double fraction)
+    {
+        return jet(std::pow(fraction, 0.65));
+    }
+
+private:
+    static constexpr int MinimumMm = 100;
+    static constexpr int MaximumMm = 10000;
+    static constexpr int BinCount = MaximumMm - MinimumMm + 1;
+    std::array<QRgb, BinCount> m_colors;
+};
 }

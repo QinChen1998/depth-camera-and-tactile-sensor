@@ -56,6 +56,8 @@ private:
     QPushButton *m_nativeTofAngle = nullptr;
     int m_nativeTofRotation = 90;
     QPushButton *m_saveButton = nullptr;
+    QPushButton *m_monocularButton = nullptr;
+    QPushButton *m_splitCorrectionButton = nullptr;
     QCheckBox *m_saveCamera = nullptr;
     QCheckBox *m_blackOutsideRange = nullptr;
     QLabel *m_colorMinimumLabel = nullptr, *m_colorMaximumLabel = nullptr;

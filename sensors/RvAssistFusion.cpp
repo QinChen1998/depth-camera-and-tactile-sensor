@@ -10,10 +10,11 @@
 #include <cmath>
 #include <cstring>
 #include <set>
+#include <utility>
 
 namespace RvAssistFusion {
 namespace {
-constexpr int W=576, H=324, GW=144;
+constexpr int W=576, H=324;
 // These are algorithm guards, not claims about the sensor's accuracy.
 constexpr int MinimumAnchors=12;
 double median(std::vector<double> v) {
@@ -33,6 +34,61 @@ double readDouble(const QByteArray &bytes,int offset) {
     double value;std::memcpy(&value,&bits,8);return value;
 }
 struct Anchor { double x,y,z,ratio; int nativeIndex; };
+bool usableNativeRange(const RvTofFrame &tof,int id,double radius) {
+    return tof.snr(id)>=6 && radius>=MinimumRadialMetres && radius<=10;
+}
+bool awayFromModelEdge(const std::vector<float> &mono,int width,int x,int y) {
+    double low=mono[y*width+x],high=low;
+    for(int dy=-3;dy<=3;dy+=3)for(int dx=-3;dx<=3;dx+=3) {
+        const double d=mono[(y+dy)*width+x+dx];low=std::min(low,d);high=std::max(high,d);
+    }
+    return high<=1.4*low;
+}
+struct ScaleFit {
+    std::vector<Anchor> inliers;
+    double scale=0,mad=0,spanX=0,spanY=0;
+    double retainedMad=0;
+    int inconsistent=0,duplicates=0;
+    bool rechecked=false,supported=false;
+};
+ScaleFit fitScale(const std::vector<Anchor> &anchors,int width,int height,QByteArray *reasons=nullptr) {
+    ScaleFit fit;
+    if(anchors.size()<MinimumAnchors)return fit;
+    std::vector<double> ratios,deviations;
+    ratios.reserve(anchors.size());deviations.reserve(anchors.size());
+    for(const auto &a:anchors)ratios.push_back(a.ratio);
+    // Centre the scale before rejecting outliers, even if the model's scale is far off.
+    const double centre=median(ratios);
+    for(double r:ratios)deviations.push_back(std::abs(r-centre));
+    fit.mad=median(std::move(deviations));
+    const double gate=std::clamp(3*1.4826*fit.mad,std::log(1.15),std::log(1.75));
+    std::vector<double> accepted;
+    double minX=width,maxX=0,minY=height,maxY=0;
+    const int columns=(width+3)/4;
+    std::set<int> occupied;
+    for(const auto &a:anchors) {
+        if(std::abs(a.ratio-centre)>gate){if(reasons)(*reasons)[a.nativeIndex]=GlobalOutlier;++fit.inconsistent;continue;}
+        const int cell=int(a.y/4)*columns+int(a.x/4);
+        if(!occupied.insert(cell).second){if(reasons)(*reasons)[a.nativeIndex]=Duplicate;++fit.duplicates;continue;}
+        if(reasons)(*reasons)[a.nativeIndex]=Adopted;
+        fit.inliers.push_back(a);accepted.push_back(a.ratio);
+        minX=std::min(minX,a.x);maxX=std::max(maxX,a.x);minY=std::min(minY,a.y);maxY=std::max(maxY,a.y);
+    }
+    fit.spanX=maxX-minX;fit.spanY=maxY-minY;
+    fit.supported=fit.inliers.size()>=MinimumAnchors&&fit.inliers.size()>=.5*anchors.size()
+        &&(fit.spanX>=32||fit.spanY>=24);
+    if(fit.supported&&fit.mad>std::log(1.3)){
+        // Recheck the retained consensus without refitting the discarded returns.
+        const double retainedCentre=median(accepted);
+        std::vector<double> retainedDeviations;retainedDeviations.reserve(accepted.size());
+        for(double ratio:accepted)retainedDeviations.push_back(std::abs(ratio-retainedCentre));
+        fit.retainedMad=median(std::move(retainedDeviations));
+        fit.rechecked=true;
+        fit.supported=fit.retainedMad<=std::log(1.3);
+    }
+    if(fit.supported)fit.scale=std::exp(median(std::move(accepted)));
+    return fit;
+}
 std::array<std::array<double,3>,256> makeNative16Rays(int fov){
     using Ray=std::array<double,3>;
     std::array<Ray,256> result{};
@@ -51,7 +107,7 @@ std::array<std::array<double,3>,256> makeNative16Rays(int fov){
 bool nativeGridMatches(const RvTofFrame &tof,const Calibration &cal){
     if(tof.columns()!=cal.columns||tof.rows()!=cal.rows)return false;
     if(cal.columns==48&&cal.rows==32)return true;
-    return cal.columns==16&&cal.rows==16&&RvCameraView::isUniDepthNative16(tof.metadata["assist_host_model"].toString());
+    return cal.columns==16&&cal.rows==16&&tof.metadata["assist_host_model"]==QLatin1String(RvCameraView::LegacyNative16Model);
 }
 }
 
@@ -103,6 +159,31 @@ const Calibration &calibrationForNativeGrid(int fov,int columns,int rows){
     return fov==6?f6:fov==1?f1:fov==2?f2:invalid;
 }
 
+QJsonValue defaultNativeProjection(const RvTofFrame &tof) {
+    const auto &m=tof.metadata;
+    const auto fov=m.contains("dtof_fov_correction")?m["dtof_fov_correction"]:m["tof_fov_correction"];
+    if(!tof.samples.isEmpty()&&fov==6&&tof.columns()==48&&tof.rows()==32
+        &&RvTofFrame::isHostFusionExperiment(m["assist_experiment"].toString())
+        &&RvCameraView::isUniDepthNative48(m["assist_host_model"].toString()))
+        return QString::fromLatin1(CloseNative48Projection);
+    return QJsonValue(QJsonValue::Undefined);
+}
+
+NativeProjection projectNativePoint(double radius,int id,const Calibration &cal,
+                                    const RvCameraView::Profile &view,const RvTofFrame &tof) {
+    const auto &q=cal.cameraRays[id];
+    const double z=radius*q[2]+cal.translation[2];
+    if(z<=0)return {{-1,-1},z};
+    QPointF pixel(view.focal*(radius*q[0]+cal.translation[0])/z+view.cx(),
+                  view.focal*(radius*q[1]+cal.translation[1])/z+view.cy());
+    // The recorded F6 48×32 near-range correction is a lateral residual.
+    if(tof.metadata[NativeProjectionField]==QLatin1String(CloseNative48Projection)&&z>.06&&z<.33){
+        const double weight=std::min({1.,(z-.06)/.04,(.33-z)/.13});
+        pixel+=QPointF(.0065,.00725)*(view.focal*weight/z);
+    }
+    return {pixel,z};
+}
+
 Result monocular(const std::vector<float> &mono,const char *reason,QSize size) {
     const int pixels=size.width()*size.height();
     Result result;
@@ -126,6 +207,9 @@ Result fuseGlobalScale(const std::vector<float> &mono,const RvTofFrame &tof,
     Result result;
     result.globalReasons=result.localReasons=QByteArray(nativeCount,Invalid);
     const auto fail=[&](const char *message) {result.depth.clear();result.error=QString::fromLatin1(message);return result;};
+    const auto projection=tof.metadata.value(NativeProjectionField);
+    if(!projection.isUndefined()&&(projection!=defaultNativeProjection(tof)||view.outputSize()!=RvCameraView::Portrait.outputSize()))
+        return fail("Invalid native ToF projection");
     if(!cal.valid || mono.size()!=width*height || cameraSize!=QSize(width,height) || !tof.isValidForHostFusion() || !nativeGridMatches(tof,cal)
         || tof.metadata["rgb_width"].toInt()!=view.inputWidth
         || tof.metadata["rectify_map_sha256"]!=QLatin1String(view.mapSha)
@@ -152,69 +236,36 @@ Result fuseGlobalScale(const std::vector<float> &mono,const RvTofFrame &tof,
     for(int i=0;i<nativeCount;++i) {
         const double radius=tof.rangeUq2(i)*.00025;
         if(!tof.valid(i))continue;
-        if(tof.snr(i)<6 || radius<MinimumRadialMetres || radius>10){result.globalReasons[i]=result.localReasons[i]=Quality;continue;}
+        if(!usableNativeRange(tof,i,radius)){result.globalReasons[i]=result.localReasons[i]=Quality;continue;}
         ++good;
-        const auto &q=cal.cameraRays[i];
-        const double x=radius*q[0]+cal.translation[0],y=radius*q[1]+cal.translation[1];
-        const double z=radius*q[2]+cal.translation[2];
+        const auto point=projectNativePoint(radius,i,cal,view,tof);
+        const double z=point.cameraZ;
         if(z<=0){result.globalReasons[i]=result.localReasons[i]=Outside;continue;}
-        const double u=view.focal*x/z+view.cx(),v=view.focal*y/z+view.cy();
+        const double u=point.pixel.x(),v=point.pixel.y();
         if(u<3 || u>width-4 || v<3 || v>height-4){result.globalReasons[i]=result.localReasons[i]=Outside;continue;}
         ++projected;
-        double low=mono[int(v)*width+int(u)],high=low;
-        for(int dy=-3;dy<=3;dy+=3)for(int dx=-3;dx<=3;dx+=3) {
-            const double d=mono[(int(v)+dy)*width+int(u)+dx];low=std::min(low,d);high=std::max(high,d);
-        }
-        if(high>1.4*low) {result.globalReasons[i]=result.localReasons[i]=Boundary;++edgeRejected;continue;}
+        if(!awayFromModelEdge(mono,width,int(u),int(v))) {result.globalReasons[i]=result.localReasons[i]=Boundary;++edgeRejected;continue;}
         result.globalReasons[i]=result.localReasons[i]=GlobalRejected;
         anchors.push_back({u,v,z,std::log(z/sample(mono,width,height,u,v)),i});
     }
     result.diagnostics={{"tof_total_zones",nativeCount},{"tof_good_zones",good},{"tof_projected_in_view",projected},
         {"anchors_projected",int(anchors.size())},{"anchors_edge_rejected",edgeRejected}};
     if(anchors.size()<MinimumAnchors)return monocular("Too few reliable dToF anchors in the camera field of view");
-    std::vector<double> ratios;for(const auto &a:anchors)ratios.push_back(a.ratio);
-    // Estimate the common scale before rejecting discrepancies. Large uniform
-    // monocular scale errors must not cause all valid ToF measurements to vanish.
-    const double centre=median(ratios);
-    std::vector<double> deviations;for(double r:ratios)deviations.push_back(std::abs(r-centre));
-    const double mad=median(deviations);
-    const double gate=std::clamp(3*1.4826*mad,std::log(1.15),std::log(1.75));
-    std::vector<Anchor> inliers;std::vector<double> accepted;
-    double minX=width,maxX=0,minY=height,maxY=0;
-    std::set<int> occupied;
-    int inconsistent=0,duplicates=0;
-    for(const auto &a:anchors) {
-        if(std::abs(a.ratio-centre)>gate){result.globalReasons[a.nativeIndex]=result.localReasons[a.nativeIndex]=GlobalOutlier;++inconsistent;continue;}
-        const int cell=int(a.y/4)*GW+int(a.x/4);
-        if(!occupied.insert(cell).second){result.globalReasons[a.nativeIndex]=result.localReasons[a.nativeIndex]=Duplicate;++duplicates;continue;}
-        result.globalReasons[a.nativeIndex]=result.localReasons[a.nativeIndex]=Adopted;
-        inliers.push_back(a);accepted.push_back(a.ratio);
-        minX=std::min(minX,a.x);maxX=std::max(maxX,a.x);minY=std::min(minY,a.y);maxY=std::max(maxY,a.y);
-    }
-    result.diagnostics["anchors_inlier"]=int(inliers.size());result.diagnostics["log_ratio_mad"]=mad;
-    result.diagnostics["anchors_inconsistent_rejected"]=inconsistent;
-    result.diagnostics["anchors_duplicate_rejected"]=duplicates;
-    result.diagnostics["anchor_span_x"]=maxX-minX;result.diagnostics["anchor_span_y"]=maxY-minY;
-    const bool supported=inliers.size()>=MinimumAnchors&&inliers.size()>=.5*anchors.size()
-        &&(maxX-minX>=32||maxY-minY>=24);
-    double fitMad=mad;
-    if(supported&&mad>std::log(1.3)){
-        // Outliers and duplicate projections already cannot constrain scale.
-        // They must not be the sole reason to discard a coherent retained
-        // majority. Keep the original gate, count/coverage checks, point IDs,
-        // and fitting arithmetic; do not retry legacy A/B or an accepted fit.
-        const double retainedCentre=median(accepted);
-        std::vector<double> retainedDeviations;retainedDeviations.reserve(accepted.size());
-        for(double ratio:accepted)retainedDeviations.push_back(std::abs(ratio-retainedCentre));
-        fitMad=median(std::move(retainedDeviations));
+    const auto fit=fitScale(anchors,width,height,&result.globalReasons);
+    result.localReasons=result.globalReasons;
+    result.diagnostics["anchors_inlier"]=int(fit.inliers.size());result.diagnostics["log_ratio_mad"]=fit.mad;
+    result.diagnostics["anchors_inconsistent_rejected"]=fit.inconsistent;
+    result.diagnostics["anchors_duplicate_rejected"]=fit.duplicates;
+    result.diagnostics["anchor_span_x"]=fit.spanX;result.diagnostics["anchor_span_y"]=fit.spanY;
+    if(fit.rechecked){
         result.diagnostics["global_consensus_recheck"]=true;
-        result.diagnostics["retained_log_ratio_mad"]=fitMad;
+        result.diagnostics["retained_log_ratio_mad"]=fit.retainedMad;
         result.diagnostics["global_consensus_limit_log"]=std::log(1.3);
-        result.diagnostics["global_consensus_accepted"]=fitMad<=std::log(1.3);
+        result.diagnostics["global_consensus_accepted"]=fit.supported;
     }
-    if(!supported||fitMad>std::log(1.3))
+    if(!fit.supported)
         return monocular("dToF anchors are inconsistent or have insufficient spatial coverage");
-    const double logScale=median(accepted),scale=std::exp(logScale);
+    const double scale=fit.scale;
     if(!std::isfinite(scale) || scale<.02 || scale>50)return monocular("Unstable monocular scale fit");
     result.depth.resize(width*height*4);
     auto *depth=result.depth.data();
@@ -222,7 +273,7 @@ Result fuseGlobalScale(const std::vector<float> &mono,const RvTofFrame &tof,
         if(!std::isfinite(z)||z<=0)return fail("Non-finite fused depth");
         quint32 bits;std::memcpy(&bits,&z,4);qToLittleEndian(bits,depth+4*i);
     }
-    QJsonArray used;for(const auto &a:inliers)used.append(a.nativeIndex);
+    QJsonArray used;for(const auto &a:fit.inliers)used.append(a.nativeIndex);
     result.localReasons=QByteArray(nativeCount,NoMeasurement);
     result.diagnostics["scale"]=scale;result.diagnostics["local_factor_limit"]=1.;
     result.diagnostics["fusion_mode"]="global_scale";result.diagnostics["dtof_corrected"]=true;
@@ -331,10 +382,11 @@ Result limitTofFieldOfView(Result result,const Calibration &cal,const RvCameraVi
 QJsonObject agreement(const std::vector<float> &mono,const Result &output,
                       const RvTofFrame &tof,const Calibration &cal,const RvCameraView::Profile &view) {
     const int nativeCount=cal.nativeCount();
-    if(!output.ok()||output.depth.size()!=W*H*4||mono.size()!=W*H||!cal.valid
+    const int width=view.outputWidth,height=view.outputHeight,pixels=width*height;
+    if(!output.ok()||output.depth.size()!=pixels*4||mono.size()!=pixels||!cal.valid
        ||!tof.isValidForHostFusion()||!nativeGridMatches(tof,cal))return {};
-    std::vector<float> depth(W*H);
-    for(int i=0;i<W*H;++i){const quint32 bits=qFromLittleEndian<quint32>(output.depth.constData()+4*i);std::memcpy(&depth[i],&bits,4);}
+    std::vector<float> depth(pixels);
+    for(int i=0;i<pixels;++i){const quint32 bits=qFromLittleEndian<quint32>(output.depth.constData()+4*i);std::memcpy(&depth[i],&bits,4);}
     struct Metrics {
         std::vector<double> before,after,relativeBefore,relativeAfter;
         double beforeBias=0,afterBias=0,measured=0;
@@ -351,13 +403,13 @@ QJsonObject agreement(const std::vector<float> &mono,const Result &output,
         }
     } all,adopted,near,middle,far;
     std::set<int> used;for(const auto id:output.diagnostics["used_native_indices"].toArray())used.insert(id.toInt(-1));
-    const double focal=view.focal;
     for(int i=0;i<nativeCount;++i){
         const double r=tof.rangeUq2(i)*.00025;if(!tof.valid(i)||tof.snr(i)<6||r<MinimumRadialMetres||r>10)continue;
-        const auto &q=cal.cameraRays[i];const double z=r*q[2]+cal.translation[2];if(z<=0)continue;
-        const double u=focal*(r*q[0]+cal.translation[0])/z+287.5,v=focal*(r*q[1]+cal.translation[1])/z+161.5;
-        if(u<3||u>W-4||v<3||v>H-4)continue;
-        const double a=sample(mono,W,H,u,v),b=sample(depth,W,H,u,v);
+        const auto point=projectNativePoint(r,i,cal,view,tof);
+        const double z=point.cameraZ;if(z<=0)continue;
+        const double u=point.pixel.x(),v=point.pixel.y();
+        if(u<3||u>width-4||v<3||v>height-4)continue;
+        const double a=sample(mono,width,height,u,v),b=sample(depth,width,height,u,v);
         if(!std::isfinite(a)||a<=0||!std::isfinite(b)||b<=0)continue;
         all.add(a,b,z);if(used.count(i))adopted.add(a,b,z);
         (z<.7?near:z<1.5?middle:far).add(a,b,z);
@@ -401,5 +453,343 @@ Result ScaleContinuity::apply(Result result,qint64 nowMs,qint64 epoch,qint64 gen
     result.diagnostics["scale_source"]=reliable?"current_dtof_smoothed":(hasReference?"held_dtof":"unadjusted");
     if(!reliable&&hasReference)result.diagnostics["fusion_mode"]="held_scale";
     return result;
+}
+
+namespace {
+constexpr int PortraitWidth=480,PortraitHeight=640;
+constexpr int GuardStep=4,GuardWidth=PortraitWidth/GuardStep,GuardHeight=PortraitHeight/GuardStep;
+constexpr int ReferenceStep=10,ReferenceWidth=PortraitWidth/ReferenceStep+1,ReferenceHeight=PortraitHeight/ReferenceStep+1;
+constexpr double NearLimit=.40,FarLimit=.55;
+constexpr int NearSearchRadius=32;
+constexpr int NearColumns=(PortraitWidth+NearSearchRadius-1)/NearSearchRadius;
+constexpr int NearRows=(PortraitHeight+NearSearchRadius-1)/NearSearchRadius;
+constexpr qint64 NoObservation=-10000;
+
+double unitWeight(double value){return std::clamp(value,0.,1.);}
+int rounded(double value){return int(std::nearbyint(value));}
+using Rgb=std::array<int,3>;
+using RgbPatch=std::array<Rgb,5>;
+
+class PortraitRgb {
+public:
+    explicit PortraitRgb(QByteArrayView planar):data(planar.data()){}
+    Rgb pixel(int x,int y) const {
+        const auto &view=RvCameraView::Rgb672VgaFp16;
+        const auto p=RvCameraView::inputPixel(QPointF(x,y),RvCameraView::Portrait.outputSize());
+        constexpr int firstX=16+RvCameraView::PortraitCropX,firstY=12+RvCameraView::PortraitCropY;
+        constexpr int lastX=firstX+RvCameraView::PortraitCropWidth-1,lastY=firstY+RvCameraView::PortraitCropHeight-1;
+        const double u=std::clamp(p.x(),double(firstX),double(lastX));
+        const int left=int(u),right=std::min(left+1,lastX),sourceRow=int(p.y());
+        const int top=std::clamp(sourceRow,firstY,lastY),bottom=std::clamp(sourceRow+1,firstY,lastY);
+        const int a=int((u-left)*8),b=int((p.y()-sourceRow)*8);
+        const int row0=top*view.inputWidth,row1=bottom*view.inputWidth;
+        Rgb color;
+        for(int c=0;c<3;++c){
+            const auto *plane=data+c*view.inputWidth*view.inputHeight;
+            const int upper=(8-a)*quint8(plane[row0+left])+a*quint8(plane[row0+right]);
+            const int lower=(8-a)*quint8(plane[row1+left])+a*quint8(plane[row1+right]);
+            // Match the 3:4 fixed-point RGB resampling used in the offline replay.
+            color[c]=((upper*(8-b)/16)+(lower*b/16)+2)/4;
+        }
+        return color;
+    }
+    RgbPatch patch(double x,double y) const {
+        const int u=rounded(x),v=rounded(y);
+        return {pixel(u,v),pixel(u-3,v-3),pixel(u+3,v-3),pixel(u-3,v+3),pixel(u+3,v+3)};
+    }
+private:
+    const char *data;
+};
+
+int colorDistance(const Rgb &a,const Rgb &b){
+    return std::max({std::abs(a[0]-b[0]),std::abs(a[1]-b[1]),std::abs(a[2]-b[2])});
+}
+bool samePatch(const RgbPatch &previous,const RgbPatch &current){
+    for(size_t i=0;i<previous.size();++i){
+        int difference=0;
+        for(int c=0;c<3;++c)difference+=std::abs(previous[i][c]-current[i][c]);
+        if(difference>3*14)return false;
+    }
+    return true;
+}
+
+// Only distances near the foreground gate matter. Include a full grid cell
+// beyond its 58 px maximum so interpolation preserves the useful distances.
+void foregroundDistances(const std::vector<int> &seeds,std::vector<float> &distance){
+    constexpr int radius=16;
+    std::array<int,GuardWidth*GuardHeight> squared;
+    squared.fill(radius*radius);
+    for(int index:seeds){
+        const int x=index%GuardWidth,y=index/GuardWidth;
+        for(int v=std::max(0,y-radius);v<=std::min(GuardHeight-1,y+radius);++v){
+            const int dy=v-y;
+            for(int u=std::max(0,x-radius);u<=std::min(GuardWidth-1,x+radius);++u){
+                const int dx=u-x;
+                auto &old=squared[v*GuardWidth+u];old=std::min(old,dx*dx+dy*dy);
+            }
+        }
+    }
+    distance.resize(squared.size());
+    for(size_t i=0;i<squared.size();++i)distance[i]=float(GuardStep*std::sqrt(double(squared[i])));
+}
+
+struct WeightedScale {
+    std::vector<std::pair<double,double>> ratios;
+    double sum=0,weighted=0;
+    int votes=0;
+    void clear(){ratios.clear();sum=weighted=0;votes=0;}
+    void add(double weight,double ratio,double voteThreshold){
+        if(weight<=0)return;
+        ratios.emplace_back(weight,ratio);sum+=weight;weighted+=weight*ratio;
+        votes+=weight>voteThreshold;
+    }
+    double mean() const {return weighted/sum;}
+    double confidence(double minimum,double deviationLimit,double deviationFade) const {
+        if(votes<3)return 0;
+        const double centre=mean();double deviation=0;
+        for(const auto &[weight,ratio]:ratios)deviation+=weight*std::abs(ratio-centre);
+        return unitWeight(sum/minimum)*unitWeight((deviationLimit-deviation/sum)/deviationFade);
+    }
+};
+
+struct FarTrack { double x=0,y=0,z=0; qint64 time=NoObservation; RgbPatch rgb{}; };
+struct FarSample {
+    const FarTrack *track;
+    Rgb color;
+    double logModel,logRatio,ageWeight;
+    qint64 age;
+};
+struct BackgroundNode { double z=0,quality=0; qint64 seen=NoObservation; Rgb color{}; };
+
+double confirmedBackground(const std::vector<FarSample> &samples,int x,int y,double raw,const Rgb &color,WeightedScale &fit){
+    static const double depthWindow=std::log(1.52),localWindow=std::log(1.25);
+    static const double deviationLimit=std::log(1.28),deviationFade=std::log(1.15);
+    const double logRaw=std::log(raw);
+    bool left=false,right=false,above=false,below=false,close=false;
+    int localCount=0;fit.clear();
+    for(const auto &s:samples){
+        const double dx=s.track->x-x,dy=s.track->y-y,distance=dx*dx+dy*dy;
+        if(distance>=155.*155.)continue;
+        const double rel=std::abs(logRaw-s.logModel);
+        if(rel>=depthWindow)continue;
+        const double spatial=1-distance/(155.*155.);
+        const double weight=spatial*spatial*(1-rel/depthWindow)
+            *unitWeight((70.-colorDistance(color,s.color))/45.)*s.ageWeight;
+        fit.add(weight,s.logRatio,.12);
+        if(weight>.10&&distance<43.*43.&&s.age<=250&&rel<localWindow){
+            ++localCount;close|=distance<25.*25.;
+            left|=dx< -2;right|=dx>2;above|=dy< -2;below|=dy>2;
+        }
+    }
+    if(localCount<3||!close||!left||!right||!above||!below||fit.confidence(1.8,deviationLimit,deviationFade)<.56)return 0;
+    return raw*std::exp(fit.mean());
+}
+
+struct NearSample { double x,y,logModel,logRatio; };
+using NearBuckets=std::array<std::vector<NearSample>,NearColumns*NearRows>;
+double currentNearCorrection(const NearBuckets &buckets,int x,int y,double raw,double base,WeightedScale &fit){
+    static const double window=std::log(1.18),deviationLimit=std::log(1.30),deviationFade=std::log(1.16);
+    const double logRaw=std::log(raw);
+    const int bx=x/NearSearchRadius,by=y/NearSearchRadius;
+    fit.clear();
+    for(int row=std::max(0,by-1);row<=std::min(NearRows-1,by+1);++row){
+        for(int column=std::max(0,bx-1);column<=std::min(NearColumns-1,bx+1);++column){
+            for(const auto &s:buckets[row*NearColumns+column]){
+                const double dx=x-s.x,dy=y-s.y,spatial=1-(dx*dx+dy*dy)/(NearSearchRadius*NearSearchRadius);
+                if(spatial<=0)continue;
+                const double depth=1-std::abs(logRaw-s.logModel)/window;
+                if(depth>0)fit.add(spatial*spatial*depth,s.logRatio,.035);
+            }
+        }
+    }
+    if(fit.sum<=2.25)return 0;
+    const double strength=unitWeight((fit.confidence(3.,deviationLimit,deviationFade)-.75)/.25);
+    if(strength<=0)return 0;
+    const double measured=std::max(.44,raw*std::exp(fit.mean()));
+    return strength*std::min(0.,measured-base);
+}
+}
+
+struct SplitCorrection::State {
+    qint64 epoch=0,generation=0,lastRgbMs=0,previousMeasurementMs=NoObservation;
+    std::array<double,48*32> previousDepth{};
+    std::array<FarTrack,48*32> far;
+    std::vector<float> guard;
+    std::vector<BackgroundNode> reference=std::vector<BackgroundNode>(ReferenceWidth*ReferenceHeight);
+    bool seenNear=false,seenBoth=false;
+
+    ScaleFit observe(const std::vector<float> &mono,const PortraitRgb &rgb,const RvTofFrame &tof,const Calibration &cal,qint64 now){
+        if(tof.samples.isEmpty())return {};
+        const auto &view=RvCameraView::Portrait;
+        std::array<double,48*32> current{};
+        std::array<bool,GuardWidth*GuardHeight> covered{};
+        std::vector<int> seeds;
+        std::vector<Anchor> near;
+        int farCount=0;
+        for(int id=0;id<cal.nativeCount();++id){
+            const double radial=tof.rangeUq2(id)*.00025;
+            if(!tof.valid(id)||!usableNativeRange(tof,id,radial))continue;
+            const auto point=projectNativePoint(radial,id,cal,view,tof);
+            const double x=point.pixel.x(),y=point.pixel.y(),z=point.cameraZ;
+            if(z<=0||x<0||y<0||x>PortraitWidth-1||y>PortraitHeight-1)continue;
+            current[id]=z;
+            if(z<=.44){
+                const int gx=std::min(rounded(x/GuardStep),GuardWidth-1),gy=std::min(rounded(y/GuardStep),GuardHeight-1);
+                const int cell=gy*GuardWidth+gx;
+                if(!covered[cell]){seeds.push_back(cell);covered[cell]=true;}
+            }
+            if(x<3||y<3||x>PortraitWidth-4||y>PortraitHeight-4||!awayFromModelEdge(mono,PortraitWidth,int(x),int(y)))continue;
+            if(z<=NearLimit){
+                near.push_back({x,y,z,std::log(z/sample(mono,PortraitWidth,PortraitHeight,x,y)),id});
+            }else if(z>=FarLimit&&previousDepth[id]>=FarLimit&&now-previousMeasurementMs<=200
+                     &&std::abs(z-previousDepth[id])<=std::max(.035,.05*z)){
+                far[id]={x,y,.75*z+.25*previousDepth[id],now,rgb.patch(x,y)};
+                ++farCount;
+            }
+        }
+        previousDepth=current;previousMeasurementMs=now;
+        if(!seeds.empty())foregroundDistances(seeds,guard);
+        auto fit=fitScale(near,PortraitWidth,PortraitHeight);
+        fit.supported=fit.supported&&fit.scale>=.02&&fit.scale<=50;
+        seenNear|=fit.supported;
+        seenBoth|=seenNear&&farCount>=5;
+        return fit;
+    }
+
+    std::vector<FarSample> visibleFar(const std::vector<float> &mono,const PortraitRgb &rgb,qint64 now) const {
+        std::vector<FarSample> visible;
+        for(const auto &track:far){
+            const qint64 age=now-track.time;
+            if(age>=440)continue;
+            const auto patch=rgb.patch(track.x,track.y);
+            if(!samePatch(track.rgb,patch))continue;
+            const double raw=sample(mono,PortraitWidth,PortraitHeight,track.x,track.y);
+            visible.push_back({&track,patch.front(),std::log(raw),std::log(track.z/raw),unitWeight((720.-age)/390.),age});
+        }
+        return visible;
+    }
+
+    void updateBackground(const std::vector<float> &mono,const PortraitRgb &rgb,std::vector<FarSample> &visible,
+                          qint64 now,double baseScale){
+        double minX=PortraitWidth,minY=PortraitHeight,maxX=0,maxY=0;
+        for(const auto &s:visible){
+            minX=std::min(minX,s.track->x);maxX=std::max(maxX,s.track->x);
+            minY=std::min(minY,s.track->y);maxY=std::max(maxY,s.track->y);
+        }
+        const bool fitBackground=visible.size()>=35&&maxX-minX>=105&&maxY-minY>=105;
+        if(fitBackground&&visible.size()>160){
+            std::vector<FarSample> distributed;
+            distributed.reserve(160);
+            const double step=double(visible.size()-1)/159.;
+            for(int i=0;i<159;++i)distributed.push_back(visible[size_t(i*step)]);
+            distributed.push_back(visible.back());
+            visible=std::move(distributed);
+            minX=PortraitWidth;minY=PortraitHeight;maxX=maxY=0;
+            for(const auto &s:visible){
+                minX=std::min(minX,s.track->x);maxX=std::max(maxX,s.track->x);
+                minY=std::min(minY,s.track->y);maxY=std::max(maxY,s.track->y);
+            }
+        }
+        const double agree=std::log(1.17);
+        WeightedScale fit;fit.ratios.reserve(visible.size());
+        for(int row=0;row<ReferenceHeight;++row)for(int column=0;column<ReferenceWidth;++column){
+            const int x=std::min(column*ReferenceStep,PortraitWidth-1),y=std::min(row*ReferenceStep,PortraitHeight-1);
+            auto &node=reference[row*ReferenceWidth+column];
+            const auto color=rgb.pixel(x,y);
+            const bool usable=sample(guard,GuardWidth,GuardHeight,double(x)/GuardStep,double(y)/GuardStep)>=39.;
+            if(!usable||now-node.seen>1080||colorDistance(node.color,color)>17){node.quality=0;node.seen=NoObservation;}
+            if(!usable||!fitBackground||x<minX-43||x>maxX+43||y<minY-43||y>maxY+43)continue;
+            const double raw=mono[y*PortraitWidth+x];
+            const double physical=confirmedBackground(visible,x,y,raw,color,fit);
+            if(physical<=0)continue;
+            if(node.quality==0){
+                if(std::abs(std::log(physical/(raw*baseScale)))>agree)continue;
+                node.z=physical;node.color=color;
+            }else{
+                if(std::abs(physical-node.z)>std::max(.05,.12*physical))continue;
+                node.z+=.07*(physical-node.z);
+            }
+            node.seen=now;
+            node.quality=std::min(1.,node.quality+.22);
+        }
+    }
+
+    void applyDepth(Result &base,const std::vector<float> &mono,const ScaleFit &near,size_t farCount,qint64 now,double scale) const {
+        std::vector<double> correction(reference.size());
+        bool hasBackground=false;
+        for(int row=0;row<ReferenceHeight;++row)for(int column=0;column<ReferenceWidth;++column){
+            const int index=row*ReferenceWidth+column;
+            const auto &node=reference[index];
+            if(node.quality<=0)continue;
+            const int x=std::min(column*ReferenceStep,PortraitWidth-1),y=std::min(row*ReferenceStep,PortraitHeight-1);
+            const double difference=std::max(0.,node.z-mono[y*PortraitWidth+x]*scale);
+            const double weight=node.quality*unitWeight((1050.-(now-node.seen))/680.);
+            correction[index]=weight*difference*unitWeight((difference-.035)/std::max(.06,.15*node.z));
+            hasBackground|=correction[index]>0;
+        }
+        const bool hasNear=near.supported&&farCount>=45;
+        if(!hasBackground&&!hasNear)return;
+        NearBuckets buckets;
+        double upper=0;
+        if(hasNear){
+            std::vector<double> models;models.reserve(near.inliers.size());
+            for(const auto &point:near.inliers){
+                const double raw=sample(mono,PortraitWidth,PortraitHeight,point.x,point.y);
+                const int cell=int(point.y/NearSearchRadius)*NearColumns+int(point.x/NearSearchRadius);
+                buckets[cell].push_back({point.x,point.y,std::log(raw),point.ratio});
+                models.push_back(raw);
+            }
+            std::sort(models.begin(),models.end());const double rank=.9*(models.size()-1);
+            const auto lo=size_t(rank),hi=std::min(lo+1,models.size()-1);
+            upper=models[lo]+(rank-lo)*(models[hi]-models[lo]);
+        }
+        WeightedScale fit;fit.ratios.reserve(near.inliers.size());
+        int backgroundPixels=0,nearPixels=0;
+        char *bytes=base.depth.data();
+        for(int y=0;y<PortraitHeight;++y)for(int x=0;x<PortraitWidth;++x){
+            const int index=y*PortraitWidth+x;
+            const double raw=mono[index],original=raw*scale;
+            const bool possibleNear=hasNear&&original>.44&&original<1.3&&raw<=upper;
+            if(!possibleNear&&!hasBackground)continue;
+            const double distance=sample(guard,GuardWidth,GuardHeight,double(x)/GuardStep,double(y)/GuardStep);
+            double change=0;
+            if(possibleNear&&distance<12.)change=currentNearCorrection(buckets,x,y,raw,original,fit);
+            else if(hasBackground&&distance>43.)change=unitWeight((distance-43.)/15.)
+                *sample(correction,ReferenceWidth,ReferenceHeight,double(x)/ReferenceStep,double(y)/ReferenceStep);
+            if(change==0)continue;
+            auto bits=qFromLittleEndian<quint32>(bytes+4*index);
+            float previous;std::memcpy(&previous,&bits,4);
+            const float next=float(previous+change);
+            if(!std::isfinite(next)||next<=0||next==previous)continue;
+            std::memcpy(&bits,&next,4);qToLittleEndian(bits,bytes+4*index);
+            backgroundPixels+=change>0;nearPixels+=change<0;
+        }
+        base.diagnostics["split_background_pixels"]=backgroundPixels;
+        base.diagnostics["split_current_near_pixels"]=nearPixels;
+    }
+};
+
+SplitCorrection::SplitCorrection()=default;
+SplitCorrection::~SplitCorrection()=default;
+void SplitCorrection::reset(){state.reset();}
+
+void SplitCorrection::apply(Result &base,const std::vector<float> &mono,QByteArrayView planarRgb,
+                            const RvTofFrame &tof,const Calibration &cal,qint64 rgbMs,qint64 epoch,qint64 generation,bool selected){
+    if(!base.ok()){reset();return;}
+    if(state&&(state->epoch!=epoch||state->generation!=generation||rgbMs<state->lastRgbMs))reset();
+    if(!selected&&!state)return;
+    if(base.depth.size()!=RvCameraView::Portrait.depthBytes()||mono.size()!=PortraitWidth*PortraitHeight
+        ||planarRgb.size()!=RvCameraView::Rgb672VgaFp16.rgbBytes()
+        ||(!tof.samples.isEmpty()&&(!cal.valid||cal.columns!=48||cal.rows!=32||!tof.isValidForHostFusion()
+                                    ||tof.metadata["tof_reused"]==true))){reset();return;}
+    if(!state){state=std::make_unique<State>();state->epoch=epoch;state->generation=generation;}
+    state->lastRgbMs=rgbMs;
+    const PortraitRgb rgb(planarRgb);
+    const auto near=state->observe(mono,rgb,tof,cal,rgbMs);
+    if(!state->seenBoth||state->guard.empty())return;
+    auto visible=state->visibleFar(mono,rgb,rgbMs);
+    const double scale=base.diagnostics["scale"].toDouble(1.);
+    state->updateBackground(mono,rgb,visible,rgbMs,scale);
+    if(selected)state->applyDepth(base,mono,near,visible.size(),rgbMs,scale);
 }
 }

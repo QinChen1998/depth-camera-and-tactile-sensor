@@ -232,11 +232,11 @@ int runRvTunerTests(const QString &path){
     check(QString("SAVE_GRID_%1_REACHES_TRANSACTION").arg(mode),calls.last().action=="persist"&&calls.last().request["settings"]==grid.json());
     const int pendingCount=calls.size();control->persist();check(QString("SAVE_GRID_%1_NO_DUPLICATE_TRANSACTION").arg(mode),calls.size()==pendingCount);
     reply({{"settings",grid.json()},{"snapshot",QString(64,'d')},{"backup","mock"}});
-    check(QString("SAVE_GRID_%1_RECEIPT_PRESERVES_SAVED_VALUES").arg(mode),control->savedSettings()==grid.json()&&control->state()==RvTunerController::Running&&control->detail().contains(QString::fromUtf8("16×16")));
+    check(QString("SAVE_GRID_%1_RECEIPT_PRESERVES_SAVED_VALUES").arg(mode),control->savedSettings()==grid.json()&&control->state()==RvTunerController::Running&&control->detail().contains(QString::fromUtf8("48×32")));
     control->stop();reply({{"state","stopped"}});
  }
  LanguageManager language;language.setLanguage(LanguageManager::Language::SimplifiedChinese,false);QApplication::processEvents();check("EMBEDDED_CHINESE_TUNER_TRANSLATION",widget.m_buttons["Persist"]->text()==QString::fromUtf8("长期保存"));
- check("EMBEDDED_CHINESE_ALL_RESOLUTIONS_SAVE",widget.m_buttons["Persist"]->toolTip().contains(QString::fromUtf8("所有支持的分辨率"))&&widget.m_buttons["Persist"]->toolTip().contains(QString::fromUtf8("16×16")));
+ check("EMBEDDED_CHINESE_ALL_RESOLUTIONS_SAVE",widget.m_buttons["Persist"]->toolTip().contains(QString::fromUtf8("所有支持的分辨率"))&&widget.m_buttons["Persist"]->toolTip().contains(QString::fromUtf8("48×32")));
  widget.acceptFrame(frame);widget.m_status->setText(QString::fromUtf8("离线合成 DTN1 验证（SIMULATED），未连接设备"));QApplication::processEvents();
  widget.grab().save(QFileInfo(path).absolutePath()+"/tuner_offline.png");
  out<<"CHECKS "<<checks<<"\nOFFLINE_SYNTHETIC_ONLY; no board connection, deployment, capture or permanent write\n";return passed?0:1;

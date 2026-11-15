@@ -1,7 +1,10 @@
 #pragma once
 #include "RvTofFrame.h"
 #include <QtGui/QImage>
+#include <QtCore/QByteArrayView>
+#include <QtCore/QPointF>
 #include <array>
+#include <memory>
 #include <vector>
 
 namespace RvCameraView {struct Profile;}
@@ -12,6 +15,14 @@ enum PointReason : char {NoMeasurement=0, Invalid=1, Quality=2, Outside=3, Bound
     WeakLocalGroup=10, AlreadySupported=11};
 inline constexpr char SupportPolicy[] = "dtof_supported_mesh_v1";
 inline constexpr char FieldOfViewPolicy[] = "dtof_geometric_fov_v1";
+inline constexpr char NativeProjectionField[] = "assist_native_projection";
+inline constexpr char CloseNative48Projection[] = "f6_close_range_offset_48_v1";
+inline constexpr char SplitCorrectionField[] = "assist_g_split_correction";
+inline constexpr char SplitCorrectionRevision[] = "g_near_and_verified_background_v1";
+inline const char *portraitRevision(const QString &mode,bool split=false) {
+    if(mode=="G"&&split)return SplitCorrectionRevision;
+    return mode=="B"?"global_scale_reuse_latest_rgb_portrait_v1":"global_scale_fresh_rgb_portrait_v2";
+}
 // Native radial admission only, independent of camera-Z and display colour range.
 // Shared by all UniDepth schemes, diagnostics and adopted-point validation.
 inline constexpr double MinimumRadialMetres = .01;
@@ -34,6 +45,10 @@ const Calibration &calibrationForFov(int fov);
 // Only the independent RGB576 FP16 native16 route may use the 16x16 grid.
 const Calibration &calibrationForNativeGrid(int fov,int columns,int rows);
 bool loadCalibration(const QByteArray &bytes, Calibration &out, QString &error);
+struct NativeProjection { QPointF pixel; double cameraZ; };
+QJsonValue defaultNativeProjection(const RvTofFrame &tof);
+NativeProjection projectNativePoint(double radius, int nativeId, const Calibration &calibration,
+                                    const RvCameraView::Profile &view, const RvTofFrame &tof);
 // An explicit RGB-only estimate has no fabricated native measurement identity.
 Result monocular(const std::vector<float> &monocularZ, const char *reason,QSize size={576,324});
 // H robust scalar fit. Retained consensus is rechecked after outlier rejection.
@@ -59,6 +74,20 @@ private:
     bool initialized=false, hasReference=false;
     qint64 lastMs=0, referenceMs=0, referenceFrame=0, boundEpoch=0, boundGeneration=0;
     double logApplied=0;
+};
+
+// A worker keeps these references for its current RGB/ToF session. The
+// experiment can keep observing after the user switches back to original G.
+class SplitCorrection {
+public:
+    SplitCorrection();
+    ~SplitCorrection();
+    void reset();
+    void apply(Result &base,const std::vector<float> &mono,QByteArrayView planarRgb,
+               const RvTofFrame &tof,const Calibration &cal,qint64 rgbMs,qint64 epoch,qint64 generation,bool selected);
+private:
+    struct State;
+    std::unique_ptr<State> state;
 };
 QString pointReasonName(char reason);
 }

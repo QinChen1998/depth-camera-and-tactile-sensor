@@ -26,7 +26,7 @@ struct Scene {
     Calibration cal;
     RvTofFrame tof;
     std::vector<float> mono;
-    explicit Scene(const char *id=RvCameraView::UniDepthVgaNative16,int fov=1):
+    explicit Scene(const char *id=RvCameraView::LegacyNative16Model,int fov=1):
         model(QLatin1String(id)),view(RvCameraView::profile(model)),cal(calibrationForNativeGrid(fov,16,16)),
         mono(view.outputWidth*view.outputHeight,1.f){
         tof.samples=QByteArray(1024,0);
@@ -52,7 +52,100 @@ int runRvAssistRecoveryTests(const QString &path){
     QFile report(path);if(!report.open(QIODevice::WriteOnly|QIODevice::Text))return 3;
     QTextStream out(&report);bool all=true;
     const auto check=[&](const QString &name,bool ok){out<<name<<' '<<(ok?"PASS":"FAIL")<<Qt::endl;all&=ok;};
-    for(const char *model:{RvCameraView::UniDepthVgaNative16})for(int fov:{1,2,6}){
+    {
+        const auto &view=RvCameraView::Portrait;
+        const auto &cal=calibrationForFov(6);
+        Scene fixture;
+        auto tof=fixture.tof;
+        tof.samples=QByteArray(48*32*4,0);
+        tof.metadata["source_candidate_mode"]=RvCaptureContract::Native48;
+        tof.metadata["assist_experiment"]="B";
+        tof.metadata["assist_host_model"]=RvCameraView::UniDepthVgaNative48;
+        tof.metadata["dtof_width"]=48;tof.metadata["dtof_height"]=32;
+        tof.metadata["dtof_bytes"]=tof.samples.size();tof.metadata["dtof_fov_correction"]=6;
+        tof.metadata["pairing_policy"]=RvTofFrame::FreshRgbReusePolicy;
+        for(int i=0;i<cal.nativeCount();++i){
+            const double radial=(.6-cal.translation[2])/cal.cameraRays[i][2];
+            qToLittleEndian<quint16>(quint16(std::lround(radial/.00025)),tof.samples.data()+4*i);
+            tof.samples[4*i+2]=30;tof.samples[4*i+3]=1;
+        }
+        const std::vector<float> mono(view.outputWidth*view.outputHeight,1.f);
+        const auto fitted=fuseGlobalScale(mono,tof,cal,view);
+        const auto visible=limitTofFieldOfView(fitted,cal,view);
+        check("PORTRAIT_F6_NATIVE48_SCALE_AND_GEOMETRIC_COVERAGE",cal.valid&&fitted.ok()&&visible.ok()
+            &&fitted.diagnostics["tof_total_zones"]==1536&&fitted.diagnostics["anchors_inlier"].toInt()>1200
+            &&std::abs(fitted.diagnostics["scale"].toDouble()-.6)<.0005
+            &&visible.diagnostics["fov_pixels"].toInt()>.99*mono.size());
+        for(double delta:{-165.,165.,-165.001,165.001}){
+            auto pair=tof;
+            pair.metadata["pair_delta_ms"]=delta;
+            pair.metadata["rgb_timestamp_ns"]=1e9-delta*1e6;
+            pair.metadata["tof_reused"]=true;
+            check(QString("PORTRAIT_NATIVE48_PAIR_BUDGET_%1").arg(delta,0,'f',3),
+                fuseGlobalScale(mono,pair,cal,view).ok()==(std::abs(delta)<=165.));
+        }
+        tof.metadata["tof_warning_flags"]=16;
+        check("PORTRAIT_NATIVE48_WARNED_MEASUREMENT_REJECTED",!fuseGlobalScale(mono,tof,cal,view).ok());
+        tof.metadata["tof_warning_flags"]=0;
+        tof.metadata["assist_experiment"]="G";
+        check("PORTRAIT_G_ACCEPTS_FRESH_MEASUREMENT",tof.isValidForHostFusion());
+        tof.metadata["tof_reused"]=true;
+        check("PORTRAIT_G_REJECTS_REUSED_MEASUREMENT",!tof.isValidForHostFusion());
+        tof.metadata["tof_reused"]=false;
+        const auto base=projectNativePoint((.10-cal.translation[2])/cal.cameraRays[800][2],800,cal,view,tof);
+        tof.metadata[NativeProjectionField]=defaultNativeProjection(tof);
+        const auto shifted=projectNativePoint((.10-cal.translation[2])/cal.cameraRays[800][2],800,cal,view,tof);
+        check("PORTRAIT_INHERITS_F6_CLOSE_PROJECTION",tof.metadata[NativeProjectionField]==QLatin1String(CloseNative48Projection)
+            &&std::abs((shifted.pixel.x()-base.pixel.x())-view.focal*.0065/.10)<1e-8
+            &&std::abs((shifted.pixel.y()-base.pixel.y())-view.focal*.00725/.10)<1e-8
+            &&shifted.cameraZ==base.cameraZ);
+        const auto resized=RvCameraView::portraitDepth(std::vector<float>(640*480,1.25f));
+        check("PORTRAIT_MONOCULAR_RESAMPLE_PRESERVES_METRIC_SCALE",resized.size()==480*640
+            &&std::all_of(resized.begin(),resized.end(),[](float z){return z==1.25f;}));
+
+        // A far wall on the left and a coherently measured close surface on the right.
+        for(int i=0;i<cal.nativeCount();++i){
+            const double z=projectNativePoint((1.-cal.translation[2])/cal.cameraRays[i][2],i,cal,view,tof).pixel.x()<270?1.:.25;
+            const double radial=(z-cal.translation[2])/cal.cameraRays[i][2];
+            qToLittleEndian<quint16>(quint16(std::lround(radial/.00025)),tof.samples.data()+4*i);
+        }
+        const auto original=[&](float z){
+            auto result=monocular(std::vector<float>(mono.size(),z),"Simulated scale",view.outputSize());
+            result.diagnostics["scale"]=z;
+            return result;
+        };
+        const QByteArray rgb(view.rgbBytes(),char(76));
+        SplitCorrection split;
+        const auto input=original(1.);
+        auto warm=input;
+        for(int frame=0;frame<8;++frame){
+            warm=input;
+            split.apply(warm,mono,rgb,tof,cal,frame*65,1,3,true);
+        }
+        check("G_SPLIT_USES_FRESH_CLOSE_MEASUREMENTS",warm.diagnostics["split_current_near_pixels"].toInt()>0
+            &&decode(warm.depth)[320*480+385]>=.44f&&decode(warm.depth)[320*480+385]<.9f);
+        auto low=original(.5),off=low;
+        split.apply(off,mono,rgb,{},cal,520,1,3,false);
+        check("G_SPLIT_OFF_PRESERVES_ORIGINAL_G_BITS",off.depth==low.depth&&off.diagnostics==low.diagnostics);
+        auto held=low;
+        split.apply(held,mono,rgb,{},cal,555,1,3,true);
+        const auto heldDepth=decode(held.depth);
+        check("G_SPLIT_RETAINS_VERIFIED_BACKGROUND_WITHOUT_REUSING_NEAR_TOF",
+            heldDepth[320*480+110]>.95f&&heldDepth[320*480+385]==.5f
+            &&held.diagnostics["split_background_pixels"].toInt()>0&&held.diagnostics["split_current_near_pixels"].toInt()==0
+            &&held.globalReasons==low.globalReasons);
+        auto changed=low;
+        split.apply(changed,mono,QByteArray(rgb.size(),char(150)),{},cal,585,1,3,true);
+        check("G_SPLIT_DROPS_REFERENCES_WHEN_RGB_CHANGES",changed.depth==low.depth);
+        for(int frame=0;frame<8;++frame){
+            auto trained=input;
+            split.apply(trained,mono,rgb,tof,cal,650+frame*65,1,3,true);
+        }
+        auto otherSession=low;
+        split.apply(otherSession,mono,rgb,{},cal,1200,2,3,true);
+        check("G_SPLIT_CLEARS_BACKGROUND_ON_NEW_EPOCH",otherSession.depth==low.depth);
+    }
+    for(const char *model:{RvCameraView::LegacyNative16Model})for(int fov:{1,2,6}){
         Scene scene(model,fov);const auto original=scene.tof.samples;const auto fit=scene.fit();
         const QString prefix=scene.model+"_F"+QString::number(fov)+"_";
         check(prefix+"PINNED_NATIVE16_CALIBRATION",scene.cal.valid&&scene.tof.isValidForHostFusion());

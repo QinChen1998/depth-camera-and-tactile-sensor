@@ -282,12 +282,12 @@ class BoardBootstrapTests(unittest.TestCase):
         self.assertNotEqual(code, 0)
         self.assertIn('Stop the active ToF', output)
 
-    def test_native_launcher_passes_required_empty_gui_argument(self):
+    def test_native_launcher_passes_mode_generation_and_options_to_gui(self):
         self.write('root/dtof_candidates_20261009/native_hd_gui',
                    '#!/bin/sh\n'
                    'case "$1" in\n'
                    '  validate) [ "$#" = 4 ] || exit 2;;\n'
-                   '  gui) [ "$#" = 5 ] && [ -z "$2" ] || exit 2;;\n'
+                   '  gui) [ "$#" = 4 ] || exit 2;;\n'
                    '  *) exit 2;;\n'
                    'esac\nprintf "<%s>" "$@"\nprintf "\\n"\n', True)
         for asset in ('root/r144_depth/camera_rtsp_config.awk',
@@ -306,7 +306,7 @@ class BoardBootstrapTests(unittest.TestCase):
                 self.assertEqual(process.returncode, 0, process.stdout.decode(errors='replace'))
                 self.assertEqual(process.stdout.decode().splitlines(),
                                  [f'<validate><{mode}><{generation}><1,1>',
-                                  f'<gui><><{mode}><{generation}><1,1>'])
+                                  f'<gui><{mode}><{generation}><1,1>'])
 
 
 class CameraTakeoverTests(unittest.TestCase):

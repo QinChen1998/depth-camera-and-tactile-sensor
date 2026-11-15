@@ -3,6 +3,12 @@
 <TS version="2.1" language="zh_CN" sourcelanguage="en_US">
   <context>
     <name>DepthMapWidget</name>
+    <message><source>Show monocular depth only</source><translation>仅显示单目深度</translation></message>
+    <message><source>Restore corrected depth</source><translation>恢复校正深度</translation></message>
+    <message><source>Show the same frame before ToF correction in the depth map and point cloud.</source><translation>在深度图和点云中查看同一帧的校正前单目结果。</translation></message>
+    <message><source>Try split correction</source><translation>试用分区校正</translation></message>
+    <message><source>Restore original G</source><translation>恢复原 G</translation></message>
+    <message><source>Use verified distant ToF for the background and paired ToF for the near hand. Applies to the depth map and point cloud.</source><translation>背景使用已确认的远处 ToF，近手使用当前帧配对的 ToF，深度图和点云同步切换。</translation></message>
     <message><source>Input angle (%1°)</source><translation>输入角度（%1°）</translation></message>
     <message><source>Native ToF angle</source><translation>原生 ToF 角度</translation></message>
     <message><source>Clockwise angle (0–359°):</source><translation>顺时针角度（0–359°）：</translation></message>
@@ -19,8 +25,20 @@
       <translation>48×32 深度和光子计数输入，384×256 输出，保持传感器原视场。实验性权重复用，实物精度尚未验证。</translation>
     </message>
     <message>
-      <source>Host-assisted inference (640×480)</source>
-      <translation>上位机辅助推理（640×480）</translation>
+      <source>Host-assisted inference (G)</source>
+      <translation>上位机辅助推理（G）</translation>
+    </message>
+    <message>
+      <source>Host-assisted inference (B, reuse ToF)</source>
+      <translation>上位机辅助推理（B，复用 ToF）</translation>
+    </message>
+    <message>
+      <source>RGB frames can reuse the latest eligible 48×32 ToF measurement within the 200 ms pairing budget.</source>
+      <translation>RGB 帧可在 200 ms 配对预算内复用最新的合格 48×32 ToF 测量。</translation>
+    </message>
+    <message>
+      <source>RGB frames trigger inference. Each fresh 48×32 ToF measurement can update the global scale once.</source>
+      <translation>RGB 帧触发推理。每份新的 48×32 ToF 测量只更新一次全局尺度。</translation>
     </message>
     <message>
       <source>Cannot open the folder. Please copy the path and open it manually.</source>
@@ -651,8 +669,8 @@
       <translation>H 按 RGB 节奏做全局尺度校正，允许复用配对时间差 100 ms 内最新的 dToF 测量。界面标注复用，不视为新测量；没有有效配对时仅沿用历史尺度。</translation>
     </message>
     <message>
-    <source>Host-assisted depth inference (640×480).</source>
-    <translation>上位机辅助深度推理（640×480）。</translation>
+    <source>Host-assisted depth inference (480×640).</source>
+    <translation>上位机辅助深度推理（480×640）。</translation>
   </message>
 </context>
   <context>
@@ -994,13 +1012,16 @@
       <translation>无法为 TensorRT-RTX 推理程序和模型准备可读的运行路径。</translation>
     </message>
       <message><source>Inference device changed; waiting for a new paired frame</source><translation>推理设备已切换，等待新的配对帧</translation></message>
+      <message><source>Host depth inference is paused during benchmarking.</source><translation>测速期间暂停上位机深度推理。</translation></message>
     <message><source>Detecting available inference devices...</source><translation>正在检测可用的推理设备…</translation></message>
-    <message><source>No usable inference device was found. Open Inference Device in Settings to retry.</source><translation>未找到可用的推理设备，请在设置中的“推理设备”重新检测。</translation></message>
+    <message><source>No usable inference device was found. Open Inference Device in Settings to retry.</source><translation>未找到可用的推理设备。请打开“设置 → 推理设备”，点击“开始测速”重试。</translation></message>
     <message><source>No NVIDIA GPU was detected. Open Inference Device in Settings to select a CPU or compatible GPU.</source><translation>未检测到 NVIDIA 显卡，请在设置中的“推理设备”选择 CPU 或兼容显卡。</translation></message>
     <message><source>Loading the host-assisted inference model...</source><translation>正在加载上位机辅助推理模型…</translation></message>
 </context>
   <context>
     <name>RvDepthView</name>
+    <message><source>Waiting for a fresh monocular depth frame...</source><translation>等待新的单目深度帧…</translation></message>
+    <message><source>(%1, %2) monocular: %3 m camera-Z</source><translation>(%1, %2) 单目深度：%3 m 相机 Z</translation></message>
     <message>
       <source>(%1, %2) raw prediction: %3 m (radial, unfiltered)</source>
       <translation>(%1, %2) 原始预测：%3 m（径向，未筛选）</translation>
@@ -1177,6 +1198,7 @@ Projected camera-Z %8 m</source>
   </context>
   <context>
     <name>RvSessionController</name>
+    <message><source>Waiting for a new G correction frame...</source><translation>正在等待切换后的 G 校正帧…</translation></message>
     <message><source>Native ToF depth expired</source><translation>原生 ToF 深度已过期</translation></message>
     <message>
       <source>The required host inference files are missing or invalid.</source>
@@ -2974,8 +2996,8 @@ Range %6 mm (radial) | SNR %7 | slot %8 | Signal %9 | Noise encoded %10</source>
       <translation>测量序号</translation>
     </message>
     <message>
-    <source>All supported resolutions can be saved permanently. Apply pending edits first. Both native service and host capture command lines are backed up and verified. Host-assisted imaging uses a separate 16×16 session preset.</source>
-    <translation>所有支持的分辨率均可长期保存，请先应用待修改参数。原生服务与上位机采集命令均会备份并回读验证。上位机辅助成像使用独立的 16×16 会话预设。</translation>
+    <source>All supported resolutions can be saved permanently. Apply pending edits first. Both native service and host capture command lines are backed up and verified. Host-assisted imaging uses a 48×32 session preset.</source>
+    <translation>所有支持的分辨率均可长期保存，请先应用待修改参数。原生服务与上位机采集命令均会备份并回读验证。上位机辅助成像使用 48×32 会话预设。</translation>
   </message>
 </context>
   <context>
@@ -3077,8 +3099,8 @@ Range %6 mm (radial) | SNR %7 | slot %8 | Signal %9 | Noise encoded %10</source>
       <translation>dToF参数已保存。上位机辅助推理（640×480）支持此16×16 ToF配置。</translation>
     </message>
     <message>
-    <source>dToF settings saved and read back. Imaging uses a 16×16 session preset without changing the saved settings.</source>
-    <translation>dToF 参数已保存并回读验证。成像使用 16×16 会话预设，不修改已保存的参数。</translation>
+    <source>dToF settings saved and read back. Host-assisted imaging uses the 48×32 session preset.</source>
+    <translation>dToF 参数已保存并回读验证。上位机辅助成像使用 48×32 会话预设。</translation>
   </message>
 </context>
   <context>
@@ -3089,14 +3111,9 @@ Range %6 mm (radial) | SNR %7 | slot %8 | Signal %9 | Noise encoded %10</source>
     </message>
   </context>
   <context>
-    <name>RvPointCloudView</name>
-    <message>
-      <source>Grid step %1 m</source>
-      <translation>网格间距 %1 m</translation>
-    </message>
-  </context>
-  <context>
     <name>RvPointCloudWidget</name>
+    <message><source>monocular depth</source><translation>单目深度</translation></message>
+    <message><source>assisted depth</source><translation>辅助深度</translation></message>
     <message>
       <source>Points</source>
       <translation>点状</translation>
@@ -3110,12 +3127,32 @@ Range %6 mm (radial) | SNR %7 | slot %8 | Signal %9 | Noise encoded %10</source>
       <translation>点云显示方式</translation>
     </message>
     <message>
+      <source>Fixed Z color range</source>
+      <translation>固定 Z 色标</translation>
+    </message>
+    <message>
+      <source>Dynamic + histogram equalization</source>
+      <translation>动态＋直方图均衡</translation>
+    </message>
+    <message>
+      <source>Point cloud color mode</source>
+      <translation>点云着色模式</translation>
+    </message>
+    <message>
+      <source>Equalize depths from 0.10 to 10.00 m in each frame. Colors can vary across frames.</source>
+      <translation>逐帧均衡 0.10–10.00 m 的有效深度。同一深度的颜色可能随帧变化。</translation>
+    </message>
+    <message>
+      <source>Depth percentile 0%</source>
+      <translation>深度百分位 0%</translation>
+    </message>
+    <message>
       <source>%1 / %2 frames · %3 triangles</source>
       <translation>%1 / %2 帧 · %3 个三角面</translation>
     </message>
     <message>
-      <source>%1×%2 assisted depth · %3 triangles</source>
-      <translation>%1×%2 辅助深度 · %3 个三角面</translation>
+      <source>%1×%2 %3 · %4 triangles</source>
+      <translation>%1×%2 %3 · %4 个三角面</translation>
     </message>
     <message>
       <source>48×32 ToF · %1 triangles</source>
@@ -3178,8 +3215,8 @@ Range %6 mm (radial) | SNR %7 | slot %8 | Signal %9 | Noise encoded %10</source>
       <translation>48×32 ToF · %1 / %2 点</translation>
     </message>
     <message>
-      <source>%1×%2 assisted depth · %3 / %4 points</source>
-      <translation>%1×%2 辅助深度 · %3 / %4 点</translation>
+      <source>%1×%2 %3 · %4 / %5 points</source>
+      <translation>%1×%2 %3 · %4 / %5 点</translation>
     </message>
     <message>
       <source>Select an imaging scheme in Depth Map.</source>
@@ -3524,17 +3561,20 @@ SSH 指纹：%2
     <message><source>Detecting inference devices...</source><translation>正在检测推理设备…</translation></message>
     <message><source>Cannot create the inference test directory.</source><translation>无法创建推理测试目录。</translation></message>
     <message><source>Cannot prepare the bundled inference worker.</source><translation>无法准备随附的推理程序。</translation></message>
-    <message><source>Testing %1 (%2/%3)...</source><translation>正在测试 %1（%2/%3）…</translation></message>
+    <message><source>Benchmarking %1 (%2/%3)...</source><translation>正在为 %1 测速（%2/%3）…</translation></message>
     <message><source>The device test timed out.</source><translation>设备测试超时。</translation></message>
     <message><source>No usable inference device was found.</source><translation>未找到可用的推理设备。</translation></message>
-    <message><source>Detection complete. Only successfully tested options are shown.</source><translation>检测完成，仅显示已成功通过试推理的选项。</translation></message>
-    <message><source>The selected device failed. Switched to CPU.</source><translation>所选设备运行失败，已切换到 CPU。</translation></message>
+    <message><source>Inference candidates detected. Run a benchmark to measure FPS.</source><translation>已检测到推理设备候选，可点击“开始测速”测量帧率。</translation></message>
+    <message><source>Using the inference candidates found before detection timed out.</source><translation>设备检测超时，将使用已检测到的推理候选。</translation></message>
+    <message><source>Benchmark complete.</source><translation>测速完成。</translation></message>
+    <message><source>The selected device failed. Trying the next inference candidate.</source><translation>所选设备运行失败，正在尝试下一个推理候选。</translation></message>
     <message><source>Inference Device</source><translation>推理设备</translation></message>
     <message><source>Choose the device used for host-assisted depth. TensorRT-RTX is preferred on first use when available. Your selection is remembered.</source><translation>选择用于上位机辅助深度推理的设备。首次使用时优先选择可用的 TensorRT-RTX，之后保留您的选择。</translation></message>
-    <message><source>Detect Again</source><translation>重新检测</translation></message>
+    <message><source>Run Benchmark</source><translation>开始测速</translation></message>
     <message><source>CPU / OpenVINO INT8 (mixed precision)</source><translation>CPU / OpenVINO INT8（混合精度）</translation></message>
     <message><source>%1 — %2 — about %3 FPS</source><translation>%1 · %2 · 约 %3 FPS</translation></message>
+    <message><source>%1 — %2 — awaiting benchmark</source><translation>%1 · %2 · 待测速</translation></message>
     <message><source>Mixed INT8 trades some depth accuracy for speed. Local testing found 1.34% mean output difference from the original model, with larger differences in some scenes. Verify it for your application.</source><translation>混合 INT8 以部分深度精度换取速度。本地测试与原模型的平均输出差异为 1.34%，部分场景差异更大，请按实际用途验证。</translation></message>
-    <message><source>FPS is a short local inference estimate. Live depth speed also depends on video and processing. Detection briefly pauses host inference and does not connect to a sensor.</source><translation>帧率为本机短时推理估计，实际深度速度还受视频和处理流程影响。检测期间暂停上位机推理，不连接传感器。</translation></message>
+    <message><source>The benchmark estimates model FPS and pauses host depth inference while it runs.</source><translation>测速估算模型帧率，期间会暂停上位机深度推理。</translation></message>
 </context>
 </TS>

@@ -26,8 +26,10 @@ public:
     bool setHostModel(const QString &model);
     QString hostModel() const { return m_hostModel; }
     bool setExperiment(const QString &mode);
+    bool splitCorrectionEnabled() const {return m_experiment=="G"&&m_splitCorrection;}
+    void setSplitCorrectionEnabled(bool enabled){m_splitCorrection=enabled;}
     QString experiment() const {return isUniDepth(m_hostModel)?m_experiment:QStringLiteral("A");}
-    static bool validExperiment(const QString &mode) {return mode=="H";}
+    static bool validExperiment(const QString &mode) {return RvTofFrame::isHostFusionExperiment(mode);}
     static bool supportsHostModel(const QString &model);
     static bool isUniDepth(const QString &model);
     // File preflight only; runtime identity and GPU checks stay in the worker.
@@ -37,8 +39,6 @@ public:
     int inputRotationDegrees() const {return m_inputRotation;}
     bool enabled() const {return m_enabled;}
     bool failed() const {return m_failed;}
-    bool tofDriven() const {return isUniDepth(m_hostModel)&&m_experiment=="B";}
-    bool reusesNativeMeasurements() const {return isUniDepth(m_hostModel)&&m_experiment=="H";}
 signals:
     void inferenceUnavailable(const QString &explanation,const QString &detail);
     void loadingStateChanged(int state); // 0 stopped/failed, 1 loading, 2 ready
@@ -55,13 +55,13 @@ private:
     void readOutput();
     bool acceptResponse(const QJsonObject &response,const QByteArray &depth,const QByteArray &coverage,QElapsedTimer &responseClock);
     void handleTimeout();
-    void fail(const QString &reason);
+    void fail(const QString &reason, bool tryNextBackend = true);
     static QString failureExplanation(const QString &reason);
     QString m_root,m_token;
     QString m_backend;
     int m_inferenceTimeoutMs=1500,m_resultAgeLimitMs=1000;
-    QString m_hostModel=QStringLiteral("unidepth_rgb672_vga_fp16_tof16");
-    QString m_experiment=QStringLiteral("H");
+    QString m_hostModel=QStringLiteral("unidepth_rgb672_vga_fp16_tof48");
+    QString m_experiment=QStringLiteral("G");
     std::unique_ptr<RvAssistWorkerPaths> m_workerPaths;
     QProcess m_process;
     QTimer m_timeout;
@@ -74,6 +74,7 @@ private:
     QJsonObject m_lastHdTofContext;
     QJsonObject m_dropReasons;
     double m_lastGuiPublishMs=0;
+    bool m_splitCorrection=false;
     bool m_enabled=false,m_ready=false,m_busy=false,m_stopping=false,m_failed=false,m_destroying=false,m_cancelling=false;
     int m_inputRotation=180; // Current RV camera mounting; independent of display rotation.
 };

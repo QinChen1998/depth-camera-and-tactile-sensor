@@ -48,12 +48,12 @@ public:
   if(nativeRadial)return QSizeF(grid.height(),grid.width());
   if(radial)return QSizeF(grid);
   if(!imageSourceRect.isEmpty()&&imageSourceRect!=image.rect())return imageSourceRect.size();
-  // The VGA virtual camera uses square pixels on the full 4:3 grid.
-  if(image.size()==QSize(640,480))return image.size();
+  if(image.size()==QSize(480,640))return image.size();
   return QSizeF(144,81);
  }
  QRect displayedSourceRect()const{return imageSourceRect;}
  bool setDepth(const QByteArray& bytes,const QJsonObject& m,const QByteArray& diagnostic={});
+ bool setMonocularVisible(bool visible);
  bool setCoverage(const QByteArray &values);
  // Retain only display pixels; expired metric values must not remain queryable.
  void holdFrame();
@@ -162,6 +162,8 @@ private:
  ImageHoverTip hoverTip;
  void refreshHover();
  QByteArray sideDiagnostic;
+ QByteArray monocularDepth;
+ bool showMonocular=false;
  double sideScale=1;
  int sidePixels=0;
  mutable int imageSidePixels=0;

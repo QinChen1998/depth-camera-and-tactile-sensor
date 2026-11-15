@@ -27,18 +27,18 @@ python -m unittest discover -s tests -p 'test_*.py' -v
 
 | 标志 | 覆盖范围 |
 |---|---|
-| `port-ui-smoke-test` | 四个模块、成像入口、方向、米制快照、点云坐标、独立点径和色标、停靠和清屏 |
+| `port-ui-smoke-test` | 四个模块、成像入口、G/B 配对选择、单目深度图与点云联动、米制快照、点云坐标、色标和清屏 |
 | `rv-tuner-test` | 调参协议、互斥、异步停止、板端模式、Native16 分片与同帧校验 |
 | `tactile-serial-test` | 串口协议、型号、零点、失败与恢复 |
 | `tactile-visualization-test` | 触觉显示、面板可见性、选择、曲线和断开 |
 | `tactile-3d-test` | QML 三维数据与生命周期 |
 | `tactile-render-test` | 三维渲染、交互、显示刷新和关闭 |
-| `rv-assist-recovery-test` | 当前 640×480 H 模型/F1/F2 的米制几何、100 ms 边界、原生点有效性、尺度连续性与 schema 1/2 诊断 |
+| `rv-assist-recovery-test` | 480×640/F6 Native48 米制几何、配对边界、有效测点、尺度连续性及旧 H 诊断回放 |
 | `rv-usb-enrollment-test` | USB 身份、地址规划、已有设备复用、完整检查回执、设置交接身份及登记准入 |
 
 脚本清除继承的 RV/DCTS/Python/Qt 覆盖，强制 `RV_TEST_OFFLINE_ONLY=1`，TEMP/TMP 指向本轮输出的 `tmp/`。调参测试只使用本机 TCP 回环；需要允许本机回环连接，不会打开真实设备。连接失败/超时不能冒充协议拒绝通过负例。QtMsBuild 需要读取本机 Qt 注册表；访问被沙箱拒绝时应修正运行环境，不改模型或设备参数。
 
-`--point-cloud-live-validation <绝对报告.json>` 使用已登记的 RV1103 依次运行 640×480 上位机辅助推理、48×32 普通和高精度档，核对辅助深度帧的标定网格、原生同帧有效点数、Qt Quick 3D 绘制、点径、色标、滚轮和停采清屏。它使用与成像切换专项相同的设备身份及授权环境变量，保存计数、状态及 640×480 点云视口截图。
+`--point-cloud-live-validation <绝对报告.json>` 使用已登记的 RV1103 依次运行 480×640 上位机辅助推理 G、48×32 普通和高精度档，核对辅助深度帧的标定网格、原生同帧有效点数、Qt Quick 3D 绘制、点径、色标、滚轮和停采清屏。它使用与成像切换专项相同的设备身份及授权环境变量，保存计数、状态及点云视口截图。
 
 判定同时检查退出码、报告存在、有独立 PASS 断言且无 FAIL。统计不把 `BYPASS` 字符串或 `RESULT PASS` 汇总行当作新断言。Python 测试覆盖缺报告、空报告、仅汇总、FAIL、非零退出、环境隔离和非离线命令拒绝。
 
@@ -62,20 +62,20 @@ Release/Debug 构建均通过，两配置各八组离线专项、各 1320 个断
 
 ## 主机模型同输入对照
 
-需要 NumPy、匹配的 Qt DLL 和兼容 NVIDIA GPU。先保存待比较版本的 EXE（ASCII 文件名），对候选/参考执行相同合成输入；两者的模型 ID、后端和运行包必须匹配。
+需要 NumPy、匹配的 Qt DLL 和兼容 NVIDIA GPU。同网格比较使用相同方案、后端及运行包的 worker。迁移测试使用 `--comparison monocular` 和旧 640×480 Native16 worker，核对同一模型、后端和输入下裁切前的预测。
 
 ```powershell
-python tools/verify_port.py --executable x64/Release/DctsInferenceWorker.exe --reference-executable x64/validation/reference/before-Release.exe --qt-root E:/Qt/6.11.1/msvc2022_64 --output x64/validation/my_check/parity-default
-python tools/verify_port.py --executable x64/Release/DctsInferenceWorker.exe --reference-executable x64/validation/reference/before-Release.exe --qt-root E:/Qt/6.11.1/msvc2022_64 --model unidepth_rgb672_vga_fp16_tof16 --output x64/validation/my_check/parity-vga
+python tools/verify_port.py --executable x64/Release/DctsInferenceWorker.exe --reference-executable x64/validation/reference/before-Release.exe --qt-root E:/Qt/6.11.1/msvc2022_64 --comparison monocular --scheme G --output x64/validation/my_check/parity-G
+python tools/verify_port.py --executable x64/Release/DctsInferenceWorker.exe --reference-executable x64/validation/reference/before-Release.exe --qt-root E:/Qt/6.11.1/msvc2022_64 --comparison monocular --scheme B --output x64/validation/my_check/parity-B
 ```
 
-默认使用 `UniDepthRuntimeRgb672VgaFP16RTX/`，仅接受 VGA 模型 ID。`--runtime` 指定候选包，`--reference-runtime` 单独指定参考包，未指定时使用候选包。受保护包按清单要求 AES-GCM 内存加载、原 SHA 校验和不读明文；开发明文包验证 `plaintext-file`，不能因传了目录参数就假定加密。
+默认运行包为 `UniDepthRuntimeRgb672VgaFP16RTX/`。`--runtime` 指定候选包，`--reference-runtime` 指定参考包，未指定时共用候选包。工具按清单核对模型摘要和实际加载方式。
 
-每个模型覆盖 28 个场景：F1/F2、0°/180°、不同 RGB、±100 ms 接受和超界拒绝、复用身份/字节一致、错误网格/FOV/方向/有效位、低 SNR 和 RGB-only。比较有效输出的米制深度、原始预测及诊断字节，检查停止重启、不重放旧 RGB，并拒绝已移除的 A 模式。包清单逐文件 SHA256 也须通过。协议和合成样本共用 `tools/unidepth/native16_contract.py`；不再运行已删除的旧模型测试脚本。
+竖幅方案各覆盖 25 个 F6 场景，包括 0°/180°、不同 RGB、165 ms 捕获时间边界、G/B 复用策略、错误网格/FOV/方向/有效位、低 SNR 和 RGB-only。检查裁切前预测、480×640 输出身份、米制深度、诊断及停止重启。包清单逐文件核对 SHA256。协议和合成样本共用 `tools/unidepth/native16_contract.py`。
 
 这类测试验证代码与数据合同，不证明实际物理精度、客户显卡性能或设备安装标定。连续尺度平滑使用单调时间；逐字节比较采用固定场景，不能把不同墙钟节奏下的长流输出直接当作同一帧比较。
 
-原生控制 worker 可单独运行 `x64/rv_control/<配置>/runtime/RvControlWorker.exe --self-test`。主机异步启动/结果回传入口为主程序 `--rv-assist-path-test <绝对报告.json>`，须同时设置 `RV_TEST_OFFLINE_ONLY=1`；报告 `pass=true` 且 `depth_bytes` 正确才通过。
+原生控制 worker 可单独运行 `x64/rv_control/<配置>/runtime/RvControlWorker.exe --self-test`。主机异步启动和结果回传入口为 `--rv-assist-path-test <绝对报告.json>`，须设置 `RV_TEST_OFFLINE_ONLY=1`。默认检查 G 的 RGB-only 出帧，设置 `DCTS_TEST_REUSE_TOF=1` 检查 B 复用同一份合成原生 ToF 测量。报告同时核对 480×640 网格和单目数据。
 
 首次板端部署脚本由 `tests/test_board_bootstrap.py` 在临时文件系统中实际执行，覆盖其他版本旧驱动、没有旧交付目录、备份、身份绑定、上传损坏拒绝、安装中断回退、固件依赖缺失、已有残留部署和采集占用。Windows 使用 Git Bash，Linux 使用 bash；测试中的系统路径映射到临时目录，不访问真实板卡。与上述 Python 测试入口一起运行。
 
@@ -83,7 +83,7 @@ python tools/verify_port.py --executable x64/Release/DctsInferenceWorker.exe --r
 
 仅验证上位机辅助推理的实机入口为主程序 `--host-assist-live-validation <绝对报告.json>`。先登记实际 USB 设备、核对公钥与标定并保存登录，在运行该进程的环境中显式设置 `DCTS_LIVE_ENABLE=1` 和与登记设备一致的 `DCTS_LIVE_SERIAL`，清除 `RV_TEST_OFFLINE_ONLY`。通过等待进程退出的方式启动，检查退出码与报告的 `passed=true`；PowerShell 直接调用 GUI EXE 时不能把命令立即返回当作测试完成。
 
-该专项只选择 `host_unidepth_rgb672_vga_fp16_tof16`，进行两轮各 30 秒的普通开始、停止及重启。按 `RV_INFERENCE_BACKEND`（默认 `tensorrt`）检查实际后端、模型摘要及精度身份，并检查 640×480 米制输出、16×16 原生测量、输入方向、H 矫正、100 ms 配对上限、相机与深度实际绘制、停止后的晚到结果，以及两份板端长期设置/脚本保持不变。`DCTS_LIVE_CONFIG_SOURCE` 可指定只读的已登记设备配置来源，复制进临时配置后执行。批量入口为 `tools/test_live_inference_backends.ps1`，要求显式 `-AllowLiveDevice`，首次失败即停止。2026-11-09 五后端结果见 [推理设备选择](MULTI_BACKEND_INFERENCE.md)。报告只保存计数、耗时、身份和设置，不保存真实图像或测量数组，不运行板端推理。它不属于离线八组，也不使用调参持久化操作；实景精度仍须用独立的物理基准评估。
+该专项选择 G，进行两轮各 30 秒的开始、停止及重启。按 `RV_INFERENCE_BACKEND`（默认 `tensorrt`）检查实际后端、模型摘要及精度身份。检查还包括 480×640 米制输出、48×32 原生测量、输入方向、配对边界、绘制、停采后的结果和板端长期文件摘要。`DCTS_LIVE_CONFIG_SOURCE` 可指定只读的已登记设备配置来源。批量入口为 `tools/test_live_inference_backends.ps1`，使用 `-AllowLiveDevice`。2026-11-09 的历史结果见 [推理设备选择](MULTI_BACKEND_INFERENCE.md)。
 
 2026-11-07 本轮首次部署及主机实测证据位于 `x64/validation/fresh_board_setup_20261107/`。当前设备通过普通 USB 一键连接完成全量安装（`usb-live-REDACTED_DEVICE.json`），不再要求旧 V1.2.0 驱动哈希。原厂摄像头退出后遗留的 DHCP 进程仅在身份、参数、启动时间、RTSP 监听和摄像头 DMA 句柄均匹配时接管；原始摄像头配置及驱动已备份。
 
@@ -126,7 +126,7 @@ python tools/thermal/run.py --mode host --serial <实际受信任序列号> --ou
 
 `tests/test_thermal_analysis.py` 离线验证累计计数差分、guest 计数不重复、缺失/回退数据、旧时钟列布局、过期采样不复用、板端/PC 帧率区分及只读脚本的临时文件系统执行。实际硬件只在上述显式实机入口运行。
 
-`--mode host` 使用 `--host-thermal-live-validation`：仅选当前 RGB672 输入／640×480 输出的 H 模型运行 600 秒，恢复 2304×1296 H.265，继续严格检查 100 ms 配对、复用身份、无历史校正点冒用、模型输入方向和停止后晚到结果。电脑端每 5 秒通过只读 nvidia-smi 记录 GPU 温度、SM/显存频率、利用率、功耗、硬件/软件热限制状态和累计时间，并记录主机 CPU/内存与供电状态。累计热限制计数只比较本轮增量，历史非零值、N/A 或缺失不能冒充本轮限频。GPU 记录与板端及逐秒推理窗口按同一主机时间对齐，过期读数不复用。此模式的板端发热包含摄像头、ISP、编码和视频传输，不能因神经网络在电脑端运行就假定板端负载很低。
+`--mode host` 使用 `--host-thermal-live-validation` 运行 G 600 秒，同时检查当前 480×640 深度、48×32 ToF、2304×1296 H.265、配对时限、输入方向和停止后的结果。电脑端每 5 秒通过只读 nvidia-smi 记录 GPU 温度、SM/显存频率、利用率、功耗、硬件/软件热限制状态和累计时间，并记录主机 CPU/内存与供电状态。热限制计数只比较本轮增量。GPU 记录与板端及逐秒推理窗口按同一主机时间对齐。板端负载包含摄像头、ISP、编码和视频传输。
 
 2026-11-07 当前设备两轮均完整运行 600 秒并正常停止，晚到结果为 0，长期参数和脚本前后相同。板端记录在 `x64/validation/thermal_20261107_REDACTED_DEVICE_run2/`，辅助推理记录在 `x64/validation/thermal_host_20261107_REDACTED_DEVICE_run1/`，汇总与对比图在 `x64/validation/thermal_comparison_20261107/`。板端 run1 仅为 exec-out 通道不兼容的启动失败，未启动推理，不计为实测。辅助轮未再次断电，记录实际起始温度；外界温度及散热片/风扇情况未独立确认。
 
@@ -151,7 +151,7 @@ python tools/audit_source.py --root . --output x64/validation/my_check/source-in
 
 ## 板端公共源码
 
-当前交付使用报告标定对应的 F6 原生采集程序，入口见 [原生采集构建](../tools/rv_capture/README.md)。离线验证覆盖 Native16 分片、网格／身份／告警校验、拒绝旧板端深度载荷、H 与原生 ToF 会话预设及安装回滚。旧 F1/F2、多模型切换和 NPU 一致性记录属于历史。真实设备需另行验证当前 H 启停、USB 修复、视频及配对，不因离线报告或历史报告通过而视为本次已实机验证。
+当前交付使用报告标定对应的 F6 原生采集程序，入口见 [原生采集构建](../tools/rv_capture/README.md)。离线验证覆盖分片、网格／身份／告警校验、原生 ToF 会话预设及安装回滚。旧 F1/F2、多模型切换和 NPU 一致性记录属于历史。
 
 ## GUI 减载与实机延迟对照（2026-11-10）
 

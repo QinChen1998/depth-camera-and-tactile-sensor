@@ -4,6 +4,7 @@
 #include "RvCalibration.h"
 #include "RvCameraView.h"
 #include "RvCaptureCalibration.h"
+#include "RvDepthDiagnostic.h"
 #include "RvSessionController.h"
 #include "SceneInstanceBuffer.h"
 #include "../RenderingSettings.h"
@@ -26,6 +27,7 @@
 #include <cstddef>
 #include <cstring>
 #include <limits>
+#include <optional>
 #include <utility>
 
 namespace {
@@ -48,8 +50,10 @@ constexpr int MaxTransitionRadius = 10;
 constexpr auto DiameterKey = "pointCloud/assistedPointDiameterPx";
 constexpr auto ColorMinimumKey = "pointCloud/assistedColorMinimumM";
 constexpr auto ColorMaximumKey = "pointCloud/assistedColorMaximumM";
+constexpr auto ColorModeKey = "pointCloud/colorMode";
 using Instance = SceneInstanceBuffer::InstanceTableEntry;
 enum DisplayMode { Points, Mesh };
+enum ColorMode { FixedColor, DynamicColor };
 
 constexpr quint32 MissingVertex = std::numeric_limits<quint32>::max();
 
@@ -131,7 +135,7 @@ bool capturesAssistedDepth(const RvSessionController &session)
 bool capturesNative48(const RvSessionController &session)
 {
     const int mode = session.dtofCandidateMode();
-    return RvCaptureContract::supports(mode)
+    return !session.hostHdAssist() && RvCaptureContract::supports(mode)
         && RvCaptureContract::columns(mode) == Columns && RvCaptureContract::rows(mode) == Rows;
 }
 
@@ -141,12 +145,11 @@ QVector4D displayColor(QRgb color)
     return {qRed(color) * ToColor, qGreen(color) * ToColor, qBlue(color) * ToColor, 1.f};
 }
 
-Instance nativePoint(const QVector3D &position, double minimum, double maximum)
+Instance nativePoint(const QVector3D &position)
 {
     const float depthMm = -position.z();
     const float scale = std::max(3.5f, depthMm * .012f) / 100.f;
-    const auto color = displayColor(PointCloudColorScale::color(depthMm / MillimetresPerMetre, minimum, maximum));
-    return {{scale, 0, 0, position.x()}, {0, scale, 0, position.y()}, {0, 0, scale, position.z()}, color, {}};
+    return {{scale, 0, 0, position.x()}, {0, scale, 0, position.y()}, {0, 0, scale, position.z()}, {}, {}};
 }
 
 double savedNumber(const QSettings &settings, const char *key, double fallback, const QDoubleSpinBox &field)
@@ -165,13 +168,14 @@ RvPointCloudWidget::RvPointCloudWidget(RvSessionController *session, QWidget *pa
       m_view(new DockableQuick3DWidget(this, {"pointInstances", "depthInstances", "depthPointDiameter", "renderSettings",
           "meshGeometry", "meshVisible", "cameraTarget", "cameraDistance", "orbitYaw", "orbitPitch"})),
       m_status(new QLabel(this)), m_displayMode(new QComboBox(this)),
+      m_colorMode(new QComboBox(this)),
       m_accumulate(new QPushButton(this)), m_reset(new QPushButton(this)),
-      m_diameterControls(new QWidget(this)),
+      m_diameterControls(new QWidget(this)), m_rangeControls(new QWidget(this)), m_colorLegend(new QLabel(this)),
       m_legendMinimum(new QLabel(this)), m_legendMaximum(new QLabel(this)),
-      m_diameterLabel(new QLabel(m_diameterControls)), m_rangeLabel(new QLabel(this)),
-      m_rangeSeparator(new QLabel(this)), m_diameter(new QDoubleSpinBox(m_diameterControls)),
-      m_colorMinimum(new QDoubleSpinBox(this)), m_colorMaximum(new QDoubleSpinBox(this)),
-      m_applyRange(new QPushButton(this))
+      m_diameterLabel(new QLabel(m_diameterControls)), m_rangeLabel(new QLabel(m_rangeControls)),
+      m_rangeSeparator(new QLabel(m_rangeControls)), m_diameter(new QDoubleSpinBox(m_diameterControls)),
+      m_colorMinimum(new QDoubleSpinBox(m_rangeControls)), m_colorMaximum(new QDoubleSpinBox(m_rangeControls)),
+      m_applyRange(new QPushButton(m_rangeControls))
 {
     setObjectName("rvPointCloudWidget");
     m_instances->setObjectName("rvPointCloudInstances");
@@ -210,18 +214,13 @@ RvPointCloudWidget::RvPointCloudWidget(RvSessionController *session, QWidget *pa
         {"meshGeometry", QVariant::fromValue(static_cast<QObject *>(m_meshGeometry))},
         {"renderSettings", QVariant::fromValue(RenderingSettings::instance())}});
 
-    auto *gradient = new QLabel(this);
-    gradient->setObjectName("rvPointCloudColorLegend");
-    QImage ramp(256, 1, QImage::Format_RGB32);
-    for (int x = 0; x < ramp.width(); ++x)
-        ramp.setPixel(x, 0, PointCloudColorScale::jet(double(x) / (ramp.width() - 1)));
-    gradient->setPixmap(QPixmap::fromImage(ramp));
-    gradient->setFixedSize(96, 7);
-    gradient->setScaledContents(true);
+    m_colorLegend->setObjectName("rvPointCloudColorLegend");
+    m_colorLegend->setFixedSize(96, 7);
+    m_colorLegend->setScaledContents(true);
     auto *legend = new QHBoxLayout;
     legend->addStretch();
     legend->addWidget(m_legendMinimum);
-    legend->addWidget(gradient);
+    legend->addWidget(m_colorLegend);
     legend->addWidget(m_legendMaximum);
     layout->addLayout(legend);
 
@@ -236,6 +235,12 @@ RvPointCloudWidget::RvPointCloudWidget(RvSessionController *session, QWidget *pa
     connect(m_session, &RvSessionController::tofFrameReady, this, &RvPointCloudWidget::acceptTofFrame);
     connect(m_session, &RvSessionController::assistDepthSnapshotReady, this, &RvPointCloudWidget::acceptAssistedDepth);
     connect(m_session, &RvSessionController::assistDepthStreamCleared, this, &RvPointCloudWidget::clearAssistedDepth);
+    connect(m_session, &RvSessionController::monocularDisplayChanged, this, [this] {
+        m_depthInstances->setTable({});
+        publishMesh({});
+        m_hasDepthFrame = false;
+        changeDisplayMode();
+    });
     connect(m_session, &RvSessionController::streamCleared, this, &RvPointCloudWidget::clearFrames);
     connect(m_session, &RvSessionController::deviceChanged, this, &RvPointCloudWidget::clearFrames);
     connect(m_session, &RvSessionController::imagingSwitchStarted, this, &RvPointCloudWidget::clearFrames);
@@ -257,6 +262,9 @@ RvPointCloudWidget::RvPointCloudWidget(RvSessionController *session, QWidget *pa
 
 void RvPointCloudWidget::setupDisplayControls(QVBoxLayout &layout)
 {
+    m_colorMode->setObjectName("rvPointCloudColorMode");
+    m_colorMode->addItems({QString(), QString()});
+
     m_diameter->setObjectName("rvPointCloudPointDiameter");
     m_diameter->setDecimals(1);
     m_diameter->setRange(1.0, 6.0);
@@ -277,6 +285,8 @@ void RvPointCloudWidget::setupDisplayControls(QVBoxLayout &layout)
     }
 
     const QSettings settings;
+    m_colorMode->setCurrentIndex(settings.value(ColorModeKey).toString() == "dynamic" ? DynamicColor : FixedColor);
+    m_rangeControls->setVisible(m_colorMode->currentIndex() == FixedColor);
     m_diameter->setValue(savedNumber(settings, DiameterKey, DefaultDiameter, *m_diameter));
     m_colorMinimum->setValue(savedNumber(settings, ColorMinimumKey, m_depthColorMinimum, *m_colorMinimum));
     m_colorMaximum->setValue(savedNumber(settings, ColorMaximumKey, m_depthColorMaximum, *m_colorMaximum));
@@ -292,17 +302,27 @@ void RvPointCloudWidget::setupDisplayControls(QVBoxLayout &layout)
     diameterRow->setContentsMargins(0, 0, 0, 0);
     diameterRow->addWidget(m_diameterLabel);
     diameterRow->addWidget(m_diameter);
-    diameterRow->addStretch();
-    auto *rangeRow = new QHBoxLayout;
+    auto *colorRow = new QHBoxLayout;
+    colorRow->addWidget(m_colorMode);
+    colorRow->addWidget(m_diameterControls);
+    colorRow->addStretch();
+    auto *rangeRow = new QHBoxLayout(m_rangeControls);
+    rangeRow->setContentsMargins(0, 0, 0, 0);
     rangeRow->addWidget(m_rangeLabel);
     rangeRow->addWidget(m_colorMinimum);
     rangeRow->addWidget(m_rangeSeparator);
     rangeRow->addWidget(m_colorMaximum);
     rangeRow->addWidget(m_applyRange);
     rangeRow->addStretch();
-    layout.addWidget(m_diameterControls);
-    layout.addLayout(rangeRow);
+    layout.addLayout(colorRow);
+    layout.addWidget(m_rangeControls);
 
+    connect(m_colorMode, &QComboBox::currentIndexChanged, this, [this](int index) {
+        const bool dynamic = index == DynamicColor;
+        QSettings().setValue(ColorModeKey, dynamic ? QStringLiteral("dynamic") : QStringLiteral("fixed"));
+        m_rangeControls->setVisible(!dynamic);
+        refreshColors();
+    });
     connect(m_diameter, &QDoubleSpinBox::valueChanged, this, [this](double diameter) {
         QSettings().setValue(DiameterKey, diameter);
         if (auto *scene = m_view->rootObject())
@@ -335,17 +355,34 @@ void RvPointCloudWidget::applyDepthColorRange()
     settings.setValue(ColorMinimumKey, minimum);
     settings.setValue(ColorMaximumKey, maximum);
     m_applyRange->setEnabled(false);
+    refreshColors();
+}
+
+void RvPointCloudWidget::refreshColors()
+{
     updateColorLegend();
-    recolorAccumulatedFrames();
-    ++m_depthEpoch;
-    m_depthDirty = !m_latestDepth.isEmpty();
-    presentLatest();
+    for (auto &frame : m_accumulatedFrames)
+        colorNativeFrame(frame);
+    changeDisplayMode();
 }
 
 void RvPointCloudWidget::updateColorLegend()
 {
-    m_legendMinimum->setText(QStringLiteral("Z  %1").arg(QLocale().toString(m_depthColorMinimum, 'f', 2)));
-    m_legendMaximum->setText(QStringLiteral("%1 m").arg(QLocale().toString(m_depthColorMaximum, 'f', 2)));
+    const bool dynamic = m_colorMode->currentIndex() == DynamicColor;
+    if (dynamic) {
+        m_legendMinimum->setText(tr("Depth percentile 0%"));
+        m_legendMaximum->setText(QStringLiteral("100%"));
+    } else {
+        m_legendMinimum->setText(QStringLiteral("Z  %1").arg(QLocale().toString(m_depthColorMinimum, 'f', 2)));
+        m_legendMaximum->setText(QStringLiteral("%1 m").arg(QLocale().toString(m_depthColorMaximum, 'f', 2)));
+    }
+    QImage ramp(256, 1, QImage::Format_RGB32);
+    for (int x = 0; x < ramp.width(); ++x) {
+        const double t = double(x) / (ramp.width() - 1);
+        ramp.setPixel(x, 0, dynamic ? PointCloudColorScale::DynamicHistogram::colorAtFraction(t)
+                                    : PointCloudColorScale::jet(t));
+    }
+    m_colorLegend->setPixmap(QPixmap::fromImage(ramp));
 }
 
 void RvPointCloudWidget::setRenderingActive(bool active)
@@ -380,14 +417,15 @@ void RvPointCloudWidget::acceptTofFrame(const RvTofFrame &frame)
         presentLatest();
 }
 
-void RvPointCloudWidget::acceptAssistedDepth(const QByteArray &depth, const QJsonObject &metadata)
+void RvPointCloudWidget::acceptAssistedDepth(const QByteArray &depth, const QJsonObject &metadata, const QImage &,
+                                             const RvTofFrame &, const QByteArray &diagnostic)
 {
     if (!capturesAssistedDepth(*m_session))
         return;
     const auto model = m_session->assistHostModel();
-    const auto &camera = RvCameraView::profile(model);
+    const auto &camera = RvCameraView::outputProfile(model);
     if (metadata["assist_host_model"] != model || metadata["depth_unit"] != "camera-Z_m_float32"
-        || metadata["width"] != camera.outputWidth || metadata["height"] != camera.outputHeight
+        || !RvCameraView::validOutputGrid(metadata)
         || metadata["depth_K"].toArray() != RvCameraView::intrinsics(camera)
         || metadata["rectify_map_sha256"] != QLatin1String(camera.mapSha)
         || metadata["assist_output_restored_to_calibrated_grid"] != true
@@ -395,6 +433,17 @@ void RvPointCloudWidget::acceptAssistedDepth(const QByteArray &depth, const QJso
         return;
 
     m_latestDepth = depth;
+    m_latestMonocularDepth = RvDepthDiagnostic::monocularDepth(diagnostic, metadata);
+    if (m_session->monocularDisplay() && m_latestMonocularDepth.isEmpty()) {
+        // A missing predictor in this frame must never leave the old cloud visible.
+        ++m_depthEpoch;
+        m_depthDirty = false;
+        m_hasDepthFrame = false;
+        m_depthInstances->setTable({});
+        publishMesh({});
+        updateStatus();
+        return;
+    }
     m_depthDirty = true;
     startDepthConversion();
 }
@@ -417,6 +466,7 @@ void RvPointCloudWidget::clearAssistedDepth()
 {
     ++m_depthEpoch;
     m_latestDepth.clear();
+    m_latestMonocularDepth.clear();
     m_depthDirty = false;
     m_hasDepthFrame = false;
     if (m_depthInstances->count())
@@ -479,8 +529,9 @@ RvPointCloudWidget::NativeFrame RvPointCloudWidget::projectTofFrame(bool mesh) c
                                  -float(radiusMm * ray[1] + MillimetresPerMetre * offset[1]),
                                  -float(radiusMm * ray[2] + MillimetresPerMetre * offset[2]));
         grid[index] = quint32(projected.points.size());
-        projected.points.append(nativePoint(position, m_depthColorMinimum, m_depthColorMaximum));
+        projected.points.append(nativePoint(position));
     }
+    colorNativeFrame(projected);
     if (mesh) {
         const auto &points = std::as_const(projected.points);
         projected.indices = meshIndices(grid.data(), Columns, Rows,
@@ -513,13 +564,19 @@ void RvPointCloudWidget::clearAccumulatedFrames()
     m_accumulatedFrames.clear();
 }
 
-void RvPointCloudWidget::recolorAccumulatedFrames()
+void RvPointCloudWidget::colorNativeFrame(NativeFrame &frame) const
 {
-    for (auto &frame : m_accumulatedFrames) {
-        for (auto &point : frame.points) {
-            const double z = -point.getPosition().z() / MillimetresPerMetre;
-            point.color = displayColor(PointCloudColorScale::color(z, m_depthColorMinimum, m_depthColorMaximum));
-        }
+    if (frame.points.isEmpty())
+        return;
+    const auto cameraZ = [](const Instance &point) { return -point.getPosition().z() / MillimetresPerMetre; };
+    std::optional<PointCloudColorScale::DynamicHistogram> histogram;
+    if (m_colorMode->currentIndex() == DynamicColor)
+        histogram.emplace(std::as_const(frame.points), cameraZ);
+    for (auto &point : frame.points) {
+        const double z = cameraZ(point);
+        const auto rgb = histogram ? histogram->color(z)
+                                   : PointCloudColorScale::color(z, m_depthColorMinimum, m_depthColorMaximum);
+        point.color = displayColor(rgb);
     }
 }
 
@@ -614,16 +671,20 @@ void RvPointCloudWidget::startDepthConversion()
     if (!m_depthDirty || m_depthConverting || !m_renderingActive || !m_view->rootObject())
         return;
 
+    const auto &depth = m_session->monocularDisplay() ? m_latestMonocularDepth : m_latestDepth;
+    if (depth.isEmpty())
+        return;
     // Keep one conversion in flight. New frames replace the pending snapshot.
     m_depthDirty = false;
     m_depthConverting = true;
     m_conversionEpoch = m_depthEpoch;
-    const auto camera = RvCameraView::profile(m_session->assistHostModel());
+    const auto camera = RvCameraView::outputProfile(m_session->assistHostModel());
     const double minimum = m_depthColorMinimum;
     const double maximum = m_depthColorMaximum;
+    const bool dynamic = m_colorMode->currentIndex() == DynamicColor;
     const bool mesh = m_displayMode->currentIndex() == Mesh;
-    m_depthConversion.setFuture(QtConcurrent::run([depth = m_latestDepth, camera, minimum, maximum, mesh] {
-        return projectDepth(depth, camera, minimum, maximum, mesh);
+    m_depthConversion.setFuture(QtConcurrent::run([depth, camera, minimum, maximum, dynamic, mesh] {
+        return projectDepth(depth, camera, minimum, maximum, dynamic, mesh);
     }));
 }
 
@@ -641,7 +702,7 @@ void RvPointCloudWidget::finishDepthConversion()
 }
 
 RvPointCloudWidget::DepthProjection RvPointCloudWidget::projectDepth(const QByteArray &depth,
-    const RvCameraView::Profile &camera, double colorMinimum, double colorMaximum, bool mesh)
+    const RvCameraView::Profile &camera, double colorMinimum, double colorMaximum, bool dynamic, bool mesh)
 {
     DepthProjection projected;
     const int columns = camera.outputWidth;
@@ -654,6 +715,9 @@ RvPointCloudWidget::DepthProjection RvPointCloudWidget::projectDepth(const QByte
         if (!std::isfinite(z) || z <= 0)
             z = 0;
     }
+    std::optional<PointCloudColorScale::DynamicHistogram> histogram;
+    if (dynamic)
+        histogram.emplace(cameraZ, [](float z) { return z; });
     QVector<MeshVertex> vertices;
     QVector<quint32> grid;
     char *output = nullptr;
@@ -686,7 +750,9 @@ RvPointCloudWidget::DepthProjection RvPointCloudWidget::projectDepth(const QByte
             const float z = -float(metres * MillimetresPerMetre);
             if (!std::isfinite(x) || !std::isfinite(y) || !std::isfinite(z))
                 continue;
-            const auto color = displayColor(PointCloudColorScale::color(metres, colorMinimum, colorMaximum));
+            const auto rgb = histogram ? histogram->color(metres)
+                                       : PointCloudColorScale::color(metres, colorMinimum, colorMaximum);
+            const auto color = displayColor(rgb);
             if (mesh) {
                 grid[i] = quint32(vertices.size());
                 vertices.append({{x, y, z}, color});
@@ -736,9 +802,10 @@ void RvPointCloudWidget::updateStatus()
         text = (showingMesh ? tr("%1 / %2 frames · %3 triangles") : tr("%1 / %2 frames · %3 points"))
             .arg(m_accumulatedFrames.size()).arg(AccumulationFrameLimit).arg(showingMesh ? triangleCount : pointCount);
     } else if (ready && assisted && m_hasDepthFrame) {
-        const auto size = RvCameraView::profile(m_session->assistHostModel()).outputSize();
-        text = showingMesh ? tr("%1×%2 assisted depth · %3 triangles").arg(size.width()).arg(size.height()).arg(triangleCount)
-            : tr("%1×%2 assisted depth · %3 / %4 points").arg(size.width()).arg(size.height())
+        const auto size = RvCameraView::outputProfile(m_session->assistHostModel()).outputSize();
+        const auto label = m_session->monocularDisplay() ? tr("monocular depth") : tr("assisted depth");
+        text = showingMesh ? tr("%1×%2 %3 · %4 triangles").arg(size.width()).arg(size.height()).arg(label).arg(triangleCount)
+            : tr("%1×%2 %3 · %4 / %5 points").arg(size.width()).arg(size.height()).arg(label)
                 .arg(pointCount).arg(size.width() * size.height());
     } else if (ready && tofAvailable) {
         if (!RvAssistFusion::calibrationForFov(RvCalibration::Fov).valid)
@@ -772,6 +839,10 @@ void RvPointCloudWidget::retranslate()
     m_displayMode->setItemText(Points, tr("Points"));
     m_displayMode->setItemText(Mesh, tr("Mesh"));
     m_displayMode->setAccessibleName(tr("Point cloud display mode"));
+    m_colorMode->setItemText(FixedColor, tr("Fixed Z color range"));
+    m_colorMode->setItemText(DynamicColor, tr("Dynamic + histogram equalization"));
+    m_colorMode->setAccessibleName(tr("Point cloud color mode"));
+    m_colorMode->setItemData(DynamicColor, tr("Equalize depths from 0.10 to 10.00 m in each frame. Colors can vary across frames."), Qt::ToolTipRole);
     m_accumulate->setText(tr("Accumulate point cloud"));
     m_accumulate->setToolTip(tr("Overlay the latest 100 native ToF frames in camera coordinates."));
     m_reset->setText(tr("Reset view"));
