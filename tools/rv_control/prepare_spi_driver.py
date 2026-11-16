@@ -1,10 +1,12 @@
-"""Prepare a vendor-source copy with explicit software ray-table calibration."""
+"""Prepare a vendor-source copy with F6 calibration and SPI clock correction."""
 import argparse
 import hashlib
 import json
+import os
 from pathlib import Path
 import shutil
 import shlex
+import subprocess
 
 
 def linux_path(path):
@@ -18,13 +20,26 @@ def prepare(source, output):
     if output.exists():
         raise ValueError('Use a new output directory; vendor input is never overwritten')
     required = ('driver_main.c', 'main.c', 'tmf8829.c', 'tmf8829_driver.c',
-                'tmf8829_shim.c', 'tmf8829_frameparser.c', 'tmf8829_ipc.c', 'parent_watch.h')
+                'tmf8829.h', 'tmf8829_shim.c', 'tmf8829_shim.h',
+                'tmf8829_frameparser.c', 'tmf8829_ipc.c', 'parent_watch.h')
     for name in required:
         if not (source / name).is_file():
             raise ValueError('Missing vendor source: ' + name)
+    project = Path(__file__).resolve().parents[2]
+    clock_assets = project / 'tools/rv_capture/common'
+    clock_patch = clock_assets / 'tmf8829_spi_clock.patch'
+    clock_header = clock_assets / 'tmf8829_spi_clock.h'
+    for path in (clock_patch, clock_header):
+        if not path.is_file():
+            raise ValueError('Missing local SPI clock correction input: ' + str(path))
     output.mkdir(parents=True)
     copied = output / 'source'
     shutil.copytree(source, copied)
+    # Apply to the copied vendor tree without walking up to the host Git worktree.
+    git_environment = dict(os.environ, GIT_CEILING_DIRECTORIES=str(copied.parent))
+    subprocess.run(['git', 'apply', '--whitespace=nowarn', str(clock_patch)],
+                   cwd=copied, env=git_environment, check=True)
+    shutil.copyfile(clock_header, copied / clock_header.name)
     wrapper = copied / 'driver_main.c'
     text = wrapper.read_text(encoding='utf-8')
     marker = '    unsigned char *c = driver->config;'
@@ -44,7 +59,6 @@ def prepare(source, output):
         '    if (dcts_write_calibration(path,getenv("CANONICAL_RUN_ID"),sensor_fov,\n'
         '                               (unsigned)processing_fov)!=0) return -1;')
     wrapper.write_bytes(text.encode('utf-8'))
-    project = Path(__file__).resolve().parents[2]
     for name in ('SessionFov.h', 'DriverWarningPolicy.h'):
         shutil.copyfile(project / 'tools/rv_control' / name, copied / name)
     quote = shlex.quote
@@ -61,6 +75,9 @@ def prepare(source, output):
               + command
               + '/usr/bin/cc -std=c11 -D_DEFAULT_SOURCE -I "$src" ' + quote(linux_path(project / 'tests/SessionFovTests.c'))
               + ' -o "$out/session-fov-tests"\nCANONICAL_WARNING_POLICY=observe-0x08 "$out/session-fov-tests"\n'
+              + '/usr/bin/cc -std=c11 -Wall -Wextra -Werror -I "$src" '
+              + quote(linux_path(project / 'tests/Tmf8829SpiClockTests.c'))
+              + ' -o "$out/test_spi_clock"\n"$out/test_spi_clock"\n'
               + 'file "$out/tof_driver"\nsha256sum "$out/tof_driver"\n')
     (output / 'build.sh').write_bytes(script.encode('utf-8'))
     hashes = {str(p.relative_to(source)).replace('\\', '/'): hashlib.sha256(p.read_bytes()).hexdigest()
@@ -68,7 +85,10 @@ def prepare(source, output):
     (output / 'provenance.json').write_text(json.dumps({
         'vendor_source_sha256': hashes, 'changes': ['explicit per-session software ray-table selection',
         'actual sensor FOV retained in verified readback',
-        'atomic generation-bound calibration receipt before publishing', 'existing exact warning policy retained'],
+        'atomic generation-bound calibration receipt before publishing', 'existing exact warning policy retained',
+        'SPI result-header timing and shared clock correction for both subframes'],
+        'spi_clock_fix_sha256': {p.name: hashlib.sha256(p.read_bytes()).hexdigest()
+                                 for p in (clock_patch, clock_header)},
         'models_changed': False, 'persistent_sensor_settings_written': False,
     }, indent=2), encoding='utf-8')
 

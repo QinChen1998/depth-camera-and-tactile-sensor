@@ -214,6 +214,7 @@
     <ClInclude Include="tools\rv_control\DriverWarningPolicy.h" />
     <None Include="tools\rv_control\prepare_spi_driver.py" />
     <None Include="tests\SessionFovTests.c" />
+    <None Include="tests\Tmf8829SpiClockTests.c" />
   </ItemGroup>
   <ItemGroup><ClInclude Include="sensors\RvCaptureCalibration.h" /></ItemGroup>
   <ItemGroup>
