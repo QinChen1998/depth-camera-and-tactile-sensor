@@ -130,6 +130,7 @@
     <ClInclude Include="tools\rv_control\DriverWarningPolicy.h"><Filter>Source Files</Filter></ClInclude>
     <None Include="tools\rv_control\prepare_spi_driver.py"><Filter>Source Files</Filter></None>
     <None Include="tests\SessionFovTests.c"><Filter>Source Files</Filter></None>
+    <None Include="tests\Tmf8829SpiClockTests.c"><Filter>Source Files</Filter></None>
   </ItemGroup>
   <ItemGroup><ClInclude Include="sensors\RvCaptureCalibration.h"><Filter>Source Files</Filter></ClInclude></ItemGroup>
   <ItemGroup>
