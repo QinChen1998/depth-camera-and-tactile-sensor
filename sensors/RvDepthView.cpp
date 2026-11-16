@@ -1,4 +1,5 @@
 #include "RvDepthView.h"
+#include "PointCloudColorScale.h"
 
 #include <QtCore/QMetaObject>
 #include <QtCore/QJsonArray>
@@ -37,10 +38,31 @@ struct RvDepthView::Colorizer {
         qint64 queuedNs=0;
         QByteArray sideDiagnostic;
         double sideScale=1;
-        int sidePixels=0;
         QByteArray monocularDepth;
+        bool dynamicColoring=false;
+
+        bool presentationOnly() const
+        {
+            return (dynamicColoring && !rawPreview) || !sideDiagnostic.isEmpty() || !monocularDepth.isEmpty();
+        }
     };
-    struct Result { QImage image; double frameId=-1,generation=-1; quint64 revision=0; QRect sourceRect; QJsonObject performance; int sidePixels=0; };
+    struct Result { QImage image; double frameId=-1,generation=-1; quint64 revision=0; QRect sourceRect; QJsonObject performance; bool presentationOnly=false; };
+
+    static Job forView(const RvDepthView &view, bool withPresentation = true)
+    {
+        Job job{view.depth, view.depthSize, view.coverage, view.rangeMinimum, view.rangeMaximum,
+                view.property("frameId").toDouble(), view.property("generation").toDouble(),
+                view.blackOutside, view.colorRevision, view.depthSourceRect,
+                view.depthMetadata.value("color_raw_preview") == true};
+        if (withPresentation) {
+            job.dynamicColoring = view.dynamicColoring;
+            job.sideDiagnostic = view.sideDiagnostic;
+            job.sideScale = view.sideScale;
+            if (view.showMonocular)
+                job.monocularDepth = view.monocularDepth;
+        }
+        return job;
+    }
 
     explicit Colorizer(RvDepthView *view):owner(view),worker([this]{run();}){}
     ~Colorizer(){
@@ -63,11 +85,22 @@ struct RvDepthView::Colorizer {
         // bits() detaches once if an explicit snapshot still owns this buffer.
         auto *pixels=reinterpret_cast<QRgb *>(buffer.bits());
         const int count=job.size.width()*job.size.height();
-        for(int i=0;i<count;++i){
-            const float original=(*job.values)[i];
-            const float display=!job.monocularDepth.isEmpty()?monoPrediction(job.monocularDepth,i,1.0)
+        const auto displayDepth = [&](int i) {
+            const float original = (*job.values)[i];
+            return !job.monocularDepth.isEmpty()?monoPrediction(job.monocularDepth,i,1.0)
                 :original==0&&!job.sideDiagnostic.isEmpty()?monoPrediction(job.sideDiagnostic,i,job.sideScale):original;
-            auto color=DepthColorScale::color(display,job.minimum,job.maximum,true,job.blackOutside);
+        };
+        std::optional<PointCloudColorScale::DynamicHistogram> histogram;
+        if (job.dynamicColoring && !job.rawPreview) {
+            histogram.emplace(*job.values, [&](const float &sample) {
+                const int i = int(&sample - job.values->data());
+                return !job.coverage.isEmpty() && job.coverage[i] == 0 ? 0.f : displayDepth(i);
+            });
+        }
+        for(int i=0;i<count;++i){
+            const float display = displayDepth(i);
+            auto color = histogram ? histogram->color(display)
+                : DepthColorScale::color(display,job.minimum,job.maximum,true,job.blackOutside);
             if(job.rawPreview){
                 const float v=(*job.values)[i];
                 color=std::isfinite(v)?QColor::fromHsvF((1-std::clamp((double(v)-job.minimum)/(job.maximum-job.minimum),0.0,1.0))*2/3,1,1).rgb():qRgb(255,0,255);
@@ -96,7 +129,7 @@ struct RvDepthView::Colorizer {
             bool notify=false;
             {std::lock_guard<std::mutex> lock(mutex);
              if(stopping)return;
-             completed=Result{buffer,job.frameId,job.generation,job.revision,job.sourceRect,job.performance,job.sidePixels};
+             completed=Result{buffer,job.frameId,job.generation,job.revision,job.sourceRect,job.performance,job.presentationOnly()};
              notify=!notificationQueued;notificationQueued=true;}
             if(notify)QMetaObject::invokeMethod(owner,[view=owner]{view->takeColoredFrame();},Qt::QueuedConnection);
         }
@@ -171,7 +204,7 @@ bool RvDepthView::setMonocularVisible(bool visible){
     showMonocular=visible;
     // A completed color job for the previous source must not stay visible
     // while the current frame is recolored.
-    image={};imageSourceRect={};imageSidePixels=0;
+    image={};imageSourceRect={};imagePresentationOnly=false;
     hoverTip.clear();
     setProperty("sidePredictionActive",!visible&&sidePixels>0);
     setProperty("sidePredictionPixels",visible?0:sidePixels);
@@ -187,6 +220,12 @@ bool RvDepthView::setCoverage(const QByteArray &values){
     if(!radial||!depth||values.size()!=depthSize.width()*depthSize.height()){clear();return false;}
     coverage=values;recolor();return true;
 }
+void RvDepthView::setDynamicColoring(bool enabled)
+{
+    if (dynamicColoring == enabled) return;
+    dynamicColoring = enabled;
+    recolor();
+}
 void RvDepthView::holdFrame(){
     if(!hasFrame()||held)return;
     held=true;depth.reset();coverage.clear();depthMetadata={};
@@ -200,7 +239,7 @@ void RvDepthView::clear(const QString &reason){
     ++colorRevision;if(colorizer)colorizer->cancel();
     loadingVisible=false;loadingTimer.stop();emptyReason=reason;held=false;
     depth.reset();depthSize={};coverage.clear();image={};depthSourceRect={};imageSourceRect={};depthMetadata={};imagePerformance={};
-    sideDiagnostic.clear();monocularDepth.clear();sidePixels=imageSidePixels=0;sideScale=1;
+    sideDiagnostic.clear();monocularDepth.clear();sidePixels=0;imagePresentationOnly=false;sideScale=1;
     setProperty("sidePredictionActive",false);setProperty("sidePredictionPixels",0);
     setProperty("frameId",QVariant());setProperty("generation",QVariant());
     setProperty("displaySourceRect",QVariant());
@@ -213,10 +252,7 @@ void RvDepthView::recolor(){
 void RvDepthView::requestColorization(){
     if(!isVisible()||!depth||held||imageRevision==colorRevision)return;
     if(!colorizer)colorizer=std::make_unique<Colorizer>(this);
-    Colorizer::Job job{depth,depthSize,coverage,rangeMinimum,rangeMaximum,
-        property("frameId").toDouble(),property("generation").toDouble(),blackOutside,colorRevision,depthSourceRect,depthMetadata.value("color_raw_preview")==true};
-    job.sideDiagnostic=sideDiagnostic;job.sideScale=sideScale;job.sidePixels=sidePixels;
-    if(showMonocular)job.monocularDepth=monocularDepth;
+    auto job = Colorizer::forView(*this);
     if(performanceFramePainted){job.performance=depthMetadata;job.performance["gui_set_depth_ms"]=guiSetDepthMs;
         job.queuedNs=std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();}
     colorizer->submit(std::move(job));
@@ -230,7 +266,7 @@ void RvDepthView::takeColoredFrame(){
     imageSourceRect=result->sourceRect;
     imageFrameId=result->frameId;imageGeneration=result->generation;
     imagePerformance=std::move(result->performance);
-    imageSidePixels=result->sidePixels;
+    imagePresentationOnly=result->presentationOnly;
     setProperty("coloredFrameId",imageFrameId);
     setProperty("coloredFrames",property("coloredFrames").toULongLong()+1);refreshHover();update();
 }
@@ -277,25 +313,23 @@ QImage RvDepthView::presentationImage()const{
     // Explicit inspection/save may request a hidden or not-yet-painted frame.
     // Only that demand generates an image synchronously; receipt never does.
     if(depth&&!held&&imageRevision!=colorRevision){
-        Colorizer::Job job{depth,depthSize,coverage,rangeMinimum,rangeMaximum,
-            property("frameId").toDouble(),property("generation").toDouble(),blackOutside,colorRevision,depthSourceRect,depthMetadata.value("color_raw_preview")==true};
-        job.sideDiagnostic=sideDiagnostic;job.sideScale=sideScale;job.sidePixels=sidePixels;
-        if(showMonocular)job.monocularDepth=monocularDepth;
-        Colorizer::render(job,image);imageSidePixels=sidePixels;
+        const auto job = Colorizer::forView(*this);
+        Colorizer::render(job,image);imagePresentationOnly=job.presentationOnly();
         imageRevision=colorRevision;imageSourceRect=depthSourceRect;imageFrameId=property("frameId").toDouble();imageGeneration=property("generation").toDouble();
     }
     return image;
 }
-QImage RvDepthView::snapshotImage()const{
-    const auto displayed=presentationImage();
-    // Expired side predictions are retained only as presentation pixels.
-    if(held&&(imageSidePixels||showMonocular))return {};
-    if(sideDiagnostic.isEmpty()&&!showMonocular)return displayed;
-    if(!depth)return {};
-    QImage masked;
-    Colorizer::render({depth,depthSize,coverage,rangeMinimum,rangeMaximum,
-        property("frameId").toDouble(),property("generation").toDouble(),blackOutside,colorRevision,depthSourceRect},masked);
-    return masked;
+QImage RvDepthView::snapshotImage() const
+{
+    const auto displayed = presentationImage();
+    if (!imagePresentationOnly)
+        return displayed;
+    // The saved image uses corrected depths and the fixed palette.
+    if (!depth)
+        return {};
+    QImage fixedImage;
+    Colorizer::render(Colorizer::forView(*this, false), fixedImage);
+    return fixedImage;
 }
 
 void RvDepthView::showEvent(QShowEvent *event){QWidget::showEvent(event);requestColorization();}

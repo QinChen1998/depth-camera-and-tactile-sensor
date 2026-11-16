@@ -68,6 +68,7 @@ public:
  double displayMaximum()const{return rangeMaximum;}
  void setBlackOutsideRange(bool enabled){if(blackOutside==enabled)return;blackOutside=enabled;recolor();}
  bool blackOutsideRange()const{return blackOutside;}
+ void setDynamicColoring(bool enabled);
  QRgb colorAt(int x,int y)const{const auto current=presentationImage();return current.isNull()?qRgb(0,0,0):current.pixel(x,y);}
  // Presentation may include predictions outside the dToF
  // field. Numeric snapshots and depthAt() retain the original geometric mask.
@@ -164,9 +165,10 @@ private:
  QByteArray sideDiagnostic;
  QByteArray monocularDepth;
  bool showMonocular=false;
+ bool dynamicColoring=false;
  double sideScale=1;
  int sidePixels=0;
- mutable int imageSidePixels=0;
+ mutable bool imagePresentationOnly=false;
  bool nativeRadial=false,held=false;QSize nativeGridSize;
  struct Colorizer;
  std::unique_ptr<Colorizer> colorizer;

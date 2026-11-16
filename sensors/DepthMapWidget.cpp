@@ -9,6 +9,7 @@
 
 #include <QtCore/QSettings>
 #include <QtCore/QDir>
+#include <QtCore/QList>
 #include <QtCore/QLocale>
 #include <QtCore/QRegularExpression>
 #include <QtCore/QStandardPaths>
@@ -40,6 +41,9 @@
 
 namespace
 {
+constexpr auto ColorModeKey = "depth/colorMode";
+enum ColorMode { FixedColor, DynamicColor };
+
 class ColorRangeInput final : public QDoubleSpinBox {
 public:
     using QDoubleSpinBox::QDoubleSpinBox;
@@ -184,6 +188,12 @@ DepthMapWidget::DepthMapWidget(QWidget *parent)
         if(m_session)m_session->setSplitCorrectionEnabled(enabled);
         syncSessionControls();
     });
+    m_colorMode = new QComboBox(statusRow);
+    m_colorMode->setObjectName("rvDepthColorMode");
+    m_colorMode->addItems({QString(), QString()});
+    m_colorMode->setSizeAdjustPolicy(QComboBox::AdjustToContents);
+    saveControls->addWidget(m_colorMode);
+
     m_blackOutsideRange = new QCheckBox(statusRow);
     m_blackOutsideRange->setObjectName("depthBlackOutsideRange");
     m_blackOutsideRange->setChecked(m_imageSettings->blackOutsideRange());
@@ -213,6 +223,7 @@ DepthMapWidget::DepthMapWidget(QWidget *parent)
     m_colorMaximumLabel->setBuddy(maximum);
     m_applyColorRange = new QPushButton(statusRow);
     m_applyColorRange->setObjectName("rvColorRangeApply");
+    QList<QWidget *> fixedColorControls{m_blackOutsideRange, m_applyColorRange};
     for (const auto &[label, field] : {qMakePair(m_colorMinimumLabel, minimum), qMakePair(m_colorMaximumLabel, maximum)}) {
         auto *range = new QWidget(statusRow);
         auto *pair = new QHBoxLayout(range);
@@ -221,6 +232,7 @@ DepthMapWidget::DepthMapWidget(QWidget *parent)
         pair->addWidget(label);
         pair->addWidget(field);
         saveControls->addWidget(range);
+        fixedColorControls.append(range);
     }
     saveControls->addWidget(m_applyColorRange);
     const auto validRange = [minimum, maximum] {
@@ -238,6 +250,21 @@ DepthMapWidget::DepthMapWidget(QWidget *parent)
         }
     });
     updateApply();
+
+    const auto applyColorMode = [this, fixedColorControls](int index) {
+        const bool dynamic = index == DynamicColor;
+        for (auto *control : fixedColorControls)
+            control->setVisible(!dynamic);
+        m_rvCanvas->setDynamicColoring(dynamic);
+        m_assistCanvas->setDynamicColoring(dynamic);
+    };
+    m_colorMode->setCurrentIndex(QSettings().value(ColorModeKey).toString() == "dynamic" ? DynamicColor : FixedColor);
+    applyColorMode(m_colorMode->currentIndex());
+    connect(m_colorMode, &QComboBox::currentIndexChanged, this, [applyColorMode](int index) {
+        QSettings().setValue(ColorModeKey, index == DynamicColor ? QStringLiteral("dynamic") : QStringLiteral("fixed"));
+        applyColorMode(index);
+    });
+
     auto *fpsRefresh=new QTimer(this);fpsRefresh->setInterval(250);
     connect(fpsRefresh,&QTimer::timeout,this,[this,fpsLabel]{
         double fps=0;
@@ -316,6 +343,10 @@ void DepthMapWidget::retranslateUi()
 {
     syncNativeTofRotation();
     m_sessionControlsKey.clear();
+    m_colorMode->setItemText(FixedColor, tr("Fixed color range"));
+    m_colorMode->setItemText(DynamicColor, tr("Dynamic + histogram equalization"));
+    m_colorMode->setAccessibleName(tr("Depth map color mode"));
+    m_colorMode->setItemData(DynamicColor, tr("Equalize depths from 0.10 to 10.00 m in each frame. Colors can vary across frames."), Qt::ToolTipRole);
     m_blackOutsideRange->setText(tr("Black outside range"));
     m_colorMinimumLabel->setText(tr("Minimum (m)"));
     m_colorMaximumLabel->setText(tr("Maximum (m)"));

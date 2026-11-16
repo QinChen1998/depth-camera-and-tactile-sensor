@@ -60,6 +60,7 @@ private:
     QPushButton *m_splitCorrectionButton = nullptr;
     QCheckBox *m_saveCamera = nullptr;
     QCheckBox *m_blackOutsideRange = nullptr;
+    QComboBox *m_colorMode = nullptr;
     QLabel *m_colorMinimumLabel = nullptr, *m_colorMaximumLabel = nullptr;
     QPushButton *m_applyColorRange = nullptr;
     DepthSnapshot m_snapshot;

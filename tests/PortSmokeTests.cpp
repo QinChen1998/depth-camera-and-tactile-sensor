@@ -950,9 +950,13 @@ int runPortSmokeTests(SensorMainWindow &window,LanguageManager &language,const Q
     check("CHINESE_WINDOW",window.windowTitle()==QStringLiteral("触想工作台（内测版）"));
     auto *pointCloudDock = window.findChild<QDockWidget *>("pointCloudDock");
     check("CHINESE_POINT_CLOUD_MENU", pointCloudDock && pointCloudDock->toggleViewAction()->text() == QStringLiteral("点云"));
-    const auto *colorMode = pointCloudDock ? pointCloudDock->findChild<QComboBox *>("rvPointCloudColorMode") : nullptr;
+    auto *colorMode = pointCloudDock ? pointCloudDock->findChild<QComboBox *>("rvPointCloudColorMode") : nullptr;
     check("CHINESE_POINT_CLOUD_COLOR_MODES", colorMode && colorMode->itemText(0) == QStringLiteral("固定 Z 色标")
         && colorMode->itemText(1) == QStringLiteral("动态＋直方图均衡"));
+    auto *depthColorMode = window.depth()->findChild<QComboBox *>("rvDepthColorMode");
+    check("CHINESE_DEPTH_COLOR_MODES_AND_FIXED_DEFAULT", depthColorMode && depthColorMode->count() == 2
+        && depthColorMode->currentIndex() == 0 && depthColorMode->itemText(0) == QStringLiteral("固定色标")
+        && depthColorMode->itemText(1) == QStringLiteral("动态＋直方图均衡"));
     auto *about = window.menuBar()->findChild<QAction *>("aboutAction");
     check("CHINESE_ABOUT_MENU",about && window.menuBar()->actions().contains(about)
         && about->text()==QStringLiteral("关于"));
@@ -988,8 +992,9 @@ int runPortSmokeTests(SensorMainWindow &window,LanguageManager &language,const Q
         && !window.findChild<QAction *>("rvBlackOutsideRangeAction")
         && !window.findChild<QAction *>("rvTofProjectionAction") && window.menuBar()->actions().size()==4);
     auto *blackOutside=window.findChild<QCheckBox *>("depthBlackOutsideRange");
-    check("BLACK_OUTSIDE_AT_RIGHT_OF_DEPTH_FOOTER",blackOutside&&blackOutside->isVisible()&&depthSave
-        && blackOutside->parentWidget()==depthSave->parentWidget()&&blackOutside->x()>depthSave->x()
+    check("BLACK_OUTSIDE_FOLLOWS_SAVE_IN_DEPTH_FOOTER",blackOutside&&blackOutside->isVisible()&&depthSave
+        && blackOutside->parentWidget()==depthSave->parentWidget()
+        && (blackOutside->x()>depthSave->x()||blackOutside->y()>depthSave->geometry().bottom())
         && blackOutside->text()==QString::fromUtf8("超范围黑色"));
     if(blackOutside){
         const auto settings=ImageDisplaySettings::shared();
@@ -1089,6 +1094,39 @@ int runPortSmokeTests(SensorMainWindow &window,LanguageManager &language,const Q
             &&highSnapshot.metresFloat32LE==raw&&highSnapshot.depthImage==frozen.depthImage
             &&highSnapshot.metadata["native_tof_display_mirror_horizontal"]==true);
         settle(80);window.depth()->grab().save(path+".native-tof-angle.png");
+        if (depthColorMode && colorMode && native) {
+            const int previousPointMode = colorMode->currentIndex();
+            const auto previousPointSetting = QSettings().value("pointCloud/colorMode");
+            const auto *apply = window.depth()->findChild<QPushButton *>("rvColorRangeApply");
+            depthColorMode->setCurrentIndex(1);
+            QElapsedTimer colorWait;
+            colorWait.start();
+            while (!native->hasRenderableFrame() && colorWait.elapsed() < 2000) settle(20);
+            check("DEPTH_DYNAMIC_RECOLORS_CURRENT_NATIVE_FRAME", native->hasRenderableFrame()
+                && native->colorAt(47, 31) == PointCloudColorScale::jet(1.)
+                && native->colorAt(47, 31) != highSnapshot.depthImage.pixel(47, 31));
+            check("DEPTH_DYNAMIC_HIDES_RANGE_CONTROLS", apply && apply->isHidden()
+                && blackOutside && blackOutside->isHidden());
+            check("DEPTH_COLOR_MODE_DOES_NOT_CHANGE_POINT_CLOUD", colorMode->currentIndex() == previousPointMode
+                && QSettings().value("pointCloud/colorMode") == previousPointSetting);
+            colorMode->setCurrentIndex(1);
+            colorMode->setCurrentIndex(0);
+            check("POINT_CLOUD_COLOR_MODE_DOES_NOT_CHANGE_DEPTH", depthColorMode->currentIndex() == 1
+                && QSettings().value("depth/colorMode").toString() == "dynamic"
+                && native->colorAt(47, 31) == PointCloudColorScale::jet(1.));
+            colorMode->setCurrentIndex(previousPointMode);
+            {
+                DepthMapWidget reopened;
+                const auto *reopenedMode = reopened.findChild<QComboBox *>("rvDepthColorMode");
+                check("DEPTH_COLOR_MODE_PERSISTS_ON_REOPEN", reopenedMode && reopenedMode->currentIndex() == 1);
+            }
+            const auto saved = window.depth()->snapshot();
+            check("DYNAMIC_NATIVE_DEPTH_SAVES_FIXED_PALETTE_AND_METRES", saved.metresFloat32LE == raw
+                && !saved.depthImage.isNull() && saved.depthImage == highSnapshot.depthImage);
+            depthColorMode->setCurrentIndex(0);
+            check("DEPTH_FIXED_RESTORES_RANGE_CONTROLS_AND_COLORS", apply && !apply->isHidden()
+                && blackOutside && !blackOutside->isHidden() && native->presentationImage() == highSnapshot.depthImage);
+        }
         window.depth()->clearRvDepth(QString());session->selectImagingScheme(priorScheme,{});
         check("NATIVE_ANGLE_HIDDEN_FOR_UNIDEPTH",angleButton->isHidden()&&host->displayRotationDegrees()==priorGlobal);
     }
@@ -1193,6 +1231,20 @@ int runPortSmokeTests(SensorMainWindow &window,LanguageManager &language,const Q
             .arg(0).arg(0).arg(1.5,0,'f',4).section(')',1).trimmed();
         check("OUTSIDE_FIELD_HOVER_ONE_LINE",hover.contains(predictionText)
             && !hover.contains('\n') && canvas->depthAt(width/4,height/2)==0);
+        if (depthColorMode) {
+            const auto fixed = window.depth()->snapshot();
+            depthColorMode->setCurrentIndex(1);
+            check("DEPTH_DYNAMIC_HOST_EQUALIZES_DISPLAYED_SAMPLES", canvas->colorAt(0, 0)
+                == PointCloudColorScale::jet(std::pow(.5, .65))
+                && canvas->colorAt(width - 1, 0) == PointCloudColorScale::jet(1.));
+            const auto saved = window.depth()->snapshot();
+            check("DYNAMIC_HOST_DEPTH_SAVES_MASKED_FIXED_IMAGE_AND_METRES", saved.metresFloat32LE == metres
+                && !saved.depthImage.isNull() && saved.depthImage == fixed.depthImage);
+            window.depth()->acceptAssistSnapshot(metres, metadata, {});
+            check("DEPTH_DYNAMIC_HOST_KEEPS_INVALID_DEPTH_BLACK", canvas->colorAt(0, 0) == qRgb(0, 0, 0)
+                && canvas->colorAt(width - 1, 0) == PointCloudColorScale::jet(1.));
+            depthColorMode->setCurrentIndex(0);
+        }
         window.depth()->clearAssistDepth({});
     } else {
         check("OUTSIDE_FIELD_HOVER_ONE_LINE",false);

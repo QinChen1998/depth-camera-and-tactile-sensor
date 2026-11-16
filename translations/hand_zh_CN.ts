@@ -3,6 +3,10 @@
 <TS version="2.1" language="zh_CN" sourcelanguage="en_US">
   <context>
     <name>DepthMapWidget</name>
+    <message><source>Fixed color range</source><translation>固定色标</translation></message>
+    <message><source>Dynamic + histogram equalization</source><translation>动态＋直方图均衡</translation></message>
+    <message><source>Depth map color mode</source><translation>深度图上色方式</translation></message>
+    <message><source>Equalize depths from 0.10 to 10.00 m in each frame. Colors can vary across frames.</source><translation>逐帧均衡 0.10–10.00 m 的有效深度。同一深度的颜色可能随帧变化。</translation></message>
     <message><source>Show monocular depth only</source><translation>仅显示单目深度</translation></message>
     <message><source>Restore corrected depth</source><translation>恢复校正深度</translation></message>
     <message><source>Show the same frame before ToF correction in the depth map and point cloud.</source><translation>在深度图和点云中查看同一帧的校正前单目结果。</translation></message>
