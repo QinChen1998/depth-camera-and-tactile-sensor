@@ -59,7 +59,8 @@ RvPointCloudWidget::RvPointCloudWidget(RvSessionController *session, QWidget *pa
       m_depthInstances(new SceneInstanceBuffer(this)),
       m_view(new DockableQuick3DWidget(this, {"pointInstances", "depthInstances", "depthPointDiameter", "renderSettings",
           "cameraTarget", "cameraDistance", "orbitYaw", "orbitPitch"})),
-      m_status(new QLabel(this)), m_reset(new QPushButton(this)), m_depthControls(new QWidget(this)),
+      m_status(new QLabel(this)), m_pause(new QPushButton(this)),
+      m_reset(new QPushButton(this)), m_depthControls(new QWidget(this)),
       m_legendMinimum(new QLabel(this)), m_legendMaximum(new QLabel(this)),
       m_diameterLabel(new QLabel(m_depthControls)), m_rangeLabel(new QLabel(m_depthControls)),
       m_rangeSeparator(new QLabel(m_depthControls)), m_diameter(new QDoubleSpinBox(m_depthControls)),
@@ -74,15 +75,21 @@ RvPointCloudWidget::RvPointCloudWidget(RvSessionController *session, QWidget *pa
     m_view->setResizeMode(QQuickWidget::SizeRootObjectToView);
     m_view->setClearColor(QColor("#161b22"));
     m_view->setMinimumSize(300, 190);
+    auto viewPolicy = m_view->sizePolicy();
+    viewPolicy.setRetainSizeWhenHidden(true);
+    m_view->setSizePolicy(viewPolicy);
     m_view->setInitialProperties({{"pointInstances", QVariant::fromValue(m_instances)},
         {"depthInstances", QVariant::fromValue(m_depthInstances)}, {"depthPointDiameter", m_diameter->value()},
         {"renderSettings", QVariant::fromValue(RenderingSettings::instance())}});
 
     m_status->setObjectName("rvPointCloudStatus");
     m_status->setWordWrap(true);
+    m_pause->setObjectName("rvPointCloudPause");
+    m_pause->setCheckable(true);
     m_reset->setObjectName("rvPointCloudReset");
     auto *toolbar = new QHBoxLayout;
     toolbar->addWidget(m_status, 1);
+    toolbar->addWidget(m_pause);
     toolbar->addWidget(m_reset);
     auto *layout = new QVBoxLayout(this);
     layout->setContentsMargins(8, 8, 8, 8);
@@ -121,6 +128,7 @@ RvPointCloudWidget::RvPointCloudWidget(RvSessionController *session, QWidget *pa
         if (capturesNative48(*m_session))
             presentLatest();
     });
+    connect(m_pause, &QPushButton::toggled, this, &RvPointCloudWidget::setPaused);
     connect(m_reset, &QPushButton::clicked, this, [this] {
         if (auto *scene = m_view->rootObject())
             QMetaObject::invokeMethod(scene, "resetView");
@@ -233,7 +241,7 @@ void RvPointCloudWidget::updateColorLegend()
 void RvPointCloudWidget::setRenderingActive(bool active)
 {
     m_renderingActive = active;
-    if (!active)
+    if (!active || m_pause->isChecked())
         return;
     if (m_view->source().isEmpty())
         m_view->setSource(QUrl(QStringLiteral("qrc:/qml/RvPointCloudView.qml")));
@@ -241,8 +249,23 @@ void RvPointCloudWidget::setRenderingActive(bool active)
         presentLatest();
 }
 
+void RvPointCloudWidget::setPaused(bool paused)
+{
+    m_view->setVisible(!paused);
+    if (paused) {
+        if (m_depthConverting)
+            m_depthConversion.cancel();
+        clearFrames();
+    } else {
+        setRenderingActive(m_renderingActive);
+        updateStatus();
+    }
+}
+
 void RvPointCloudWidget::acceptTofFrame(const RvTofFrame &frame)
 {
+    if (m_pause->isChecked())
+        return;
     const auto &metadata = frame.metadata;
     const double age = metadata["raw_age_ms"].toDouble(-1);
     if (!capturesNative48(*m_session) || metadata["candidate_mode"] != m_session->dtofCandidateMode()
@@ -261,7 +284,7 @@ void RvPointCloudWidget::acceptTofFrame(const RvTofFrame &frame)
 
 void RvPointCloudWidget::acceptAssistedDepth(const QByteArray &depth, const QJsonObject &metadata)
 {
-    if (!capturesAssistedDepth(*m_session))
+    if (m_pause->isChecked() || !capturesAssistedDepth(*m_session))
         return;
     const auto model = m_session->assistHostModel();
     const auto &camera = RvCameraView::outputProfile(model);
@@ -299,7 +322,7 @@ void RvPointCloudWidget::clearAssistedDepth()
 
 void RvPointCloudWidget::presentLatest()
 {
-    if (!m_renderingActive)
+    if (!m_renderingActive || m_pause->isChecked())
         return;
     if (auto *scene = m_view->rootObject()) {
         scene->setProperty("depthPointDiameter", m_diameter->value());
@@ -340,7 +363,7 @@ void RvPointCloudWidget::presentTofFrame()
 
 void RvPointCloudWidget::startDepthConversion()
 {
-    if (!m_depthDirty || m_depthConverting || !m_renderingActive || !m_view->rootObject())
+    if (!m_depthDirty || m_depthConverting || m_pause->isChecked() || !m_renderingActive || !m_view->rootObject())
         return;
 
     // Keep one conversion in flight. New frames replace the pending snapshot.
@@ -350,25 +373,27 @@ void RvPointCloudWidget::startDepthConversion()
     const auto camera = RvCameraView::outputProfile(m_session->assistHostModel());
     const double minimum = m_depthColorMinimum;
     const double maximum = m_depthColorMaximum;
-    m_depthConversion.setFuture(QtConcurrent::run([depth = m_latestDepth, camera, minimum, maximum] {
-        return projectDepth(depth, camera, minimum, maximum);
-    }));
+    m_depthConversion.setFuture(QtConcurrent::run(&RvPointCloudWidget::projectDepth, m_latestDepth,
+                                                  camera, minimum, maximum));
 }
 
 void RvPointCloudWidget::finishDepthConversion()
 {
     m_depthConverting = false;
-    if (m_conversionEpoch == m_depthEpoch) {
-        m_depthInstances->setTable(m_depthConversion.result());
+    auto future = m_depthConversion.future();
+    if (!future.isCanceled() && future.resultCount() > 0 && m_conversionEpoch == m_depthEpoch && !m_pause->isChecked()) {
+        m_depthInstances->setTable(future.takeResult());
         m_hasDepthFrame = true;
         updateStatus();
     }
     startDepthConversion();
 }
 
-QByteArray RvPointCloudWidget::projectDepth(const QByteArray &depth,
+void RvPointCloudWidget::projectDepth(QPromise<QByteArray> &work, const QByteArray &depth,
     const RvCameraView::Profile &camera, double colorMinimum, double colorMaximum)
 {
+    if (work.isCanceled())
+        return;
     QByteArray table(camera.outputWidth * camera.outputHeight * sizeof(Instance), Qt::Uninitialized);
     const char *pixel = depth.constData();
     char *output = table.data();
@@ -376,6 +401,8 @@ QByteArray RvPointCloudWidget::projectDepth(const QByteArray &depth,
     Instance point{{1, 0, 0, 0}, {0, 1, 0, 0}, {0, 0, 1, 0}, {}, {}};
     constexpr float ToColor = 1.f / 255.f;
     for (int row = 0; row < camera.outputHeight; ++row) {
+        if (work.isCanceled())
+            return;
         const double yScale = (camera.cy() - row) * scale;
         for (int column = 0; column < camera.outputWidth; ++column, pixel += sizeof(float)) {
             const auto bits = qFromLittleEndian<quint32>(pixel);
@@ -401,12 +428,15 @@ QByteArray RvPointCloudWidget::projectDepth(const QByteArray &depth,
         }
     }
     table.resize(output - table.constData());
-    return table;
+    work.addResult(std::move(table));
 }
 
 void RvPointCloudWidget::updateStatus()
 {
-    const bool ready = m_view->status() == QQuickWidget::Ready;
+    const bool paused = m_pause->isChecked();
+    const bool ready = !paused && m_view->status() == QQuickWidget::Ready;
+    m_pause->setText(paused ? tr("Resume point cloud") : tr("Stop point cloud"));
+    m_depthControls->setEnabled(!paused);
     const bool tofAvailable = m_expiry.remainingTime() > 0;
     const bool assisted = capturesAssistedDepth(*m_session);
     if (m_depthControls->isHidden() == assisted) {
@@ -415,7 +445,9 @@ void RvPointCloudWidget::updateStatus()
     }
     m_reset->setEnabled(ready && (assisted ? m_depthInstances->count() > 0 : (tofAvailable && m_instances->count() > 0)));
     QString text;
-    if (m_view->status() == QQuickWidget::Error) {
+    if (paused) {
+        text = tr("Point cloud stopped");
+    } else if (m_view->status() == QQuickWidget::Error) {
         text = tr("3D view unavailable");
     } else if (ready && assisted && m_hasDepthFrame) {
         const auto size = RvCameraView::outputProfile(m_session->assistHostModel()).outputSize();

@@ -2,6 +2,7 @@
 #include <QtWidgets/QDockWidget>
 #include "../SensorMainWindow.h"
 #include "../sensors/DepthMapWidget.h"
+#include "../sensors/MeasurementCaptureDialog.h"
 #include "../sensors/DepthColorScale.h"
 #include "../sensors/RvDepthView.h"
 #include "../sensors/RvDtofBoardStream.h"
@@ -20,6 +21,11 @@
 #include <QDateTime>
 #include <QDoubleSpinBox>
 #include <QLabel>
+#include <QLineEdit>
+#include <QDir>
+#include <QFileInfo>
+#include <QSpinBox>
+#include <QProgressBar>
 #include <QMessageBox>
 #include <QPushButton>
 #include <QQuickItem>
@@ -49,6 +55,119 @@ QJsonObject stats(QVector<double> values){
     return {{"samples",values.size()},{"mean_ms",sum/values.size()},{"p95_ms",values[int((values.size()-1)*.95)]},{"max_ms",values.last()}};
 }
 bool save(const QString &path,const QJsonObject &value){QSaveFile file(path);const auto bytes=QJsonDocument(value).toJson();return file.open(QIODevice::WriteOnly)&&file.write(bytes)==bytes.size()&&file.commit();}
+}
+
+int runMeasurementLiveValidation(SensorMainWindow &window, const QString &path)
+{
+    auto *session = window.session();
+    if (session->deviceProfile().serial != qEnvironmentVariable("DCTS_LIVE_SERIAL"))
+        return 3;
+    auto *open = window.findChild<QAction *>("measurementCaptureAction");
+    if (!open)
+        return 3;
+    open->trigger();
+    auto *dialog = window.findChild<MeasurementCaptureDialog *>("measurementCaptureDialog");
+    auto *source = window.findChild<QComboBox *>("measurementSource");
+    auto *directory = window.findChild<QLineEdit *>("measurementDirectory");
+    auto *duration = window.findChild<QSpinBox *>("measurementDuration");
+    auto *start = window.findChild<QPushButton *>("measurementStart");
+    auto *status = window.findChild<QLabel *>("measurementStatus");
+    auto *progress = window.findChild<QProgressBar *>("measurementProgress");
+    if (!dialog || !source || !directory || !duration || !start || !status || !progress)
+        return 3;
+    const QString root = QFileInfo(path).absolutePath() + "/" + QFileInfo(path).completeBaseName() + "_captures";
+    if (!QDir().mkpath(root) || !QDir(root).entryList(QDir::Dirs | QDir::NoDotAndDotDot).isEmpty())
+        return 3;
+    const auto integration = qEnvironmentVariable("DCTS_MEASUREMENT_LIVE_1200K");
+    const bool highAccuracy = integration == "high_accuracy";
+    const bool validate1200K = highAccuracy || integration == "1";
+    QString scheme = QStringLiteral("board_native_tof48");
+    if (highAccuracy) scheme = QLatin1String(RvSessionController::Native48HighAccuracy1200KScheme);
+    else if (validate1200K) scheme = QLatin1String(RvSessionController::Native48ExtendedIntegrationScheme);
+    session->selectImagingScheme(scheme, {});
+    const QStringList sources = validate1200K ? QStringList{"rv1103"} : QStringList{"rv1103", "gemini335"};
+    QJsonArray stages;
+    bool passed = true;
+    for (const auto &name : sources) {
+        const bool rv = name == "rv1103";
+        const auto output = root + "/" + name;
+        if (!QDir().mkpath(output))
+            return 3;
+        source->setCurrentIndex(source->findData(name));
+        duration->setValue(rv ? 30 : 60);
+        directory->setText(QDir::toNativeSeparators(output));
+        start->click();
+        const bool finished = waitFor([&] { return !dialog->recording(); }, (duration->value() + 55) * 1000);
+        if (!finished) {
+            dialog->stopRecording();
+            waitFor([&] { return !dialog->recording(); }, 5000);
+        }
+        const auto folders = QDir(output).entryList(QDir::Dirs | QDir::NoDotAndDotDot);
+        const auto capture = folders.size() == 1 ? QDir(output + "/" + folders.first()) : QDir(output);
+        QFile manifest(capture.filePath("session.json"));
+        QJsonObject data;
+        if (manifest.open(QIODevice::ReadOnly))
+            data = QJsonDocument::fromJson(manifest.readAll()).object();
+        const auto format = data["format"].toObject();
+        const auto frameBytes = format["frame_bytes"].toInteger();
+        const auto frames = data["frames"].toInteger();
+        const auto span = data["span_ns"].toInteger();
+        const qint64 expectedBytes = rv ? 48 * 32 * 4 : 1280 * 800 * 2;
+        const qint64 durationNs = qint64(duration->value()) * 1'000'000'000;
+        bool valid = finished && folders.size() == 1 && data["source"] == name && data["status"] == "complete"
+            && frameBytes == expectedBytes && frames > 20 && span >= durationNs && span <= durationNs + 1'000'000'000
+            && QFileInfo(capture.filePath("depth.bin")).size() == frames * frameBytes;
+        const int expectedMode = highAccuracy ? RvCaptureContract::Native48HighAccuracy : RvCaptureContract::Native48;
+        valid &= rv ? (format["candidate_mode"] == expectedMode && QFileInfo::exists(capture.filePath("geometry.bin")))
+                    : (format["device"].toString().contains("Gemini 335") && format["intrinsics"].isObject()
+                       && format["scale_mm_per_code"].toDouble() > 0);
+        if (validate1200K)
+            valid &= format["imaging_scheme"] == scheme
+                && format["sensor_readback"].toObject()["main_iterations_k"] == RvCaptureContract::Native48ExtendedIntegrationK
+                && data["sequence_gaps"] == 0;
+        QFile index(capture.filePath("frames.jsonl"));
+        qint64 count = 0, sequence = 0, previousTime = 0, firstTime = 0, gaps = 0;
+        if (index.open(QIODevice::ReadOnly)) {
+            while (!index.atEnd()) {
+                const auto item = QJsonDocument::fromJson(index.readLine()).object();
+                const auto seq = item["sequence"].toInteger();
+                const auto time = item["source_time_ns"].toInteger();
+                valid &= seq > sequence && time > previousTime && item["host_arrival_ns"].toInteger() > 0
+                    && item["offset"].toInteger(-1) == count * expectedBytes && item["bytes"].toInteger() == expectedBytes;
+                if (count)
+                    gaps += seq - sequence - 1;
+                else
+                    firstTime = time;
+                sequence = seq;
+                previousTime = time;
+                ++count;
+            }
+        }
+        valid &= count == frames && previousTime - firstTime == span && gaps == data["sequence_gaps"].toInteger(-1);
+        valid &= progress->value() == progress->maximum();
+        QFile depth(capture.filePath("depth.bin"));
+        int validPixels = 0;
+        if (depth.open(QIODevice::ReadOnly)) {
+            const auto sample = depth.read(expectedBytes);
+            const int stride = rv ? 4 : 2;
+            for (qsizetype i = 0; i + stride <= sample.size(); i += stride)
+                validPixels += qFromLittleEndian<quint16>(sample.constData() + i) > 0 && (!rv || sample[i + 3] == 1);
+        }
+        valid &= validPixels > 0;
+        if (rv) {
+            session->stop();
+            valid &= waitFor([&] { return session->userStopped() && !session->busy(); }, 15000);
+        }
+        dialog->grab().save(QDir(root).filePath(name + "_page.png"));
+        stages.append(QJsonObject{{"source", name}, {"passed", valid}, {"status", data["status"]},
+            {"detail", data["detail"]}, {"ui_status", status->text()}, {"capture", capture.absolutePath()},
+            {"frames", frames}, {"seconds", span / 1e9}, {"sequence_gaps", gaps}, {"first_valid_pixels", validPixels},
+            {"imaging_scheme", format["imaging_scheme"]}, {"candidate_mode", format["candidate_mode"]},
+            {"sensor_readback", format["sensor_readback"]}});
+        passed &= valid;
+    }
+    const bool written = save(path, {{"passed", passed}, {"stages", stages}});
+    return passed && written ? 0 : 1;
 }
 
 // Explicitly gated real GUI test. All frame products remain in memory. Only
@@ -409,9 +528,14 @@ int runImagingSwitchValidation(SensorMainWindow &window,const QString &path){
     auto *native=static_cast<RvDepthView*>(window.depth()->findChild<QWidget*>("rvNativeDepthCanvas"));
     if(!menu||!host||!native)return 3;
     const QString hostScheme=QLatin1String(RvSessionController::ReuseLatestTofImagingScheme),ordinary="board_native_tof48",high="board_native_tof48_high_accuracy";
+    const QString ordinary1200 = QLatin1String(RvSessionController::Native48ExtendedIntegrationScheme);
+    const QString high1200 = QLatin1String(RvSessionController::Native48HighAccuracy1200KScheme);
     QJsonObject report{{"passed",false},{"calibration_release",RvCalibration::Release},{"rendering","offscreen_widget_grab"}};
     QJsonArray stages;bool all=true;QString priorGeneration;
-    for(const auto &scheme:QStringList{hostScheme,ordinary,high,hostScheme,high,ordinary,hostScheme}){
+    const QStringList schemes{hostScheme, ordinary, ordinary1200, high, high1200, hostScheme, high1200, high, ordinary, hostScheme};
+    for(const auto &scheme:schemes){
+        const bool extended = scheme == ordinary1200 || scheme == high1200;
+        const int nativeSensorMode = scheme == ordinary || scheme == ordinary1200 ? 11 : 12;
         QObject scope;int frames=0,painted=0,videos=0,rawFrames=0,filledPoints=0;bool invalid=false,measuring=false;
         QByteArray rawDepth;QJsonObject last,rawMeta;QString generation;double maxDelta=0;
         auto *canvas=scheme==hostScheme?host:native;
@@ -435,7 +559,10 @@ int runImagingSwitchValidation(SensorMainWindow &window,const QString &path){
             if(scheme!=hostScheme){
                 invalid|=session->assistDepthEnabled()||m["tof_sequence"]!=rawMeta["tof_sequence"]
                     ||m["depth_unit"]!="sensor_radial_m_float32"||m["native_order"]!=true
-                    ||m["sensor_mode"]!=(scheme==ordinary?11:12);
+                    ||m["sensor_mode"]!=nativeSensorMode;
+                if (extended)
+                    invalid |= rawMeta["tof_sensor_readback"].toObject()["main_iterations_k"]
+                        != RvCaptureContract::Native48ExtendedIntegrationK;
                 const auto indices=m["native_hole_fill_indices"].toArray();
                 auto restored=bytes;
                 for(const auto index:indices){
@@ -485,7 +612,7 @@ int runImagingSwitchValidation(SensorMainWindow &window,const QString &path){
     QObject::connect(session,&RvSessionController::depthFrameReady,&stopScope,[&]{++late;});
     QObject::connect(session,&RvSessionController::assistDepthSnapshotReady,&stopScope,[&]{++late;});
     session->stop();const bool stopped=waitFor([&]{return !session->busy();},35000);waitFor([]{return false;},1500);
-    report["normal_stop"]=stopped;report["late_depth_results"]=late;report["passed"]=all&&stages.size()==7&&stopped&&late==0;
+    report["normal_stop"]=stopped;report["late_depth_results"]=late;report["passed"]=all&&stages.size()==schemes.size()&&stopped&&late==0;
     save(path,report);window.close();return report["passed"].toBool()?0:2;
 }
 

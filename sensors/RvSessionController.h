@@ -72,6 +72,9 @@ public:
     quint64 presentationEpoch() const {return m_presentationEpoch;}
     bool assistDepthEnabled() const;
     bool hostHdAssist() const {return m_hostAssistSelected&&m_dtofMode==RvDtofCandidates::Native48&&m_config.cameraWidth==2304;}
+    static constexpr char Native48ExtendedIntegrationScheme[]="board_native_tof48_1200k";
+    static constexpr char Native48HighAccuracy1200KScheme[]="board_native_tof48_high_accuracy_1200k";
+    bool native48ExtendedIntegration() const { return m_native48ExtendedIntegration; }
     int assistInputRotationDegrees() const;
     QString assistHostModel() const;
     QString currentImagingScheme() const;
@@ -197,6 +200,7 @@ private:
     AutomaticConnectionStage m_automaticConnectionStage = AutomaticConnectionStage::Idle;
     quint64 m_stopRevision=0;
     int m_dtofMode=-1;
+    bool m_native48ExtendedIntegration=false;
     RvDtofCandidates::Settings m_dtofSettings;
     QString m_dtofOptions,m_dtofToken;
     QJsonObject m_dtofReceipt;

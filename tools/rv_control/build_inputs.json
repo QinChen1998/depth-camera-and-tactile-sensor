@@ -3,9 +3,9 @@
   "version": "1.1.7",
   "description": "Pinned F6 native capture and bootstrap binaries.",
   "files": {
-    "tools/rv_capture/native/payload/native-fov6.bin": "5e569e5882491ce1e887afe9b55c3cdaed7c15597fd4b4031493981f0745a029",
+    "tools/rv_capture/native/payload/native-fov6.bin": "54b6594d35717e46df9fdb0f07d429dab52ceddd28a05085967cdf46577d1bd0",
     "tools/rv_control/bootstrap/depth_status": "53f228cb025b25b2dcf2e548d482f8a952563e349ce2b4d514090be09610fc46",
     "tools/rv_control/bootstrap/no_route_monitor.so": "0b6878aec5c17caadda53f3c4305f89a9cead84c4d4a80fd7682a568e295fb63",
-    "tools/rv_control/bootstrap/tof_driver": "f272722063a8d5f123c9b6dcc933e1836cc87323b8d7ff1e4164af6e83d14d23"
+    "tools/rv_control/bootstrap/tof_driver": "6c9c56d1ff1746aa807ae5b18c1023066177f543b8f3bbfe1de7f83f7fcdc341"
   }
 }

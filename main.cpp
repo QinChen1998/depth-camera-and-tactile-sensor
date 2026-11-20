@@ -31,6 +31,7 @@ int runRvTunerTests(const QString &);
 int runLiveValidation(SensorMainWindow &,const QString &,int);
 int runImagingSwitchValidation(SensorMainWindow&,const QString&);
 int runPointCloudLiveValidation(SensorMainWindow &, const QString &);
+int runMeasurementLiveValidation(SensorMainWindow &, const QString &);
 int runHostAssistLiveValidation(SensorMainWindow &,const QString &);
 int runHostThermalLiveValidation(SensorMainWindow &,const QString &);
 int runUsbEnrollmentLiveValidation(SensorMainWindow &,const QString &);
@@ -120,7 +121,8 @@ int main(int argc,char **argv)
     const bool usbEnrollmentLive=flag=="--usb-enrollment-live-validation";
     const bool imagingSwitchLive=flag=="--imaging-switch-validation";
     const bool pointCloudLive=flag=="--point-cloud-live-validation";
-    const bool live=usbEnrollmentLive||hostAssistLive||hostThermalLive||imagingSwitchLive||pointCloudLive||flag=="--live-validation";
+    const bool measurementLive=flag=="--measurement-live-validation";
+    const bool live=usbEnrollmentLive||hostAssistLive||hostThermalLive||imagingSwitchLive||pointCloudLive||measurementLive||flag=="--live-validation";
     if(live&&(qEnvironmentVariable("DCTS_LIVE_ENABLE")!="1"||qEnvironmentVariable("DCTS_LIVE_SERIAL").isEmpty()
         ||(!usbEnrollmentLive&&!hostAssistLive&&!hostThermalLive&&qEnvironmentVariable("DCTS_ALLOW_SAVED_TOF_SWITCH")!="1")||qEnvironmentVariable("RV_TEST_OFFLINE_ONLY")=="1")){
         qWarning("Live validation requires explicit enablement, a device identity, and the applicable mode-switch authorization.");
@@ -192,6 +194,7 @@ int main(int argc,char **argv)
     if(hostThermalLive)return runHostThermalLiveValidation(window,report);
     if(imagingSwitchLive)return runImagingSwitchValidation(window,report);
     if(pointCloudLive)return runPointCloudLiveValidation(window,report);
+    if(measurementLive)return runMeasurementLiveValidation(window,report);
     if(live)return runLiveValidation(window,report,300);
     if(flag=="--port-ui-smoke-test"){
         const int result=runPortSmokeTests(window,language,report);

@@ -57,6 +57,18 @@ class HostCapturePresets(unittest.TestCase):
                 self.assertEqual(result.returncode, 2)
                 self.assertEqual(result.stdout, '')
 
+    def test_native48_1200k_changes_only_main_integration_from_the_native_preset(self):
+        saved = ['-m', '-d', '5', '-p', '91', '-i', '600', '-s', '100', '-r', '6', '-g', '-n']
+        for mode in (24, 25):
+            ordinary = self.run_preset(mode, saved, 48)
+            extended = self.run_preset(mode, saved, '48-1200')
+            self.assertEqual(ordinary.returncode, 0, ordinary.stderr)
+            self.assertEqual(extended.returncode, 0, extended.stderr)
+            expected = ordinary.stdout.splitlines()
+            expected[expected.index('-i') + 1] = '1200'
+            self.assertEqual(extended.stdout.splitlines(), expected)
+        self.assertEqual(self.run_preset(14, saved, '48-1200').returncode, 2)
+
     def test_incomplete_numeric_override_is_refused(self):
         for flag in ('-d', '-o', '-t'):
             result = self.run_preset(14, ['-m', flag])

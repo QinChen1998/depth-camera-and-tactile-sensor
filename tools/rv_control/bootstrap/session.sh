@@ -102,6 +102,14 @@ CANONICAL_RUN_ID="dtof_$2" CANONICAL_WARNING_POLICY=observe-0x08 launch_tof "$1"
 producer=$!;producer_born=$(sed 's/.*) //' /proc/$producer/stat | awk '{print $20}')
 sleep 5
 same "$producer" "$producer_born" || { sensor_fault; exit 2; }
+if [ "${DCTS_DTOF_PRESET:-}" = 48-1200 ]; then
+ if ! grep -q "\"run_id\":\"dtof_$2\"" "$TMF_HOST_READBACK.calibration.json" ||
+    ! grep -Eq '"iterations"[[:space:]]*:[[:space:]]*1200[[:space:]]*[,}]' "$TMF_HOST_READBACK"; then
+  echo 'TMF8829 did not confirm 1200K main integration for this session' >&2
+  sensor_fault
+  exit 2
+ fi
+fi
 rm -f "$state/server.log.0" "$state/server.log.1"
 mkfifo "$hd_runtime/server.pipe"
 awk -v base="$state/server.log" -f /root/r144_depth/bounded_log.awk < "$hd_runtime/server.pipe" &

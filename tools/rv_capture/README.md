@@ -1,6 +1,6 @@
 # RV1103 原生采集与构建
 
-「上位机辅助推理」和「板端推理」使用 mode24 的 48×32 普通 ToF。「板端推理高精度」使用 mode25 的 48×32 高精度 ToF。mode14 提供工程用 Native16。会话为单目标，关闭 Signal 和 Noise，周期、SNR 和积分沿用保存值。
+「上位机辅助推理」和「板端推理」使用 mode24 的 48×32 普通 ToF。「板端推理高精度」使用 mode25 的 48×32 高精度 ToF。mode14 提供工程用 Native16。会话为单目标，关闭 Signal 和 Noise，周期、SNR 和积分沿用保存值。普通和高精度另有 1200K 档，仅覆盖当前会话的主积分。
 
 `bash tools/rv_capture/build.sh /absolute/new-output` 使用 `RV1103_CROSS_PREFIX` 指定的 ARM 工具链，默认位于 `/opt/rv1103-sdk/`。输出目录必须不存在，生成的 `native-fov6.bin` 与 F6 标定和 `tools/rv_control/build_inputs.json` 的 SHA256 配套。
 
@@ -10,4 +10,6 @@
 
 TMF8829 驱动通过 [prepare_spi_driver.py](../rv_control/prepare_spi_driver.py) 复制厂商源码后应用 F6 配置和 SPI 时钟修复。修复使用 SPI 结果头传输的单调时间估计传感器时钟，按完整帧锁定校正值。补丁和估计器位于本地的 `common/`。运行脚本生成的 `build.sh` 可交叉编译 `tof_driver` 并执行 FOV 和时钟回归。将验证过的驱动放在 `tools/rv_control/bootstrap/tof_driver` 后，重新构建桌面程序会同步更新板端载荷摘要。
 
-本次修复对应的 `tof_driver` SHA-256 为 `f272722063a8d5f123c9b6dcc933e1836cc87323b8d7ff1e4164af6e83d14d23`。
+产品采集和工程调参使用 `observe-0x08`。有效位 `0x01` 可以与提示位 `0x08`、`0x10` 单独或同时出现，原始状态与提示字段必须一致。`0x19` 的提示字段为 `0x18`，随测量保留。含 `0x20`、`0x40`、`0x80` 或其他未知位的状态仍会被拒绝。
+
+当前 `tof_driver` SHA-256 为 `6c9c56d1ff1746aa807ae5b18c1023066177f543b8f3bbfe1de7f83f7fcdc341`。

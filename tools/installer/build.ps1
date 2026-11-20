@@ -25,7 +25,13 @@ $payload=Join-Path $work 'payload'
 $exe='触想工作台.exe'
 $desktopFiles=@($exe,'DctsInferenceWorker.exe')
 $imagingSchemes=(Get-Content -LiteralPath (Join-Path $project 'DCTS_APP.json') -Raw | ConvertFrom-Json).imaging_schemes
-$expectedImagingSchemes='host_unidepth_rgb672_vga_fp16_tof48_b','board_native_tof48','board_native_tof48_high_accuracy'
+$expectedImagingSchemes=@(
+    'host_unidepth_rgb672_vga_fp16_tof48_b'
+    'board_native_tof48'
+    'board_native_tof48_1200k'
+    'board_native_tof48_high_accuracy'
+    'board_native_tof48_high_accuracy_1200k'
+)
 if(($imagingSchemes -join ',') -cne ($expectedImagingSchemes -join ',')){throw 'Unsupported desktop imaging menu.'}
 $desktopReceipt=Join-Path $work 'desktop-imaging.json'
 

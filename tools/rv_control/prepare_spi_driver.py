@@ -85,7 +85,7 @@ def prepare(source, output):
     (output / 'provenance.json').write_text(json.dumps({
         'vendor_source_sha256': hashes, 'changes': ['explicit per-session software ray-table selection',
         'actual sensor FOV retained in verified readback',
-        'atomic generation-bound calibration receipt before publishing', 'existing exact warning policy retained',
+        'atomic generation-bound calibration receipt before publishing', 'combined 0x08 and 0x10 allowed in observe mode',
         'SPI result-header timing and shared clock correction for both subframes'],
         'spi_clock_fix_sha256': {p.name: hashlib.sha256(p.read_bytes()).hexdigest()
                                  for p in (clock_patch, clock_header)},

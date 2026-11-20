@@ -6,12 +6,16 @@
 #include "../UiStyle.h"
 #include <QtCore/QCoreApplication>
 #include <QtCore/QDateTime>
+#include <QtCore/QDir>
 #include <QtCore/QFile>
+#include <QtCore/QFileInfo>
+#include <QtCore/QJsonArray>
 #include <QtCore/QJsonDocument>
 #include <QtCore/QProcess>
 #include <QtCore/QRegularExpression>
 #include <QtCore/QSaveFile>
 #include <QtCore/QSettings>
+#include <QtCore/QStandardPaths>
 #include <QtCore/QTimer>
 #include <QtCore/QUuid>
 #include <QtWidgets/QCheckBox>
@@ -100,7 +104,10 @@ RvDeviceManagerDialog::RvDeviceManagerDialog(RvSessionController *session,QWidge
     layout->addWidget(actions);
     m_save=new QPushButton(tr("Save device"),actions);m_save->setObjectName("rvDeviceSave");m_verify=new QPushButton(tr("Verify connection"),actions);m_verify->setObjectName("rvDeviceVerify");m_forget=new QPushButton(tr("Clear saved login"),actions);m_forget->setObjectName("rvDeviceForget");
     m_installCapture=new QPushButton(tr("Install board capture support..."),actions);m_installCapture->setObjectName("rvDeviceInstallCapture");
-    for(auto *b:{m_save,m_verify,m_installCapture,m_forget}){bottom->addWidget(b);m_actions.append(b);}
+    m_maintainCapture=new QPushButton(tr("Maintain board files"),actions);
+    m_maintainCapture->setObjectName("rvDeviceMaintainCapture");
+    m_maintainCapture->setToolTip(tr("Check the capture files against the deployment list. Replace changed or extra runtime files and archive older rollback copies on this computer."));
+    for(auto *b:{m_save,m_verify,m_installCapture,m_maintainCapture,m_forget}){bottom->addWidget(b);m_actions.append(b);}
     auto *close=new QDialogButtonBox(QDialogButtonBox::Close,actions);
     auto *closeButton=close->button(QDialogButtonBox::Close);
     closeButton->setText(tr("Close"));closeButton->setObjectName("rvDeviceClose");
@@ -109,7 +116,8 @@ RvDeviceManagerDialog::RvDeviceManagerDialog(RvSessionController *session,QWidge
     connect(m_save,&QPushButton::clicked,this,[this]{save();});connect(m_probe,&QPushButton::clicked,this,[this]{runWorker("--inspect-host");});
     connect(m_readSerial,&QPushButton::clicked,this,[this]{readDeviceInformation();});
     connect(m_verify,&QPushButton::clicked,this,[this]{runWorker("--verify-device");});
-    connect(m_installCapture,&QPushButton::clicked,this,[this]{installCaptureRuntime();});
+    connect(m_installCapture,&QPushButton::clicked,this,[this]{prepareCaptureRuntime("--install-capture-runtime");});
+    connect(m_maintainCapture,&QPushButton::clicked,this,[this]{prepareCaptureRuntime("--maintain-capture-runtime");});
     connect(m_forget,&QPushButton::clicked,this,[this]{if(QMessageBox::question(this,tr("Clear saved login"),tr("Remove the saved Windows login for this device? The next connection will ask for its password."))==QMessageBox::Yes)runWorker("--forget-device-credentials");});
     const auto changed=[this]{m_confirm->setChecked(false);updateFingerprint();};
     for(auto *f:{m_name,m_host,m_serial,m_key,m_username})connect(f,&QLineEdit::textEdited,this,changed);
@@ -249,7 +257,8 @@ void RvDeviceManagerDialog::acceptWorkerResult(const QJsonObject &result){
         else if(model=="runtime_missing")message(tr("Verified %1. The board capture runtime is incomplete.").arg(p.name),true);
         else if(model=="ready")message(tr("Verified %1. Native capture and automatic dToF are ready.").arg(p.name));
         else message(tr("Verified %1. Board capture status is unavailable.").arg(p.name),true);
-    }else if(m_operation=="--install-capture-runtime"){
+    }else if(m_operation=="--install-capture-runtime"||m_operation=="--maintain-capture-runtime"){
+        const bool maintenance=m_operation=="--maintain-capture-runtime";
         const auto p=RvDeviceProfile::fromJson(result["trusted_device"].toObject());
         m_store->reload();
         if(result["automatic_tof"]!="ready"||p.id!=m_id||m_store->byId(m_id).json()!=p.json())
@@ -257,6 +266,19 @@ void RvDeviceManagerDialog::acceptWorkerResult(const QJsonObject &result){
         m_operation.clear();
         const auto model=result["capture_runtime"].toString();
         if(model!="ready")throw std::runtime_error("Native capture support installation was not verified");
+        if (maintenance) {
+            const int archived=result["archived_rollbacks"].toInt();
+            const auto archives=result["archives"].toArray();
+            auto detail=(result["runtime_replaced"].toBool()
+                ? tr("Board files were updated and verified on %1.")
+                : tr("Board files match the deployment list on %1.")).arg(p.name);
+            if (archived > 0 && !archives.isEmpty()) {
+                const auto directory=QFileInfo(archives.first().toString()).absolutePath();
+                detail += " " + tr("Archived %1 rollback copies to %2.").arg(archived).arg(QDir::toNativeSeparators(directory));
+            }
+            message(detail);
+            return;
+        }
         if (m_resumeImaging && m_session && m_session->userStopped() && !m_session->busy()
             && m_session->deviceProfile().json()==p.json()) {
             m_resumeImaging=false;
@@ -290,10 +312,11 @@ void RvDeviceManagerDialog::showBoardImportFailure(const QString &reason,const Q
 
 void RvDeviceManagerDialog::operationFailed(const QString &reason,int code){
     const bool serialRead=m_readingSerial||m_operation=="--read-device-serial";
-    const bool boardImport=m_operation=="--install-capture-runtime";
+    const bool maintenance=m_operation=="--maintain-capture-runtime";
+    const bool boardImport=m_operation=="--install-capture-runtime"||maintenance;
     m_readingSerial=false;m_operation.clear();
     if (boardImport) {
-        showBoardImportFailure(reason,m_workerFailure.isEmpty() ? "board_import" : "worker_failure",code);
+        showBoardImportFailure(reason,m_workerFailure.isEmpty() ? (maintenance ? "board_maintenance" : "board_import") : "worker_failure",code);
         m_resumeImaging=false;
         return;
     }
@@ -317,7 +340,7 @@ void RvDeviceManagerDialog::updateFingerprint(){
     catch(...){m_fingerprint->setText(tr("Enter a complete Ed25519 public key"));}
 }
 void RvDeviceManagerDialog::message(const QString &text,bool error){m_status->setText(UiStyle::depthErrorText(QCoreApplication::translate("RvDeviceManagerDialog",text.toUtf8().constData())));m_status->setStyleSheet(error?"color: #c64a42;":"");}
-void RvDeviceManagerDialog::busy(bool value){for(auto *b:m_actions)b->setEnabled(!value&&(bool(m_store)||b->objectName()=="rvDeviceReload"));m_table->setEnabled(!value&&bool(m_store));m_details->setEnabled(!value&&bool(m_store));for(auto *b:{m_verify,m_forget,m_use,m_remove,m_installCapture})b->setEnabled(!value&&bool(m_store)&&!m_fresh);}
+void RvDeviceManagerDialog::busy(bool value){for(auto *b:m_actions)b->setEnabled(!value&&(bool(m_store)||b->objectName()=="rvDeviceReload"));m_table->setEnabled(!value&&bool(m_store));m_details->setEnabled(!value&&bool(m_store));for(auto *b:{m_verify,m_forget,m_use,m_remove,m_installCapture,m_maintainCapture})b->setEnabled(!value&&bool(m_store)&&!m_fresh);}
 void RvDeviceManagerDialog::reload(){try{m_store=std::make_unique<RvDeviceStore>(m_session?m_session->deviceStorePath():RvDeviceStore::defaultPath());busy(false);refresh(m_store->activeId());message(tr("Select a device or add a new one."));}catch(const std::exception&e){m_store.reset();busy(false);message(QString::fromUtf8(e.what()),true);}}
 void RvDeviceManagerDialog::refresh(const QString &id){
     m_table->blockSignals(true);m_table->setRowCount(0);int selected=-1;
@@ -326,7 +349,7 @@ void RvDeviceManagerDialog::refresh(const QString &id){
     m_table->blockSignals(false);m_active->setText(m_store->activeId().isEmpty()?tr("No active device"):tr("Active device: %1").arg(m_session&& !m_session->userStopped()?m_session->deviceProfile().name:m_store->active().name));
     if(selected>=0)m_table->selectRow(selected);else if(m_table->rowCount())m_table->selectRow(0);else{RvDeviceProfile p;p.id=QUuid::createUuid().toString(QUuid::Id128);p.host="172.32.0.93";edit(p,true);}
 }
-void RvDeviceManagerDialog::edit(const RvDeviceProfile &p,bool fresh){m_fresh=false;m_readingSerial=false;m_operation.clear();m_serialHelp->hide();m_serial->setReadOnly(true);m_serial->setPlaceholderText(tr("Read automatically when connecting"));m_savedFingerprint=fresh?QString():p.fingerprint();m_id=p.id;m_name->setText(p.name);m_host->setText(p.host);m_port->setValue(p.sshPort);m_serial->setText(p.serial);m_username->setText(p.username);m_key->setText(p.publicKey.isEmpty()?QString():"ssh-ed25519 "+p.publicKey);m_rotation->setCurrentIndex(m_rotation->findData(RvSessionController::effectiveHostInputRotation(p)));m_legacyCameraMountRotation=p.cameraMountRotation;m_legacy->setChecked(p.legacyCoordinator);m_confirm->setChecked(false);m_fingerprint->setText(fresh?tr("Connect via USB to read the public key automatically."):p.fingerprint());m_verify->setEnabled(!fresh);m_forget->setEnabled(!fresh);m_use->setEnabled(!fresh);m_remove->setEnabled(!fresh);m_installCapture->setEnabled(!fresh);m_fresh=fresh;}
+void RvDeviceManagerDialog::edit(const RvDeviceProfile &p,bool fresh){m_fresh=false;m_readingSerial=false;m_operation.clear();m_serialHelp->hide();m_serial->setReadOnly(true);m_serial->setPlaceholderText(tr("Read automatically when connecting"));m_savedFingerprint=fresh?QString():p.fingerprint();m_id=p.id;m_name->setText(p.name);m_host->setText(p.host);m_port->setValue(p.sshPort);m_serial->setText(p.serial);m_username->setText(p.username);m_key->setText(p.publicKey.isEmpty()?QString():"ssh-ed25519 "+p.publicKey);m_rotation->setCurrentIndex(m_rotation->findData(RvSessionController::effectiveHostInputRotation(p)));m_legacyCameraMountRotation=p.cameraMountRotation;m_legacy->setChecked(p.legacyCoordinator);m_confirm->setChecked(false);m_fingerprint->setText(fresh?tr("Connect via USB to read the public key automatically."):p.fingerprint());m_verify->setEnabled(!fresh);m_forget->setEnabled(!fresh);m_use->setEnabled(!fresh);m_remove->setEnabled(!fresh);m_installCapture->setEnabled(!fresh);m_maintainCapture->setEnabled(!fresh);m_fresh=fresh;}
 RvDeviceProfile RvDeviceManagerDialog::draft() const {RvDeviceProfile p;p.id=m_id;p.name=m_name->text().trimmed();p.host=m_host->text().trimmed();p.sshPort=m_port->value();p.serial=m_serial->text().trimmed().toLower();p.username=m_username->text().trimmed();p.publicKey=m_key->text().trimmed();if(p.publicKey.startsWith("ssh-ed25519 "))p.publicKey=p.publicKey.mid(12).trimmed();p.calibration=QLatin1String(RvCalibration::Id);p.inputRotation=m_rotation->currentData().toInt();p.cameraMountRotation=m_legacyCameraMountRotation;p.legacyCoordinator=m_legacy->isChecked();p.temporaryFovCalibration=false;p.validate();return p;}
 void RvDeviceManagerDialog::save(){if(m_session&&m_session->tuner()->shutdownPending()){message(tr("Stop dToF tuning before changing trusted devices."),true);return;}if(m_serial->text().isEmpty()&&m_serial->isReadOnly()){readDeviceInformation();return;}try{auto p=draft();auto list=m_store->profiles();int index=-1;for(int i=0;i<list.size();++i)if(list[i].id==p.id)index=i;
     bool trustChanged=index<0;if(index>=0){const auto &old=list[index];trustChanged=old.publicKey!=p.publicKey||old.serial!=p.serial||old.calibration!=p.calibration||old.inputRotation!=p.inputRotation||old.cameraMountRotation!=p.cameraMountRotation||old.legacyCoordinator!=p.legacyCoordinator||old.temporaryFovCalibration!=p.temporaryFovCalibration;p.lastConnected=trustChanged?QString():old.lastConnected;}
@@ -352,32 +375,39 @@ void RvDeviceManagerDialog::importBoardFilesForStart(const RvDeviceProfile &devi
         if (m_store->byId(device.id).json()!=device.json())
             throw std::runtime_error("Device profile changed before import");
         refresh(device.id);
-        installCaptureRuntime(true);
+        prepareCaptureRuntime("--install-capture-runtime",true);
     } catch (const std::exception &error) {
         showBoardImportFailure(QString::fromUtf8(error.what()),"profile_check",-1);
     }
 }
 
-void RvDeviceManagerDialog::installCaptureRuntime(bool confirmed)
+void RvDeviceManagerDialog::prepareCaptureRuntime(const QString &operation, bool resumeImaging)
 {
     if (!m_store || m_fresh || m_worker->state()!=QProcess::NotRunning) return;
     if (qEnvironmentVariable("RV_TEST_OFFLINE_ONLY")=="1") {
-        message(tr("Board capture installation is unavailable in offline mode."),true);
+        message(operation=="--maintain-capture-runtime" ? tr("Board file maintenance is unavailable in offline mode.")
+            : tr("Board capture installation is unavailable in offline mode."),true);
         return;
     }
     if (m_session && (!m_session->userStopped() || m_session->busy() || m_session->tuner()->shutdownPending())) {
         message(tr("Stop imaging before importing board files."),true);
         return;
     }
-    m_resumeImaging=confirmed;
-    runWorker("--install-capture-runtime");
+    m_resumeImaging=resumeImaging;
+    runWorker(operation);
 }
 void RvDeviceManagerDialog::runWorker(const QString &operation){if(operation=="--forget-device-credentials"&&m_session&&m_session->tuner()->shutdownPending()){message(tr("Stop dToF tuning before changing trusted devices."),true);return;}
-    if (operation=="--install-capture-runtime") {
+    const bool maintenance=operation=="--maintain-capture-runtime";
+    if (operation=="--install-capture-runtime"||maintenance) {
         m_operation=operation;
         m_workerFailure.clear();
     }
     try{const auto worker=RuntimeDiscovery::rvControlForLaunch();if(!worker.error.isEmpty())throw std::runtime_error(worker.error.toStdString());QStringList args{operation};
+    if (maintenance) {
+        const auto local=QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation);
+        if (local.isEmpty()) throw std::runtime_error("Local board archive directory is unavailable");
+        args << QDir(local).filePath("DctsBoardArchives/rv1103");
+    }
     if(operation=="--inspect-host"){
         m_probeId=m_id;m_probeHost=m_host->text().trimmed();m_probePort=m_port->value();m_probeUsername=m_username->text().trimmed();
         if(!RvDeviceStore::validHost(m_probeHost))throw std::runtime_error("Invalid device address");args<<m_probeHost<<QString::number(m_probePort);
@@ -397,5 +427,5 @@ void RvDeviceManagerDialog::runWorker(const QString &operation){if(operation=="-
         }
         args<<"--device-store"<<m_store->path()<<"--device-revision"<<m_store->revision()<<"--device-id"<<p.id;
     }
-    m_operation=operation;m_workerFailure.clear();m_worker->setProcessEnvironment(RuntimeDiscovery::nativeWorkerEnvironment(worker.executable));m_worker->setProgram(worker.executable);m_worker->setArguments(args);busy(true);message(operation=="--read-device-serial"?tr("Log in with the usual device password to read its serial..."):tr("Working..."));m_worker->start();m_timeout->start(operation=="--read-device-serial"?180000:60000);
+    m_operation=operation;m_workerFailure.clear();m_worker->setProcessEnvironment(RuntimeDiscovery::nativeWorkerEnvironment(worker.executable));m_worker->setProgram(worker.executable);m_worker->setArguments(args);busy(true);message(operation=="--read-device-serial"?tr("Log in with the usual device password to read its serial..."):tr("Working..."));m_worker->start();m_timeout->start(maintenance?300000:operation=="--read-device-serial"?180000:60000);
 }catch(const std::exception&e){busy(false);operationFailed(QString::fromUtf8(e.what()));}}

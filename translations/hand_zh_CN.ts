@@ -643,6 +643,14 @@
       <source>H uses global scale at RGB cadence and may reuse the newest dToF measurement within 100 ms. Reuse is labeled; it is not a new measurement. Without a valid pair, only the historical scale is retained.</source>
       <translation>H 按 RGB 节奏做全局尺度校正，允许复用配对时间差 100 ms 内最新的 dToF 测量。界面标注复用，不视为新测量；没有有效配对时仅沿用历史尺度。</translation>
     </message>
+    <message><source>Board inference (1200K)</source><translation>板端推理（1200K）</translation></message>
+    <message><source>Ordinary 48×32 ToF with 1200K main integration.</source><translation>48×32 普通 ToF，主积分为 1200K。</translation></message>
+    <message><source>Board inference high accuracy (1200K)</source><translation>板端推理高精度（1200K）</translation></message>
+    <message><source>High-accuracy 48×32 ToF with 1200K main integration.</source><translation>48×32 高精度 ToF，主积分为 1200K。</translation></message>
+    <message>
+    <source>Select the imaging scheme for the shared depth and camera session.</source>
+    <translation>选择深度图和原视频共享会话的成像方案。</translation>
+  </message>
 </context>
   <context>
     <name>ImagePresentation</name>
@@ -1523,6 +1531,7 @@ Projected camera-Z %8 m</source>
     <translation>板端采集运行文件不完整。</translation>
   </message>
     <message><source>Metric depth unavailable: waiting for reliable dToF correction</source><translation>米制深度暂不可用，等待可靠的 ToF 校正</translation></message>
+    <message><source>The sensor did not confirm 1200K main integration.</source><translation>传感器未确认主积分为 1200K。</translation></message>
 </context>
   <context>
     <name>TactileView</name>
@@ -2707,6 +2716,30 @@ New: %2</source>
     <source>Verified %1. The existing board capture runtime checksum differs.</source>
     <translation>已验证 %1。板端采集运行文件的校验值不匹配。</translation>
   </message>
+  <message>
+    <source>Maintain board files</source>
+    <translation>维护板端文件</translation>
+  </message>
+  <message>
+    <source>Check the capture files against the deployment list. Replace changed or extra runtime files and archive older rollback copies on this computer.</source>
+    <translation>按部署清单核对采集文件。发现变更或多余文件时更新板端运行目录，并将旧回滚副本归档到本机。</translation>
+  </message>
+  <message>
+    <source>Board file maintenance is unavailable in offline mode.</source>
+    <translation>离线模式无法维护板端文件。</translation>
+  </message>
+  <message>
+    <source>Board files were updated and verified on %1.</source>
+    <translation>已更新并核验 %1 上的板端文件。</translation>
+  </message>
+  <message>
+    <source>Board files match the deployment list on %1.</source>
+    <translation>%1 上的板端文件符合部署清单。</translation>
+  </message>
+  <message>
+    <source>Archived %1 rollback copies to %2.</source>
+    <translation>已将 %1 份回滚副本归档至 %2。</translation>
+  </message>
 </context>
   <context>
     <name>RvTunerWidget</name>
@@ -3145,6 +3178,9 @@ Range %6 mm (radial) | SNR %7 | slot %8 | Signal %9 | Noise encoded %10</source>
       <source>Waiting for a fresh 48×32 ToF frame...</source>
       <translation>等待新的 48×32 ToF 帧…</translation>
     </message>
+    <message><source>Stop point cloud</source><translation>停止点云</translation></message>
+    <message><source>Resume point cloud</source><translation>恢复点云</translation></message>
+    <message><source>Point cloud stopped</source><translation>点云已停止</translation></message>
   </context>
   <context>
     <name>SensorMainWindow</name>
@@ -3286,6 +3322,10 @@ Range %6 mm (radial) | SNR %7 | slot %8 | Signal %9 | Noise encoded %10</source>
   </message>
     <message><source>Inference Device...</source><translation>推理设备…</translation></message>
     <message><source>Open Settings &gt; Inference Device to detect usable devices, then click Start again.</source><translation>请在“设置 → 推理设备”中检测可用设备，然后重新点击开始。</translation></message>
+    <message>
+      <source>Measurement Capture...</source>
+      <translation>测量采集…</translation>
+    </message>
 </context>
   <context>
     <name>RvUsbEnrollment</name>
@@ -3494,4 +3534,113 @@ SSH 指纹：%2
     <message><source>Mixed INT8 trades some depth accuracy for speed. Local testing found 1.34% mean output difference from the original model, with larger differences in some scenes. Verify it for your application.</source><translation>混合 INT8 以部分深度精度换取速度。本地测试与原模型的平均输出差异为 1.34%，部分场景差异更大，请按实际用途验证。</translation></message>
     <message><source>The benchmark estimates model FPS and pauses host depth inference while it runs.</source><translation>测速估算模型帧率，期间会暂停上位机深度推理。</translation></message>
 </context>
+  <context>
+    <name>MeasurementCaptureDialog</name>
+    <message>
+      <source>Measurement Capture</source>
+      <translation>测量采集</translation>
+    </message>
+    <message>
+      <source>Device</source>
+      <translation>采集设备</translation>
+    </message>
+    <message>
+      <source>Duration</source>
+      <translation>录制时长</translation>
+    </message>
+    <message>
+      <source>Measured distance</source>
+      <translation>实测距离</translation>
+    </message>
+    <message>
+      <source>Scene</source>
+      <translation>场景备注</translation>
+    </message>
+    <message>
+      <source>Output folder</source>
+      <translation>保存目录</translation>
+    </message>
+    <message>
+      <source>Select measurement folder</source>
+      <translation>选择测量数据目录</translation>
+    </message>
+    <message>
+      <source> s</source>
+      <translation> 秒</translation>
+    </message>
+    <message>
+      <source> mm</source>
+      <translation> mm</translation>
+    </message>
+    <message>
+      <source>Unspecified</source>
+      <translation>未填写</translation>
+    </message>
+    <message>
+      <source>Browse…</source>
+      <translation>浏览…</translation>
+    </message>
+    <message>
+      <source>Start recording</source>
+      <translation>开始录制</translation>
+    </message>
+    <message>
+      <source>Stop recording</source>
+      <translation>停止录制</translation>
+    </message>
+    <message>
+      <source>Open folder</source>
+      <translation>打开目录</translation>
+    </message>
+    <message>
+      <source>Hide</source>
+      <translation>隐藏</translation>
+    </message>
+    <message>
+      <source>Uses the imaging mode selected in Depth Map.</source>
+      <translation>录制深度图中选定的 RV1103 成像模式。</translation>
+    </message>
+    <message>
+      <source>Records Gemini 335 native depth at 1280 × 800 and 15 FPS.</source>
+      <translation>录制 Gemini 335 的 1280×800、15 FPS 原生深度。</translation>
+    </message>
+    <message>
+      <source>Finishing recording…</source>
+      <translation>正在结束录制…</translation>
+    </message>
+    <message>
+      <source>Waiting for the first depth frame…</source>
+      <translation>等待首帧深度数据…</translation>
+    </message>
+    <message>
+      <source>Recording · %1 s · %2 frames</source>
+      <translation>录制中 · %1 秒 · %2 帧</translation>
+    </message>
+    <message>
+      <source>Saved %1 frames · %2 s</source>
+      <translation>已保存 %1 帧 · %2 秒</translation>
+    </message>
+    <message>
+      <source>Stopped · %1 frames saved</source>
+      <translation>已停止 · 保存 %1 帧</translation>
+    </message>
+    <message>
+      <source>Recording ended · %1 frames saved
+%2</source>
+      <translation>录制已结束 · 保存 %1 帧
+%2</translation>
+    </message>
+    <message>
+      <source>Ready</source>
+      <translation>就绪</translation>
+    </message>
+    <message>
+      <source>RV1103 depth stream ended during recording</source>
+      <translation>录制期间 RV1103 深度流中断</translation>
+    </message>
+    <message>
+      <source>RV1103 session or imaging mode changed during recording</source>
+      <translation>录制期间 RV1103 会话或成像模式发生变化</translation>
+    </message>
+  </context>
 </TS>

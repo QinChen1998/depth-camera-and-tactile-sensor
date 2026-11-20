@@ -85,7 +85,9 @@ DepthMapWidget::DepthMapWidget(QWidget *parent)
     m_rvModel->setObjectName("rvDepthModel");
     m_rvModel->addItem(QString(),QLatin1String(RvSessionController::ReuseLatestTofImagingScheme));
     m_rvModel->addItem(QString(),"board_native_tof48");
+    m_rvModel->addItem(QString(),QLatin1String(RvSessionController::Native48ExtendedIntegrationScheme));
     m_rvModel->addItem(QString(),"board_native_tof48_high_accuracy");
+    m_rvModel->addItem(QString(),QLatin1String(RvSessionController::Native48HighAccuracy1200KScheme));
     m_rvModel->setMinimumWidth(0);
     m_rvModel->setSizeAdjustPolicy(QComboBox::AdjustToContents);
     m_rvModel->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Preferred);
@@ -327,10 +329,12 @@ void DepthMapWidget::retranslateUi()
     auto label=[this](const char* id,const QString& text){m_rvModel->setItemText(m_rvModel->findData(id),text);};
     label(RvSessionController::ReuseLatestTofImagingScheme,tr("Host-assisted inference"));
     label("board_native_tof48",tr("Board inference"));
+    label(RvSessionController::Native48ExtendedIntegrationScheme,tr("Board inference (1200K)"));
     label("board_native_tof48_high_accuracy",tr("Board inference high accuracy"));
+    label(RvSessionController::Native48HighAccuracy1200KScheme,tr("Board inference high accuracy (1200K)"));
     m_depthTabs->setTabText(0,tr("Board depth"));m_depthTabs->setTabText(1,tr("Host assisted depth"));
     m_rvModel->setAccessibleName(tr("Imaging scheme:"));
-    m_rvModel->setToolTip(tr("Select how the depth map is generated."));
+    m_rvModel->setToolTip(tr("Select the imaging scheme for the shared depth and camera session."));
     if (m_session) m_session->retranslateState();
     m_sessionControlsKey.clear();syncSessionControls();
 }
@@ -512,7 +516,8 @@ void DepthMapWidget::syncSessionControls()
         QString::number(m_session?m_session->dtofCandidateMode():-1), QString::number(busy), QString::number(m_switchUiActive), QString::number(connecting),
         QString::number(m_session&&m_session->controlledSource()),
         QString::number(m_session?m_session->assistLoadingState():0),
-        m_session?m_session->assistHostModel():QString()};
+        m_session?m_session->assistHostModel():QString(),
+        m_session?m_session->currentImagingScheme():QString()};
     // Frame statistics change much more often than configuration. Keep status
     // current without rebuilding combo-box permissions/tooltips on every frame.
     if(key!=m_sessionControlsKey){
@@ -531,7 +536,15 @@ void DepthMapWidget::syncSessionControls()
         const bool available=RvAssistDepth::hostModelAvailable(QLatin1String(RvCameraView::UniDepthVgaNative48));
         for(int i=0;i<m_rvModel->count();++i){
             const auto id=m_rvModel->itemData(i).toString();
-            if(id.startsWith("board_native_")){items->item(i)->setEnabled(true);items->item(i)->setToolTip(tr("Native 48×32 ToF radial depth; no neural inference."));}
+            if(id.startsWith("board_native_")){
+                items->item(i)->setEnabled(true);
+                QString tooltip=tr("Native 48×32 ToF radial depth; no neural inference.");
+                if(id==QLatin1String(RvSessionController::Native48ExtendedIntegrationScheme))
+                    tooltip=tr("Ordinary 48×32 ToF with 1200K main integration.");
+                else if(id==QLatin1String(RvSessionController::Native48HighAccuracy1200KScheme))
+                    tooltip=tr("High-accuracy 48×32 ToF with 1200K main integration.");
+                items->item(i)->setToolTip(tooltip);
+            }
             else{
                 items->item(i)->setEnabled(offerAssist&&available);
                 if(!available)items->item(i)->setToolTip(RvAssistDepth::tr("Selected host model runtime is missing; prepare the optional runtime first"));

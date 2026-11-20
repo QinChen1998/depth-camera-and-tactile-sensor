@@ -2,6 +2,7 @@
 
 #include "RvTofFrame.h"
 #include <QFutureWatcher>
+#include <QPromise>
 #include <QSharedPointer>
 #include <QTimer>
 #include <QVector3D>
@@ -29,14 +30,15 @@ protected:
 private:
     void acceptTofFrame(const RvTofFrame &frame);
     void acceptAssistedDepth(const QByteArray &depth, const QJsonObject &metadata);
+    void setPaused(bool paused);
     void clearFrames();
     void clearAssistedDepth();
     void presentLatest();
     void presentTofFrame();
     void startDepthConversion();
     void finishDepthConversion();
-    static QByteArray projectDepth(const QByteArray &depth, const RvCameraView::Profile &camera,
-                                  double colorMinimum, double colorMaximum);
+    static void projectDepth(QPromise<QByteArray> &work, const QByteArray &depth,
+                             const RvCameraView::Profile &camera, double colorMinimum, double colorMaximum);
     void setupDisplayControls();
     void applyDepthColorRange();
     void updateColorLegend();
@@ -49,6 +51,7 @@ private:
     SceneInstanceBuffer *const m_depthInstances;
     QQuickWidget *const m_view;
     QLabel *const m_status;
+    QPushButton *const m_pause;
     QPushButton *const m_reset;
     QWidget *const m_depthControls;
     QLabel *const m_legendMinimum;

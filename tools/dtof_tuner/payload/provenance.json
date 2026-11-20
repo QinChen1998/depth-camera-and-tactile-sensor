@@ -5,8 +5,9 @@
     "bounded_log.awk": "97ca78b9983ea78ef7a82519130570b1b87232989c4bb7e568006d805a3b6c83",
     "LICENSE-MIT.TXT": "99f486ec3489c0d3b2d089ab92e9044ce96c199c018e63fa8b122e98359f9bda",
     "session.sh": "71867198c50360ee90b8b5008d0680f5e6ef11bd28c04d2d6b8547e68e3ad401",
-    "tmf8829_tuner": "06039c807cc833bf74f711c2a1839990255aa184078157e18ba4050a3663ed6d"
+    "tmf8829_tuner": "23987b79ac0f2674e0d1c9a44cc98b3776ab2290bb0242ae89b3f18744f38d4f"
   },
   "runtime": "native ARM hard-float/uClibc; no host Python dependency",
-  "deployment": "USB enrollment provisions matching assets while the verified board is idle; experiment preflight still requires exact hashes"
+  "deployment": "USB enrollment provisions matching assets while the verified board is idle; experiment preflight still requires exact hashes",
+  "update": "Rebuilt on 2026-11-20 with the clock-corrected TMF8829 core and the SDK DTN1 encoder for combined 0x08 and 0x10."
 }

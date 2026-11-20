@@ -10,6 +10,9 @@
     <ClCompile Include="LanguageManager.cpp"/>
     <ClCompile Include="TactileDockWidget.cpp"/>
     <ClCompile Include="sensors\DepthMapWidget.cpp"/>
+    <ClCompile Include="sensors\DepthMeasurement.cpp"/>
+    <ClCompile Include="sensors\GeminiMeasurement.cpp"/>
+    <ClCompile Include="sensors\MeasurementCaptureDialog.cpp"/>
     <ClCompile Include="sensors\RvPointCloudWidget.cpp"/>
     <ClCompile Include="sensors\ImageDisplaySettings.cpp"/>
     <ClCompile Include="sensors\RtspCameraPage.cpp"/>
@@ -57,6 +60,7 @@
     <QtMoc Include="sensors\DepthMapWidget.h"/>
     <ClInclude Include="sensors\DockableQuick3DWidget.h"/>
     <QtMoc Include="sensors\RvPointCloudWidget.h"/>
+    <QtMoc Include="sensors\MeasurementCaptureDialog.h"/>
     <QtMoc Include="sensors\SceneInstanceBuffer.h"/>
     <ClInclude Include="sensors\DepthPost.h"/>
     <ClInclude Include="sensors\DepthSnapshot.h"/>
@@ -72,6 +76,7 @@
     <ClInclude Include="sensors\RvDepthCoverage.h"/>
     <ClInclude Include="sensors\RvDepthDiagnostic.h"/>
     <ClInclude Include="sensors\RvDepthView.h"/>
+    <ClInclude Include="sensors\DepthMeasurement.h"/>
     <QtMoc Include="sensors\RvDeviceManagerDialog.h"/>
     <ClInclude Include="sensors\RvDeviceStore.h"/>
     <ClInclude Include="sensors\RvCalibration.h" />
