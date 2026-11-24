@@ -295,11 +295,21 @@ static int runHostLiveValidation(SensorMainWindow &window,const QString &path,bo
         QString sequenceFolder;
         bool overlayOk=false,alignmentOk=false;
         if(ready&&!diagnosticDirectory.isEmpty()){
+            auto *depthDock=window.findChild<QDockWidget *>("depthMapDock");
+            if(depthDock){
+                depthDock->show();
+                depthDock->raise();
+            }
             auto *points=window.depth()->findChild<QPushButton *>("depthPairedTofPoints");
             auto *alignment=window.depth()->findChild<QPushButton *>("depthPairedRgb");
-            const bool pairedReady=waitFor([&]{return invalid||s->userStopped()||last["dtof_present"]==true;},5000)
-                &&!invalid&&!s->userStopped()&&last["dtof_present"]==true;
-            if(pairedReady&&points&&alignment&&points->isEnabled()&&alignment->isEnabled()){
+            auto *record=window.depth()->findChild<QPushButton *>("depthDiagnosticRecord");
+            const auto controlsReady=[&] {
+                return points&&alignment&&record&&points->isEnabled()&&alignment->isEnabled()
+                    &&record->isEnabled()&&last["dtof_present"]==true;
+            };
+            const bool pairedReady=waitFor([&]{return invalid||s->userStopped()||controlsReady();},10000)
+                &&!invalid&&!s->userStopped()&&controlsReady();
+            if(pairedReady){
                 const auto baseline=window.depth()->snapshot();
                 const auto corrected=canvas->grab().toImage();
                 points->click();
@@ -312,8 +322,10 @@ static int runHostLiveValidation(SensorMainWindow &window,const QString &path,bo
                     &&saved.metresFloat32LE==baseline.metresFloat32LE;
                 alignment->click();
                 points->click();
+                sequenceFolder=window.depth()->startDiagnosticRecording(diagnosticDirectory,&error);
+            }else if(error.isEmpty()){
+                error="Timed out waiting for a paired frame and ready diagnostic controls";
             }
-            sequenceFolder=window.depth()->startDiagnosticRecording(diagnosticDirectory,&error);
             if(sequenceFolder.isEmpty())
                 invalid=true;
             else{
@@ -378,8 +390,10 @@ static int runHostLiveValidation(SensorMainWindow &window,const QString &path,bo
             diagnostics={{"overlay",overlayOk},{"rgb_alignment",alignmentOk},{"recording_passed",recordedOk},
                 {"sequence",sequenceFolder},{"recorded_frames",recorded["frames"]},{"dropped_frames",recorded["dropped_frames"]},
                 {"paired_replay",pairedReplay},{"held_frame_seen",heldSeen},{"held_replay",heldReplay}};
-            if(!overlayOk||!alignmentOk||!recordedOk||!pairedReplay||(heldSeen&&!heldReplay))
-                fail("Diagnostic overlay, recording or replay did not pass");
+            if(!overlayOk||!alignmentOk||!recordedOk||!pairedReplay||(heldSeen&&!heldReplay)){
+                if(error.isEmpty())error="Diagnostic overlay, recording or replay did not pass";
+                invalid=true;
+            }
         }
         const bool pass=cameraVisibility&&ready&&!invalid&&!s->userStopped()&&elapsed>=seconds-.5&&frames-initial>=10&&positiveFrames>=10&&painted>=10&&(depthOnly?videos==0:videos>=30)&&native>=10&&(onHost?photon==0:photon>=10)&&geometry&&cameraGeometry&&generation!=previousGeneration&&(!onHost||(paired>=10&&corrected>=10));
         if(!pass&&error.isEmpty())error=QString("Incomplete measurement: ready=%1 positive=%2 painted=%3 video=%4 native=%5 photon=%6 geometry=%7").arg(ready).arg(positiveFrames).arg(painted).arg(videos).arg(native).arg(photon).arg(geometry);
