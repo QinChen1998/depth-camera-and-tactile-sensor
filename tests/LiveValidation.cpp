@@ -366,7 +366,20 @@ static int runHostLiveValidation(SensorMainWindow &window,const QString &path,bo
             windows.append(item);progress(item);if(!thermalOnly&&frames==previousFrames)fail("No fresh output in measurement window");previousFrames=frames;previousPainted=painted;previousSeconds=elapsed;
         };
         QTimer timer;timer.setInterval(thermalOnly||requestedSeconds>0?1000:10000);QObject::connect(&timer,&QTimer::timeout,&context,pulse);
-        if(ready){progress({{"phase","measuring"},{"scheme",scheme},{"seconds",seconds},{"generation",generation}});timer.start();waitFor([&]{return invalid||s->userStopped();},seconds*1000);timer.stop();pulse();}
+        QTimer render;
+        render.setInterval(100);
+        QObject::connect(&render,&QTimer::timeout,&context,[canvas]{
+            // Exercise actual paints when the validation window is not exposed.
+            canvas->presentationImage();
+            canvas->grab();
+        });
+        if(ready){
+            progress({{"phase","measuring"},{"scheme",scheme},{"seconds",seconds},{"generation",generation}});
+            timer.start();
+            if(!diagnosticDirectory.isEmpty())render.start();
+            waitFor([&]{return invalid||s->userStopped();},seconds*1000);
+            render.stop();timer.stop();pulse();
+        }
         measuring=false;const double elapsed=clock.nsecsElapsed()/1e9;
         const bool geometry=onHost||(canvas->property("depthWidth").toInt()==width&&canvas->property("depthHeight").toInt()==height&&canvas->presentationSize()==QSizeF(32,48));
         auto *videoCanvas=window.findChild<QWidget*>("rtspCameraLatestFrame");
