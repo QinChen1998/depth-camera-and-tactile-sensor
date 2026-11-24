@@ -1051,6 +1051,26 @@ int runPortSmokeTests(SensorMainWindow &window,LanguageManager &language,const Q
         RvSessionController reopened;
         check(QString("NATIVE_MODE_PERSISTS_")+scheme,reopened.currentImagingScheme()==scheme&&!reopened.assistDepthEnabled()&&reopened.userStopped()
             &&reopened.dtofCandidateMode()==expectedMode&&reopened.native48ExtendedIntegration()==expected1200K);
+#ifdef Q_OS_WIN
+        const QTemporaryDir launchFixture;
+        auto *control=reopened.m_previewControl;
+        const auto missingWorker=QDir(launchFixture.path()).filePath("missing-worker.exe").toStdWString();
+        bool intercepted=false;
+        if(launchFixture.isValid()){
+            // Observe the real launch arguments without starting a worker or reaching a device.
+            control->setCreateProcessArgumentsModifier([&](QProcess::CreateProcessArguments *process){
+                intercepted=true;
+                process->applicationName=missingWorker.c_str();
+            });
+            reopened.start();
+            control->setCreateProcessArgumentsModifier({});
+            reopened.stop();
+        }
+        const auto arguments=control->arguments();
+        check(QString("NATIVE_MODE_START_USES_SELECTED_INTEGRATION_")+scheme,intercepted
+            &&arguments.value(0)=="--dtof"&&arguments.value(1)==QString::number(expectedMode)
+            &&arguments.count("--native48-1200k")==int(expected1200K));
+#endif
     }
     session->selectImagingScheme(visibleHostScheme,{});
     check("NO_BOARD_DEPTH_OR_REPAIR_UI",!window.depth()->findChild<QWidget*>("rvDtofFastDepthCanvas")&&!window.depth()->findChild<QWidget*>("rvLiteSrRepairSettings")&&!window.depth()->findChild<QWidget*>("rvBoardLiteSrHostContour"));

@@ -1157,6 +1157,7 @@ void RvSessionController::submitConfiguration(const Configuration &candidate, bo
         m_dtofToken=QUuid::createUuid().toString(QUuid::Id128);m_dtofReceipt={};
         args={"--dtof",QString::number(m_dtofMode),m_dtofToken,m_dtofOptions};
         if(hostHdAssist())args<<"--host-model"<<assistHostModel();
+        if(m_native48ExtendedIntegration)args<<"--native48-1200k";
     }
     // Explicit Start may recover any fault after ownership checks. Background
     // recovery must pass the board's structural-fault classifier and rate cap.

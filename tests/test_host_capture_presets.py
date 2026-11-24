@@ -38,16 +38,19 @@ class HostCapturePresets(unittest.TestCase):
                 self.assertNotIn('-n', args)
                 self.assertEqual(args[args.index('--socket')+1], '/run/extrinsic_capture/tof.sock')
 
-    def test_native48_ordinary_and_high_accuracy_keep_saved_timing(self):
+    def test_native48_normal_and_high_accuracy_use_saved_or_requested_integration(self):
         for mode, sensor_mode in [(24, 11), (25, 12)]:
-            result = self.run_preset(mode, ['-m', '-d', '5', '-p', '91', '-i', '600', '-r', '6', '-g', '-n'], 48)
-            self.assertEqual(result.returncode, 0, result.stderr)
-            args = result.stdout.splitlines()[2:]
-            for flag, value in [('-d', sensor_mode), ('-p', 91), ('-i', 600), ('-r', 6), ('-o', 1), ('-t', 0)]:
-                self.assertEqual(args.count(flag), 1)
-                self.assertEqual(args[args.index(flag)+1], str(value))
-            self.assertNotIn('-g', args)
-            self.assertNotIn('-n', args)
+            for preset, iterations in [(48, 600), ('48-1200', 1200)]:
+                with self.subTest(mode=mode, preset=preset):
+                    saved = ['-m', '-d', '5', '-p', '91', '-i', '600', '-r', '6', '-g', '-n']
+                    result = self.run_preset(mode, saved, preset)
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    args = result.stdout.splitlines()[2:]
+                    for flag, value in [('-d', sensor_mode), ('-p', 91), ('-i', iterations), ('-r', 6), ('-o', 1), ('-t', 0)]:
+                        self.assertEqual(args.count(flag), 1)
+                        self.assertEqual(args[args.index(flag)+1], str(value))
+                    self.assertNotIn('-g', args)
+                    self.assertNotIn('-n', args)
             self.assertEqual(self.run_preset(mode, ['-d', '5'], 16).returncode, 2)
 
     def test_all_retired_modes_and_wrong_grids_are_refused(self):

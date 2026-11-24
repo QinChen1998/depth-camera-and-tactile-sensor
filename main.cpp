@@ -4,6 +4,7 @@
 #include "RuntimeDiscovery.h"
 #include "UiStyle.h"
 #include "sensors/RvAssistDepth.h"
+#include "sensors/RvDepthDiagnostic.h"
 #include "sensors/RvInferenceSettings.h"
 #include "sensors/RvInferenceRuntime.h"
 #include "sensors/RvDeviceStore.h"
@@ -107,6 +108,11 @@ int main(int argc,char **argv)
         QCoreApplication app(argc,argv);const auto args=app.arguments();
         if(args.size()!=5||!RvAssistDepth::supportsHostModel(args[4]))return 3;
         return runRvAssistWorker(args[2],args[3],args[4]);
+    }
+    if(argc>1&&std::strcmp(argv[1],"--rv-depth-diagnostic-replay")==0){
+        QCoreApplication app(argc,argv);const auto args=app.arguments();
+        if(args.size()<4)return 3;
+        return RvDepthDiagnostic::replay(args[2],args[3],args.value(4));
     }
     if(argc>1&&std::strcmp(argv[1],"--import-settings")==0){
         QCoreApplication app(argc,argv);configureSettings(configurationDirectory(),true,true);return 0;

@@ -42,6 +42,8 @@ python -m unittest discover -s tests -p 'test_*.py' -v
 
 给 `--host-assist-live-validation` 设置 `DCTS_HOST_DIAGNOSTIC_DIRECTORY` 后，专项依次测试 G 和 B 的测点叠加、配对 RGB 对照、10 秒录制和单帧回放，并在指定的本地目录保存 RGB 和测量数据。离线融合专项覆盖 B 复用、G/B 无配对时的历史尺度和旧版 G 诊断回放。当前 G/B 按快照保存的测量尺度和应用尺度重建结果。分区校正的状态依赖前序帧，单帧入口会提示使用序列。
 
+使用 `--rv-depth-diagnostic-replay <单帧诊断目录> <报告.json>` 可在离线环境重放 G/B 的已保存单帧。
+
 设置 `DCTS_LIVE_HOST_MODEL=depthpro2_s_vga_fp16` 或 `depthpro2_b_vga_fp16` 可实测相应型号的 ToF G 和 ToF B。专项核对 TensorRT 引擎身份、640×480 深度和配对 RGB 网格、配对预算及校正帧数。离线融合专项使用模拟平面核对两个型号的 F6 尺度、无效值处理、历史尺度和快照回放。
 
 `--measurement-live-validation <绝对报告.json>` 通过「文件 → 测量采集」依次录制 RV1103 普通档 30 秒和 Gemini 335 60 秒，核验帧时长、序号、二进制长度、字节索引和有效测点。需要已登记的 RV1103、已安装 Orbbec SDK v2 及已连接的 Gemini 335。板端身份和实机开关与成像切换专项相同。录制文件保存在报告旁的独立目录。
@@ -81,7 +83,7 @@ python tools/verify_port.py --executable x64/Release/DctsInferenceWorker.exe --r
 
 默认运行包为 `UniDepthRuntimeRgb672VgaFP16RTX/`。`--runtime` 指定候选包，`--reference-runtime` 指定参考包，未指定时共用候选包。工具按清单核对模型摘要和实际加载方式。
 
-竖幅方案各覆盖 25 个 F6 场景，包括 0°/180°、不同 RGB、165 ms 捕获时间边界、G/B 复用策略、错误网格/FOV/方向/有效位、低 SNR 和 RGB-only。检查裁切前预测、480×640 输出身份、米制深度、诊断及停止重启。包清单逐文件核对 SHA256。协议和合成样本共用 `tools/unidepth/native16_contract.py`。
+竖幅方案各覆盖 25 个 F6 场景，包括 0°/180°、不同 RGB、165 ms 捕获时间边界、G/B 复用策略、错误网格/FOV/方向/有效位、低 SNR 和 RGB-only。检查裁切前预测、480×640 输出身份、米制深度、诊断及停止重启。包清单逐文件核对 SHA256。协议和合成样本共用 `tools/unidepth/native48_contract.py`。
 
 这类测试验证代码与数据合同，不证明实际物理精度、客户显卡性能或设备安装标定。连续尺度平滑使用单调时间；逐字节比较采用固定场景，不能把不同墙钟节奏下的长流输出直接当作同一帧比较。
 
