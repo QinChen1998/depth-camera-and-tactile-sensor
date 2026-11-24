@@ -5,6 +5,7 @@
 #include "../sensors/PointCloudColorScale.h"
 #include "../sensors/RvDepthView.h"
 #include "../sensors/RvCameraView.h"
+#include "../sensors/RvDepthDiagnostic.h"
 #include "../sensors/RvInferenceRuntime.h"
 #include "../sensors/RvTunerController.h"
 #include "../sensors/RvUsbEnrollment.h"
@@ -16,6 +17,7 @@
 #include <QtEndian>
 #include <cstring>
 #include <QDateTime>
+#include <QDir>
 #include <QDoubleSpinBox>
 #include <QLabel>
 #include <QMessageBox>
@@ -26,6 +28,7 @@
 #include <QElapsedTimer>
 #include <QEventLoop>
 #include <QFile>
+#include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QSaveFile>
@@ -161,13 +164,14 @@ int runUsbEnrollmentLiveValidation(SensorMainWindow &window,const QString &path)
     save(path,report);manager->close();window.close();return report["passed"].toBool()?0:2;
 }
 
-// Explicit real-device integration test. Only scalar reports are saved.
+// Explicit real-device integration test. Frame files require a diagnostic directory.
 // Uses ordinary session selection/start/switch/stop, never tuner.persist().
 static int runHostLiveValidation(SensorMainWindow &window,const QString &path,bool thermalOnly=false){
     constexpr bool hostOnly=true;
     auto *s=window.session();auto *t=s->tuner();
     QJsonObject report{{"passed",false},{"images_saved",false},{"measurement_arrays_saved",false},{"saved_sensor_settings_written",false}};
     const auto executionDevice=qEnvironmentVariable("RV_INFERENCE_BACKEND","tensorrt");
+    const auto diagnosticDirectory=thermalOnly?QString():qEnvironmentVariable("DCTS_HOST_DIAGNOSTIC_DIRECTORY");
     if(!RvInferenceRuntime::validBackend(executionDevice))return 3;
     report["execution_device"]=executionDevice;
     if(thermalOnly){report["thermal_only"]=true;report["measurement_seconds"]=600;report["sample_interval_seconds"]=1;}
@@ -183,12 +187,15 @@ static int runHostLiveValidation(SensorMainWindow &window,const QString &path,bo
     QFile journal(path+".progress.jsonl");if(!journal.open(QIODevice::WriteOnly|QIODevice::Truncate))return 3;
     const auto progress=[&](QJsonObject o){o["unix_ms"]=QDateTime::currentMSecsSinceEpoch();journal.write(QJsonDocument(o).toJson(QJsonDocument::Compact)+'\n');journal.flush();};
     const QString vga=QLatin1String(RvSessionController::GlobalRgbImagingScheme);
-    const QStringList sequence=thermalOnly?QStringList{vga}:QStringList{vga,vga};
+    QStringList sequence{vga};
+    if(!thermalOnly)
+        sequence.append(diagnosticDirectory.isEmpty()?vga:QLatin1String(RvSessionController::ReuseLatestTofImagingScheme));
     int stage=0;
     for(const auto &scheme:sequence){
         constexpr bool onHost=true,depthOnly=false;
         constexpr int mode=RvCaptureContract::Native48;
         const QString hostModel=QLatin1String(RvCameraView::UniDepthVgaNative48);
+        const QString experiment=scheme==vga?QStringLiteral("G"):QStringLiteral("B");
         const auto &profile=RvCameraView::outputProfile(hostModel);
         const int width=onHost?profile.outputWidth:384,height=onHost?profile.outputHeight:256;
         auto *canvas=host;QObject context;
@@ -196,6 +203,7 @@ static int runHostLiveValidation(SensorMainWindow &window,const QString &path,bo
         double maximumPairDelta=0;QVector<double> inference,total;
         QMap<QString,QVector<double>> performance;
         QString error,generation; qint64 lastId=-1,lastPaint=-1;QJsonObject last;QVector<double> npu,contour,compute,sourcePublish;QJsonArray windows;
+        RvDepthDiagnostic::Snapshot pairedDiagnostic,heldDiagnostic;
         int info10=0;double firstPublish=-1,lastPublish=-1,firstCount=0,lastCount=0;
         qint64 nativeSequence=0,nativeTimestamp=0;
         const auto fail=[&](const QString &why){invalid=true;error=why;};
@@ -205,7 +213,7 @@ static int runHostLiveValidation(SensorMainWindow &window,const QString &path,bo
             if(!generation.isEmpty()&&generation==g&&id<=lastId){fail("Repeated depth frame");return;}
             generation=g;lastId=id;
             if(bytes.size()!=width*height*4||m["width"]!=width||m["height"]!=height){fail("Wrong output shape");return;}
-            if(onHost&&(m["assist_host_model"]!=hostModel||m["assist_experiment"]!="G"||!RvCameraView::validOutputGrid(m)||m["assist_output_restored_to_calibrated_grid"]!=true)){fail("Host inference grid or identity mismatch");return;}
+            if(onHost&&(m["assist_host_model"]!=hostModel||m["assist_experiment"]!=experiment||!RvCameraView::validOutputGrid(m)||m["assist_output_restored_to_calibrated_grid"]!=true)){fail("Host inference grid or identity mismatch");return;}
             if(onHost&&(m["assist_backend"]!=RvInferenceRuntime::backendName(executionDevice)||m["assist_execution_device"]!=executionDevice||!RvInferenceRuntime::validGraphMetadata(m)||m["depth_unit"]!="camera-Z_m_float32"||m["assist_input_orientation_checked"]!=true||m["assist_input_rotation_degrees"]!=s->assistInputRotationDegrees()||(m["dtof_present"].toBool()&&(m["dtof_width"]!=48||m["dtof_height"]!=32||m["dtof_fov_correction"]!=s->deviceProfile().fov())))){fail("Host backend, orientation or native measurement contract mismatch");return;}
             if(onHost&&s->deviceProfile().temporaryFovCalibration){
                 const auto calibration=m["tof_calibration"].toObject();
@@ -247,7 +255,18 @@ static int runHostLiveValidation(SensorMainWindow &window,const QString &path,bo
                 }
             }
         };
-        QObject::connect(s,&RvSessionController::assistDepthSnapshotReady,&context,[&](const QByteArray &b,const QJsonObject &m){if(onHost)accept(b,m);});
+        QObject::connect(s,&RvSessionController::assistDepthSnapshotReady,&context,
+            [&](const QByteArray &bytes,const QJsonObject &m,const QImage &rgb,const RvTofFrame &tof,const QByteArray &payload) {
+                accept(bytes,m);
+                if(diagnosticDirectory.isEmpty()||invalid)
+                    return;
+                const auto fit=m["assist_fusion"].toObject();
+                if(RvDepthDiagnostic::matchesPairedNative(m,tof)&&fit["dtof_corrected"]==true
+                    &&pairedDiagnostic.output.metresFloat32LE.isEmpty())
+                    pairedDiagnostic={{bytes,{},rgb,m,QDateTime::currentDateTimeUtc()},tof,payload,{}};
+                if(m["dtof_present"]==false&&fit["fusion_mode"]=="held_scale"&&heldDiagnostic.output.metresFloat32LE.isEmpty())
+                    heldDiagnostic={{bytes,{},rgb,m,QDateTime::currentDateTimeUtc()},tof,payload,{}};
+            });
         QObject::connect(s,&RvSessionController::cameraFrameReady,&context,[&](const QImage &im){if(measuring){if(depthOnly||im.size()!=QSize(2304,1296))fail("Unexpected RGB stream");++videos;}});
         QObject::connect(s,&RvSessionController::tofFrameReady,&context,[&](const RvTofFrame &f){if(measuring){if(f.columns()!=48||f.rows()!=32)fail("Wrong native grid");++native;nativeSequence=f.metadata["tof_sequence"].toInteger();nativeTimestamp=f.metadata["tof_timestamp_ns"].toInteger();}});
         QObject::connect(s,&RvSessionController::photonFrameReady,&context,[&](const RvPhotonFrame &){if(measuring)++photon;});
@@ -273,6 +292,35 @@ static int runHostLiveValidation(SensorMainWindow &window,const QString &path,bo
         if(!ready&&error.isEmpty())error=s->detailText()+" / "+s->depthInfoText();
         const int requestedSeconds=qEnvironmentVariableIntValue("DCTS_LIVE_SECONDS");
         if(ready&&requestedSeconds>0)waitFor([&]{return invalid||s->userStopped();},10000);
+        QString sequenceFolder;
+        bool overlayOk=false,alignmentOk=false;
+        if(ready&&!diagnosticDirectory.isEmpty()){
+            auto *points=window.depth()->findChild<QPushButton *>("depthPairedTofPoints");
+            auto *alignment=window.depth()->findChild<QPushButton *>("depthPairedRgb");
+            const bool pairedReady=waitFor([&]{return invalid||s->userStopped()||last["dtof_present"]==true;},5000)
+                &&!invalid&&!s->userStopped()&&last["dtof_present"]==true;
+            if(pairedReady&&points&&alignment&&points->isEnabled()&&alignment->isEnabled()){
+                const auto baseline=window.depth()->snapshot();
+                const auto corrected=canvas->grab().toImage();
+                points->click();
+                const auto overlaid=canvas->grab().toImage();
+                overlayOk=points->isChecked()&&overlaid!=corrected;
+                alignment->click();
+                const auto aligned=canvas->grab().toImage();
+                const auto saved=window.depth()->snapshot();
+                alignmentOk=alignment->isChecked()&&aligned!=overlaid&&saved.depthImage==baseline.depthImage
+                    &&saved.metresFloat32LE==baseline.metresFloat32LE;
+                alignment->click();
+                points->click();
+            }
+            sequenceFolder=window.depth()->startDiagnosticRecording(diagnosticDirectory,&error);
+            if(sequenceFolder.isEmpty())
+                invalid=true;
+            else{
+                report["images_saved"]=true;
+                report["measurement_arrays_saved"]=true;
+            }
+        }
         const int initial=frames;QElapsedTimer clock;clock.start();measuring=ready;
         const int seconds=thermalOnly?600:std::clamp(requestedSeconds>0?requestedSeconds:30,30,300);
         int previousFrames=initial,previousPainted=0;double previousSeconds=0;
@@ -314,6 +362,25 @@ static int runHostLiveValidation(SensorMainWindow &window,const QString &path,bo
         auto *cameraDock=window.findChild<QDockWidget*>("rtspCameraDock");
         const bool cameraVisibility=cameraDock&&(depthOnly?cameraDock->isHidden():!cameraDock->isHidden());
         if(!hostOnly&&!thermalOnly){if(window.grab().save(path+QString(".stage_%1.png").arg(stage)))report["images_saved"]=true;else fail("Window screenshot save failed");}
+        QJsonObject diagnostics;
+        if(!diagnosticDirectory.isEmpty()){
+            QFile receipt(QDir(sequenceFolder).filePath("recording.json"));
+            const auto recorded=receipt.open(QIODevice::ReadOnly)?QJsonDocument::fromJson(receipt.readAll()).object():QJsonObject{};
+            const bool recordedOk=recorded["complete"]==true&&recorded["error"]==""&&recorded["frames"].toInt()>=10
+                &&recorded["dropped_frames"]==0&&QFileInfo(QDir(sequenceFolder).filePath("frames.bin")).size()==recorded["bytes"].toInteger(-1);
+            const QDir output(diagnosticDirectory);
+            QString pairedFolder,heldFolder;
+            const bool pairedReplay=pairedDiagnostic.save(output.absolutePath(),&pairedFolder)
+                &&RvDepthDiagnostic::replay(pairedFolder,output.filePath(experiment+"-paired-replay.json"))==0;
+            const bool heldSeen=!heldDiagnostic.output.metresFloat32LE.isEmpty();
+            const bool heldReplay=heldSeen&&heldDiagnostic.save(output.absolutePath(),&heldFolder)
+                &&RvDepthDiagnostic::replay(heldFolder,output.filePath(experiment+"-held-replay.json"))==0;
+            diagnostics={{"overlay",overlayOk},{"rgb_alignment",alignmentOk},{"recording_passed",recordedOk},
+                {"sequence",sequenceFolder},{"recorded_frames",recorded["frames"]},{"dropped_frames",recorded["dropped_frames"]},
+                {"paired_replay",pairedReplay},{"held_frame_seen",heldSeen},{"held_replay",heldReplay}};
+            if(!overlayOk||!alignmentOk||!recordedOk||!pairedReplay||(heldSeen&&!heldReplay))
+                fail("Diagnostic overlay, recording or replay did not pass");
+        }
         const bool pass=cameraVisibility&&ready&&!invalid&&!s->userStopped()&&elapsed>=seconds-.5&&frames-initial>=10&&positiveFrames>=10&&painted>=10&&(depthOnly?videos==0:videos>=30)&&native>=10&&(onHost?photon==0:photon>=10)&&geometry&&cameraGeometry&&generation!=previousGeneration&&(!onHost||(paired>=10&&corrected>=10));
         if(!pass&&error.isEmpty())error=QString("Incomplete measurement: ready=%1 positive=%2 painted=%3 video=%4 native=%5 photon=%6 geometry=%7").arg(ready).arg(positiveFrames).arg(painted).arg(videos).arg(native).arg(photon).arg(geometry);
         QJsonObject result{{"scheme",scheme},{"mode",mode},{"passed",pass},{"error",error},{"seconds",elapsed},{"depth_frames",frames-initial},{"positive_depth_frames",positiveFrames},{"painted_frames",painted},{"video_frames",videos},{"native_frames",native},{"photon_frames",photon},{"depth_fps",(frames-initial)/std::max(.001,elapsed)},{"painted_fps",painted/std::max(.001,elapsed)},{"video_fps",videos/std::max(.001,elapsed)},{"npu",stats(npu)},{"contour",stats(contour)},{"display_geometry_preserved",geometry},{"generation",generation},{"model_sha256",last["model_sha256"]},{"input_rotation_degrees",last["input_rotation_degrees"]}};
@@ -323,6 +390,7 @@ static int runHostLiveValidation(SensorMainWindow &window,const QString &path,bo
         if(onHost){result["inference"]=stats(inference);result["host_total"]=stats(total);result["paired_frames"]=paired;result["reused_native_frames"]=reused;result["dtof_corrected_frames"]=corrected;result["unpaired_frames"]=unpaired;result["historical_scale_frames"]=historical;result["maximum_pair_delta_ms"]=maximumPairDelta;result["backend"]=last["assist_backend"];result["host_model"]=last["assist_host_model"];result["graph_sha256"]=last["assist_graph_sha256"];result["tof_calibration"]=last["tof_calibration"];result["camera_mount_rotation_degrees"]=last["camera_mount_rotation_degrees"];result["input_rotation_degrees"]=last["assist_input_rotation_degrees"];}
         QJsonObject timing;for(auto it=performance.begin();it!=performance.end();++it)timing[it.key()]=stats(it.value());
         result["performance"]=timing;
+        if(!diagnostics.isEmpty())result["diagnostics"]=diagnostics;
         result["board_compute"]=stats(compute);result["source_to_publish"]=stats(sourcePublish);result["info10_outputs"]=info10;result["windows"]=windows;
         result["board_publish_fps"]=(lastPublish>firstPublish)?1000.*(lastCount-firstCount)/(lastPublish-firstPublish):0.;
         runs.append(result);report["runs"]=runs;save(path,report);progress({{"phase","mode_finished"},{"passed",pass},{"scheme",scheme}});

@@ -9,6 +9,7 @@
 #include <QtCore/QSharedPointer>
 #include <QtGui/QImage>
 #include <QtWidgets/QWidget>
+#include <memory>
 
 class QPushButton;
 class QCheckBox;
@@ -19,6 +20,7 @@ class QLabel;
 class QTimer;
 class QTabWidget;
 class QProgressBar;
+namespace RvDepthDiagnostic { class SequenceRecorder; }
 
 class DepthMapWidget : public QWidget
 {
@@ -32,7 +34,10 @@ public:
     void acceptRvDepth(const QByteArray &depth,const QJsonObject &metadata);
     void clearRvDepth(const QString &reason);
     void acceptRvSnapshot(const QByteArray &depth, const QJsonObject &metadata, const QImage &camera);
-    void acceptAssistSnapshot(const QByteArray &depth,const QJsonObject &metadata,const QImage &camera,const RvTofFrame &tof=RvTofFrame(),const QByteArray &diagnostic=QByteArray());
+    void acceptAssistSnapshot(const QByteArray &depth,const QJsonObject &metadata,const QImage &camera,
+                              const RvTofFrame &tof=RvTofFrame(),const QByteArray &diagnostic=QByteArray(),
+                              const QImage &inferenceInput=QImage());
+    QString startDiagnosticRecording(const QString &folder,QString *error=nullptr);
     void clearAssistDepth(const QString &reason);
     DepthSnapshot snapshot() const;
     int selectedWidth() const;
@@ -51,6 +56,8 @@ private:
     void advanceImagingSwitchUi();
     bool eventFilter(QObject *watched,QEvent *event) override;
     void saveCurrentFrame();
+    void chooseDiagnosticRecordingFolder();
+    void updateDiagnosticRecording();
     void editNativeTofRotation();
     void syncNativeTofRotation();
     QPushButton *m_nativeTofAngle = nullptr;
@@ -58,6 +65,13 @@ private:
     QPushButton *m_saveButton = nullptr;
     QPushButton *m_monocularButton = nullptr;
     QPushButton *m_splitCorrectionButton = nullptr;
+    QWidget *m_diagnosticsRow = nullptr;
+    QPushButton *m_tofPointsButton = nullptr, *m_pairedRgbButton = nullptr;
+    QPushButton *m_recordButton = nullptr, *m_openRecording = nullptr;
+    QLabel *m_recordStatus = nullptr;
+    QTimer *m_recordTimer = nullptr;
+    std::unique_ptr<RvDepthDiagnostic::SequenceRecorder> m_recorder;
+    QString m_recordingFolder;
     QCheckBox *m_saveCamera = nullptr;
     QCheckBox *m_blackOutsideRange = nullptr;
     QComboBox *m_colorMode = nullptr;

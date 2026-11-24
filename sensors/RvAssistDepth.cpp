@@ -1058,7 +1058,7 @@ bool RvAssistDepth::acceptResponse(const QJsonObject &response,const QByteArray 
         auto pairedTof=current.tof;
         pairedTof.metadata.insert(QLatin1String(RvAssistFusion::NativeProjectionField),
             metadata.value(RvAssistFusion::NativeProjectionField));
-        emit resultReady(depth,metadata,pairedCamera,current.epoch,pairedTof,coverage);
+        emit resultReady(depth,metadata,pairedCamera,current.epoch,pairedTof,coverage,current.camera);
         if(!alive)return false;
         if(view.networkProfile)m_lastGuiPublishMs=publishClock.nsecsElapsed()/1e6;
     }

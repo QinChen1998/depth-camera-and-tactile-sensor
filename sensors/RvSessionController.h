@@ -130,7 +130,9 @@ signals:
     void depthStreamCleared(const QString &reason);
     void assistStateChanged();
     void monocularDisplayChanged(bool enabled);
-    void assistDepthSnapshotReady(const QByteArray &depth,const QJsonObject &metadata,const QImage &camera,const RvTofFrame &tof=RvTofFrame(),const QByteArray &diagnostic=QByteArray());
+    void assistDepthSnapshotReady(const QByteArray &depth,const QJsonObject &metadata,const QImage &camera,
+                                  const RvTofFrame &tof=RvTofFrame(),const QByteArray &diagnostic=QByteArray(),
+                                  const QImage &inferenceInput=QImage());
     void assistDepthStreamCleared(const QString &reason);
     void imagingSwitchStarted(const QString &scheme,int estimatedMs);
     void imagingSwitchFinished(const QString &scheme,qint64 elapsedMs);

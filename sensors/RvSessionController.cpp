@@ -507,7 +507,8 @@ RvSessionController::RvSessionController(QObject *parent,const QString &deviceSt
         }
         if(!m_destroying){emit assistDepthStreamCleared(reason);emit assistStateChanged();}
     });
-    connect(m_assist,&RvAssistDepth::resultReady,this,[this](const QByteArray &depth,const QJsonObject &metadata,const QImage &camera,quint64 epoch,const RvTofFrame &tof,const QByteArray &diagnostic){
+    connect(m_assist,&RvAssistDepth::resultReady,this,[this](const QByteArray &depth,const QJsonObject &metadata,const QImage &camera,quint64 epoch,
+        const RvTofFrame &tof,const QByteArray &diagnostic,const QImage &inferenceInput){
         if(m_destroying||!assistDepthEnabled()||m_userStopped||busy()||epoch!=m_presentationEpoch
             ||(m_config.cameraWidth!=576&&!hostHdAssist())||metadata["generation"]!=m_currentMetadata["generation"]
             ||(hostHdAssist()&&metadata["boot_id"]!=m_currentMetadata["boot_id"])
@@ -558,7 +559,7 @@ RvSessionController::RvSessionController(QObject *parent,const QString &deviceSt
         const int processingBudget=std::clamp(metadata["assist_processing_budget_ms"].toInt(1000),1000,120000);
         m_assistExpiry.start(std::max(1,processingBudget-int(std::ceil(sourceAge))));
         finishImagingSwitch();
-        emit assistDepthSnapshotReady(depth,metadata,camera,tof,diagnostic);
+        emit assistDepthSnapshotReady(depth,metadata,camera,tof,diagnostic,inferenceInput);
         if(!m_destroying&&epoch==m_presentationEpoch)emit assistStateChanged();
     });
     resetQtPlayer();

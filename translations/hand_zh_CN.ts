@@ -11,6 +11,21 @@
     <message><source>Restore corrected depth</source><translation>恢复校正深度</translation></message>
     <message><source>Show the same frame before ToF correction in the depth map and point cloud.</source><translation>在深度图和点云中查看同一帧的校正前单目结果。</translation></message>
     <message><source>Try split correction</source><translation>试用分区校正</translation></message>
+    <message><source>Show ToF points</source><translation>显示 ToF 测点</translation></message>
+    <message><source>Hide ToF points</source><translation>隐藏 ToF 测点</translation></message>
+    <message><source>Point centers use the measured depth color. White outlines mark points used to correct this frame.</source><translation>点的颜色表示测量深度，白圈标记参与本帧校正的测点。</translation></message>
+    <message><source>ToF / RGB alignment</source><translation>ToF / RGB 对照</translation></message>
+    <message><source>Return to depth</source><translation>返回深度图</translation></message>
+    <message><source>Show projected ToF points on the RGB image paired with this depth frame.</source><translation>在与当前深度帧配对的 RGB 图上显示 ToF 投影测点。</translation></message>
+    <message><source>Record diagnostic (10 s)</source><translation>录制诊断（10秒）</translation></message>
+    <message><source>Record paired RGB, native ToF, monocular and corrected depth for 10 seconds (about 1 GB).</source><translation>录制 10 秒配对 RGB、原生 ToF、单目深度和校正深度，约占 1 GB。</translation></message>
+    <message><source>Open recording folder</source><translation>打开录制目录</translation></message>
+    <message><source>Select diagnostic recording folder</source><translation>选择诊断录制目录</translation></message>
+    <message><source>Wait for a fresh host-assisted depth frame.</source><translation>请等待上位机辅助推理产生新的深度帧。</translation></message>
+    <message><source>Recording failed: %1</source><translation>录制失败：%1</translation></message>
+    <message><source>Recording %1 s</source><translation>还剩 %1 秒</translation></message>
+    <message><source>Recording: %1 frames, %2 dropped</source><translation>录制中，已写入 %1 帧，丢弃 %2 帧</translation></message>
+    <message><source>Saved %1 frames (%2 dropped) to %3</source><translation>已保存 %1 帧（丢弃 %2 帧）到 %3</translation></message>
     <message><source>Restore original G</source><translation>恢复原 G</translation></message>
     <message><source>Use verified distant ToF for the background and paired ToF for the near hand. Applies to the depth map and point cloud.</source><translation>背景使用已确认的远处 ToF，近手使用当前帧配对的 ToF，深度图和点云同步切换。</translation></message>
     <message><source>Input angle (%1°)</source><translation>输入角度（%1°）</translation></message>
@@ -1024,6 +1039,7 @@
 </context>
   <context>
     <name>RvDepthView</name>
+    <message><source>Waiting for a paired RGB frame...</source><translation>等待与深度配对的 RGB 帧…</translation></message>
     <message><source>Waiting for a fresh monocular depth frame...</source><translation>等待新的单目深度帧…</translation></message>
     <message><source>(%1, %2) monocular: %3 m camera-Z</source><translation>(%1, %2) 单目深度：%3 m 相机 Z</translation></message>
     <message>

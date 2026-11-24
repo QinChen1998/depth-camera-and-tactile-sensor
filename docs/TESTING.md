@@ -40,6 +40,8 @@ python -m unittest discover -s tests -p 'test_*.py' -v
 
 `--point-cloud-live-validation <绝对报告.json>` 使用已登记的 RV1103 依次运行 480×640 上位机辅助推理 G、48×32 普通和高精度档，核对辅助深度帧的标定网格、原生同帧有效点数、Qt Quick 3D 绘制、点径、色标、滚轮和停采清屏。它使用与成像切换专项相同的设备身份及授权环境变量，保存计数、状态及点云视口截图。
 
+给 `--host-assist-live-validation` 设置 `DCTS_HOST_DIAGNOSTIC_DIRECTORY` 后，专项依次测试 G 和 B 的测点叠加、配对 RGB 对照、10 秒录制和单帧回放，并在指定的本地目录保存 RGB 和测量数据。离线融合专项覆盖 B 复用、G/B 无配对时的历史尺度和旧版 G 诊断回放。当前 G/B 按快照保存的测量尺度和应用尺度重建结果。分区校正的状态依赖前序帧，单帧入口会提示使用序列。
+
 判定同时检查退出码、报告存在、有独立 PASS 断言且无 FAIL。统计不把 `BYPASS` 字符串或 `RESULT PASS` 汇总行当作新断言。Python 测试覆盖缺报告、空报告、仅汇总、FAIL、非零退出、环境隔离和非离线命令拒绝。
 
 ## USB 自动发现与免填参数（2026-11-09）
