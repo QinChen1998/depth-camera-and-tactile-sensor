@@ -1,7 +1,0 @@
-VARYING vec4 vertexColor;
-
-void MAIN()
-{
-    vertexColor = INSTANCE_COLOR;
-    POSITION = INSTANCE_MODELVIEWPROJECTION_MATRIX * vec4(VERTEX, 1.0);
-}

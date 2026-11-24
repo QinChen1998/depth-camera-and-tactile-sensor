@@ -30,6 +30,7 @@ class RvHdVideoStream;
 class RvDtofBoardStream;
 class RvAssistDepth;
 class RvTunerController;
+class DepthSdkClient;
 class SensorMainWindow;
 class LanguageManager;
 struct RtspVlcBackend;
@@ -59,12 +60,12 @@ public:
     QString depthLocation() const { return m_config.location; }
     QString depthMethod() const { return m_config.method; }
     QJsonObject metadata() const { return m_currentMetadata; }
-    bool busy() const { return m_tunerExclusive || m_controlPending || m_waitingForSelectedFrame || m_transitioning; }
+    bool busy() const;
     AutomaticConnectionStage automaticConnectionStage() const { return m_automaticConnectionStage; }
     bool automaticConnecting() const { return m_automaticConnectionStage != AutomaticConnectionStage::Idle; }
     RvTunerController *tuner() const {return m_tuner;}
     bool userStopped() const { return m_userStopped; }
-    bool retainingRecoveryDisplay() const { return !m_destroying && !m_userStopped && m_recoveryDisplayTimer.isActive(); }
+    bool retainingRecoveryDisplay() const;
     QString stateText() const { return m_stateText; }
     QString detailText() const { return m_detailText; }
     double videoFps() const { return m_videoFps; }
@@ -72,28 +73,16 @@ public:
     quint64 presentationEpoch() const {return m_presentationEpoch;}
     bool assistDepthEnabled() const;
     bool hostHdAssist() const {return m_hostAssistSelected&&m_dtofMode==RvDtofCandidates::Native48&&m_config.cameraWidth==2304;}
-    static constexpr char GlobalRgbImagingScheme[]="host_unidepth_rgb672_vga_fp16_tof48_g";
-    static constexpr char ReuseLatestTofImagingScheme[]="host_unidepth_rgb672_vga_fp16_tof48_b";
-    static constexpr char DepthPro2ImagingScheme[]="host_depthpro2_s_vga_fp16";
-    static constexpr char DepthPro2BImagingScheme[]="host_depthpro2_b_vga_fp16";
-    static constexpr char DepthPro2ReuseImagingScheme[]="host_depthpro2_s_vga_fp16_reuse_tof";
-    static constexpr char DepthPro2BReuseImagingScheme[]="host_depthpro2_b_vga_fp16_reuse_tof";
-    static QString depthPro2ModelForScheme(const QString &scheme);
-    static QString depthPro2Scheme(const QString &model,bool reuse);
-    static bool reusesLatestTof(const QString &scheme);
+    static constexpr char HostAssistImagingScheme[]="host_assisted_depth";
     static constexpr char Native48ExtendedIntegrationScheme[]="board_native_tof48_1200k";
     static constexpr char Native48HighAccuracy1200KScheme[]="board_native_tof48_high_accuracy_1200k";
     bool native48ExtendedIntegration() const { return m_native48ExtendedIntegration; }
     bool monocularDisplay() const {return m_monocularDisplay;}
     void setMonocularDisplay(bool enabled);
-    bool splitCorrectionAvailable() const;
-    bool splitCorrectionEnabled() const;
-    void setSplitCorrectionEnabled(bool enabled);
     QString assistExperiment() const;
     int assistInputRotationDegrees() const;
     QString assistHostModel() const;
     QString currentImagingScheme() const;
-    static QString imagingHostModel(const QString &scheme);
     QString hostInferencePreflightError() const;
     QString assistDepthInfoText() const {return m_assistInfo;}
     int assistLoadingState() const {return m_assistLoadingState;}
@@ -128,6 +117,9 @@ public slots:
     void stop();
     void reconnectNow();
     void retranslateState();
+    DepthSdkClient *depthSdk() const { return m_sdk; }
+    void initializeDepthSdk();
+    void setSdkInputRotation(int degrees);
 
 signals:
     void hostInferenceUnavailable(const QString &explanation,const QString &detail);
@@ -159,7 +151,6 @@ private:
     friend int runPortSmokeTests(SensorMainWindow &,LanguageManager &,const QString &);
     bool testHostHdPreparation();
     friend class RvTunerController;
-    friend class RvUsbEnrollment;
     friend int runUsbEnrollmentLiveValidation(SensorMainWindow &,const QString &);
     friend int runRvTunerTests(const QString &);
     friend int runPortSmokeTests(SensorMainWindow &, LanguageManager &, const QString &);
@@ -181,6 +172,8 @@ private:
     Configuration withCameraWidth(int width) const;
     Configuration withDepthWidth(int width) const;
     void setAutomaticConnectionStage(AutomaticConnectionStage stage);
+    bool selectNativeDepth(const char *scheme, int mode, const RvDtofCandidates::Settings &settings, bool rememberSelection);
+    bool fallBackToBoardDepth();
     void startImaging(bool automatic,const QString &expectedBoot = QString());
     void submitConfiguration(const Configuration &candidate, bool previewChange, bool modelChange,
                              bool startAfter = false, bool reconnecting = false, bool automatic = false,const QString &expectedBoot = QString());
@@ -211,14 +204,26 @@ private:
     void scheduleReconnect(const QString &reason);
     void handleFrame(const QVideoFrame &frame);
     void setState(const QString &state, const QString &detail);
+    bool usesDepthSdk() const;
+    void loadSdkDevice();
+    void updateSdkState();
+    void resetSdkPresentation(const QString &reason);
+    bool acceptSdkIdentity(const QString &generation, quint64 epoch);
+    void acceptSdkDepth(const QByteArray &depth, QJsonObject metadata, const RvTofFrame &native);
+    void acceptSdkVideo(const QImage &image, quint64 sequence, qint64 decodedNs,
+                        quint64 epoch, const QString &generation);
 
     Configuration m_config;
     RvDeviceProfile m_device;
+    DepthSdkClient *m_sdk = nullptr;
+    QString m_sdkGeneration, m_sdkBoot;
+    quint64 m_sdkEpoch = 0;
     QString m_deviceStorePath,m_deviceError,m_deviceRevision;
     QString m_autoStartAttemptedDevice;
     AutomaticConnectionStage m_automaticConnectionStage = AutomaticConnectionStage::Idle;
     quint64 m_stopRevision=0;
     int m_dtofMode=-1;
+    QString m_hostInferenceStartupError;
     bool m_native48ExtendedIntegration=false;
     RvDtofCandidates::Settings m_dtofSettings;
     QString m_dtofOptions,m_dtofToken;

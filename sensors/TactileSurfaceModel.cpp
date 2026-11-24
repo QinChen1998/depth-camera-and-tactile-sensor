@@ -4,10 +4,51 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QtEndian>
 #include <array>
 #include <cmath>
+#include <cstring>
 
 namespace {
+bool loadHousing(const QByteArray &bytes, TactileSurfaceModel &model) {
+    const auto headerEnd = bytes.indexOf("end_header\n");
+    if (headerEnd < 0 || headerEnd > 512) return false;
+    const auto lines = bytes.left(headerEnd).split('\n');
+    if (lines.size() != 9 || lines[0] != "ply" || lines[1] != "format binary_little_endian 1.0"
+        || !lines[2].startsWith("element vertex ") || lines[3] != "property float x" || lines[4] != "property float y"
+        || lines[5] != "property float z" || !lines[6].startsWith("element face ")
+        || lines[7] != "property list uchar uint vertex_indices") return false;
+    bool vertexCountOk = false, faceCountOk = false;
+    const int vertices = lines[2].mid(15).toInt(&vertexCountOk);
+    const int faces = lines[6].mid(13).toInt(&faceCountOk);
+    const auto start = headerEnd + qsizetype(sizeof("end_header\n") - 1);
+    if (!vertexCountOk || !faceCountOk || vertices <= 0 || vertices > 100000 || faces <= 0 || faces > 100000
+        || bytes.size() != start + vertices * 12 + faces * 13) return false;
+    auto *data = bytes.constData() + start;
+    model.meshVertices.reserve(vertices);
+    for (int i = 0; i < vertices; ++i, data += 12) {
+        QVector3D position;
+        for (int axis = 0; axis < 3; ++axis) {
+            const auto bits = qFromLittleEndian<quint32>(data + axis * 4);
+            float value;
+            std::memcpy(&value, &bits, sizeof(value));
+            if (!std::isfinite(value) || std::abs(value) > 1) return false;
+            position[axis] = value;
+        }
+        model.meshVertices.append((model.meshRotation.rotatedVector(position) + model.meshPosition) * 1000);
+    }
+    model.meshIndices.reserve(faces * 3);
+    for (int i = 0; i < faces; ++i, data += 13) {
+        if (data[0] != 3) return false;
+        for (int j = 0; j < 3; ++j) {
+            const auto vertex = qFromLittleEndian<quint32>(data + 1 + j * 4);
+            if (vertex >= quint32(vertices)) return false;
+            model.meshIndices.append(vertex);
+        }
+    }
+    return true;
+}
+
 bool vector(const QJsonValue &value,QVector3D &target) {
     const auto a=value.toArray();
     if(a.size()!=3)return false;
@@ -24,10 +65,11 @@ std::array<TactileSurfaceModel,3> load() {
     const QStringList ids={"fingertip","terminal","ultrathin"};
     for(int i=0;i<3;++i) {
         const auto s=sensors[i].toObject();auto &model=models[i];
-        const QString path=":/tactile/"+ids[i]+".mesh";
+        const QString path=":/tactile/"+ids[i]+".ply";
         QFile mesh(path);
         if(s["id"].toString()!=ids[i]||!mesh.open(QIODevice::ReadOnly))continue;
-        if(QCryptographicHash::hash(mesh.readAll(),QCryptographicHash::Sha256).toHex()!=s["meshSha256"].toString().toLatin1())continue;
+        const auto bytes=mesh.readAll();
+        if(QCryptographicHash::hash(bytes,QCryptographicHash::Sha256).toHex()!=s["meshSha256"].toString().toLatin1())continue;
         model.mesh=QUrl("qrc"+path);
         if(!vector(s["meshPositionM"],model.meshPosition)||!vector(s["boundsCenterM"],model.boundsCenter)
             ||!vector(s["boundsSizeM"],model.boundsSize)||!vector(s["resultantPositionM"],model.resultantPosition))continue;
@@ -36,7 +78,7 @@ std::array<TactileSurfaceModel,3> load() {
         for(const auto &v:q)finite &= v.isDouble()&&std::isfinite(v.toDouble());
         if(!finite)continue;
         model.meshRotation=QQuaternion(float(q[0].toDouble()),float(q[1].toDouble()),float(q[2].toDouble()),float(q[3].toDouble()));
-        if(std::abs(model.meshRotation.lengthSquared()-1)>1e-5)continue;
+        if(std::abs(model.meshRotation.lengthSquared()-1)>1e-5||!loadHousing(bytes,model))continue;
         const auto points=s["points"].toArray();
         if(points.size()!=(i==2?16:20))continue;
         bool okay=true;

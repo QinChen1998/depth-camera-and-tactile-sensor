@@ -20,8 +20,6 @@ def test_environment(qt_root, temporary, runtime=None):
     system = Path(os.environ.get('SystemRoot', 'C:/Windows')) / 'System32'
     env.update(PATH=str(runtime or qt_root / 'bin') + os.pathsep + str(system),
                QT_PLUGIN_PATH=str(runtime or qt_root / 'plugins'),
-               QML_IMPORT_PATH=str((runtime or qt_root) / 'qml'),
-               QML2_IMPORT_PATH=str((runtime or qt_root) / 'qml'),
                TEMP=str(temporary), TMP=str(temporary), RV_TEST_OFFLINE_ONLY='1')
     return env
 

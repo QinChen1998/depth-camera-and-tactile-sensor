@@ -3,11 +3,9 @@
 <TS version="2.1" language="zh_CN" sourcelanguage="en_US">
   <context>
     <name>DepthMapWidget</name>
-    <message><source>Depth Pro 2-S (ToF G)</source><translation>Depth Pro 2-S（ToF G）</translation></message>
-    <message><source>Depth Pro 2-S (ToF B, reuse)</source><translation>Depth Pro 2-S（ToF B，复用）</translation></message>
-    <message><source>Depth Pro 2-B (ToF G)</source><translation>Depth Pro 2-B（ToF G）</translation></message>
-    <message><source>Depth Pro 2-B (ToF B, reuse)</source><translation>Depth Pro 2-B（ToF B，复用）</translation></message>
-    <message><source>Calibrated 640×480 RGB depth on NVIDIA TensorRT FP16.</source><translation>在 NVIDIA TensorRT FP16 上推理标定后的 640×480 RGB 深度。</translation></message>
+
+
+
     <message><source>Fixed color range</source><translation>固定色标</translation></message>
     <message><source>Dynamic + histogram equalization</source><translation>动态＋直方图均衡</translation></message>
     <message><source>Depth map color mode</source><translation>深度图上色方式</translation></message>
@@ -15,7 +13,7 @@
     <message><source>Show monocular depth only</source><translation>仅显示单目深度</translation></message>
     <message><source>Restore corrected depth</source><translation>恢复校正深度</translation></message>
     <message><source>Show the same frame before ToF correction in the depth map and point cloud.</source><translation>在深度图和点云中查看同一帧的校正前单目结果。</translation></message>
-    <message><source>Try split correction</source><translation>试用分区校正</translation></message>
+
     <message><source>Show ToF points</source><translation>显示 ToF 测点</translation></message>
     <message><source>Hide ToF points</source><translation>隐藏 ToF 测点</translation></message>
     <message><source>Point centers use the measured depth color. White outlines mark points used to correct this frame.</source><translation>点的颜色表示测量深度，白圈标记参与本帧校正的测点。</translation></message>
@@ -31,18 +29,16 @@
     <message><source>Recording %1 s</source><translation>还剩 %1 秒</translation></message>
     <message><source>Recording: %1 frames, %2 dropped</source><translation>录制中，已写入 %1 帧，丢弃 %2 帧</translation></message>
     <message><source>Saved %1 frames (%2 dropped) to %3</source><translation>已保存 %1 帧（丢弃 %2 帧）到 %3</translation></message>
-    <message><source>Restore original G</source><translation>恢复原 G</translation></message>
-    <message><source>Use verified distant ToF for the background and paired ToF for the near hand. Applies to the depth map and point cloud.</source><translation>背景使用已确认的远处 ToF，近手使用当前帧配对的 ToF，深度图和点云同步切换。</translation></message>
+
+
     <message><source>Input angle (%1°)</source><translation>输入角度（%1°）</translation></message>
     <message><source>Native ToF angle</source><translation>原生 ToF 角度</translation></message>
     <message><source>Clockwise angle (0–359°):</source><translation>顺时针角度（0–359°）：</translation></message>
     <message><source>Rotate both native ToF displays clockwise. UniDepth, raw measurements and saved images keep their orientation.</source><translation>顺时针旋转两档原生 ToF 显示。UniDepth、原始测量和保存图像的方向保持不变。</translation></message>
-    <message><source>Board inference</source><translation>板端推理</translation></message>
-    <message><source>Board inference (1200K)</source><translation>板端推理（1200K）</translation></message>
+
     <message><source>Ordinary 48×32 ToF with 1200K main integration.</source><translation>48×32 普通 ToF，主积分为 1200K。</translation></message>
-    <message><source>Board inference high accuracy (1200K)</source><translation>板端推理高精度（1200K）</translation></message>
+
     <message><source>High-accuracy 48×32 ToF with 1200K main integration.</source><translation>48×32 高精度 ToF，主积分为 1200K。</translation></message>
-    <message><source>Board inference high accuracy</source><translation>板端推理高精度</translation></message>
     <message><source>Native 48×32 ToF radial depth; no neural inference.</source><translation>原生 48×32 ToF 径向深度，不执行神经网络推理。</translation></message>
     <message>
       <source>16x16 depth and same-frame photon input; 128x128 output. Camera disabled. Selecting another model restores its capture configuration.</source>
@@ -52,22 +48,10 @@
       <source>48x32 depth and photon input; 384x256 output. Same sensor field of view. Experimental weight reuse; physical accuracy is unverified.</source>
       <translation>48×32 深度和光子计数输入，384×256 输出，保持传感器原视场。实验性权重复用，实物精度尚未验证。</translation>
     </message>
-    <message>
-      <source>Host-assisted inference (G)</source>
-      <translation>上位机辅助推理（G）</translation>
-    </message>
-    <message>
-      <source>Host-assisted inference (B, reuse ToF)</source>
-      <translation>上位机辅助推理（B，复用 ToF）</translation>
-    </message>
-    <message>
-      <source>RGB frames can reuse the latest eligible 48×32 ToF measurement within the 200 ms pairing budget.</source>
-      <translation>RGB 帧可在 200 ms 配对预算内复用最新的合格 48×32 ToF 测量。</translation>
-    </message>
-    <message>
-      <source>RGB frames trigger inference. Each fresh 48×32 ToF measurement can update the global scale once.</source>
-      <translation>RGB 帧触发推理。每份新的 48×32 ToF 测量只更新一次全局尺度。</translation>
-    </message>
+
+
+
+
     <message>
       <source>Cannot open the folder. Please copy the path and open it manually.</source>
       <translation>无法打开文件夹，请复制地址后手动打开。</translation>
@@ -733,7 +717,10 @@
       <translation>RV1103 连接进度</translation>
     </message>
     <message><source>Select how the depth map is generated.</source><translation>选择深度图的生成方式。</translation></message>
-</context>
+    <message><source>Board inference</source><translation>板端推理</translation></message>
+    <message><source>Board inference high accuracy</source><translation>板端推理高精度</translation></message>
+    <message><source>Depth Pro 2-S uses 480×640 RGB and the latest eligible ToF measurement.</source><translation>Depth Pro 2-S 使用 480×640 RGB 和最新的合格 ToF 测量。</translation></message>
+  </context>
   <context>
     <name>ImagePresentation</name>
     <message>
@@ -1636,6 +1623,13 @@ Projected camera-Z %8 m</source>
       <translation>复用测量</translation>
     </message>
     <message><source>Metric depth unavailable: waiting for reliable dToF correction</source><translation>米制深度暂不可用，等待可靠的 ToF 校正</translation></message>
+    <message><source>Waiting for SDK camera frames...</source><translation>等待 SDK 视频帧…</translation></message>
+    <message><source>The SDK imaging switch did not complete.</source><translation>SDK 成像档位切换未完成。</translation></message>
+    <message><source>Recovering the SDK capture session...</source><translation>正在恢复 SDK 采集会话…</translation></message>
+    <message><source>Waiting for the current SDK capture generation...</source><translation>等待当前 SDK 采集会话的帧…</translation></message>
+    <message><source>Waiting for SDK depth frames...</source><translation>等待 SDK 深度帧…</translation></message>
+    <message><source>Waiting for the selected host depth frames...</source><translation>等待所选上位机模型的深度帧…</translation></message>
+    <message><source>Stopping</source><translation>正在停止</translation></message>
 </context>
   <context>
     <name>TactileView</name>
@@ -2310,7 +2304,8 @@ After reconnecting power, click 'Connect selected module' using the new values.<
       <source>ID %1 at baud %2 responds with CRC-valid sensor data. Communication with the new settings verified.</source>
       <translation>地址 %1 / 波特率 %2 已返回 CRC 正确的传感器数据，新参数通信验证通过。</translation>
     </message>
-  </context>
+      <message><source>Tactile surface unavailable.</source><translation>触觉表面不可用。</translation></message>
+</context>
   <context>
     <name>RvDeviceManagerDialog</name>
     <message><source>2026-11-09 calibration / F=6 (automatic)</source><translation>2026-11-09 标定 / F=6（自动应用）</translation></message>
@@ -2844,6 +2839,54 @@ New: %2</source>
   </message>
     <message><source>Connect via USB to read the public key automatically.</source><translation>点击“USB 一键连接”后会自动读取公钥。</translation></message>
     <message><source>The RV1103 is connected. Imaging will start after inference device detection.</source><translation>RV1103 已连接，推理设备检测完成后将自动启动成像。</translation></message>
+    <message><source>Correction grid progress</source><translation>矫正网格进度</translation></message>
+    <message><source>CXWL Depth Camera %1</source><translation>触想深度相机 %1</translation></message>
+    <message><source>%1 (current)</source><translation>%1（当前）</translation></message>
+    <message><source>Could not read the saved device list.</source><translation>无法读取已登记设备。</translation></message>
+    <message><source>Stop capture to switch or maintain saved devices.</source><translation>停止采集后可切换设备或维护板端文件。</translation></message>
+    <message><source>Connect a CXWL Depth Camera with a USB data cable to get started.</source><translation>使用 USB 数据线连接触想深度相机。</translation></message>
+    <message><source>Wait for the current device operation to finish, then try again.</source><translation>当前设备操作结束后再试。</translation></message>
+    <message><source>Connecting to CXWL Depth Camera via USB...</source><translation>正在通过 USB 连接触想深度相机…</translation></message>
+    <message><source>The CXWL Depth Camera was verified and selected for imaging.</source><translation>触想深度相机已验证并选为当前成像设备。</translation></message>
+    <message><source>Could not select the device. Reopen Device Manager and try again.</source><translation>无法选择设备。重新打开设备管理后再试。</translation></message>
+    <message><source>Remove the selected device from this computer?</source><translation>从本机移除所选设备？</translation></message>
+    <message><source>Device removed.</source><translation>设备已移除。</translation></message>
+    <message><source>Could not remove the device. Reopen Device Manager and try again.</source><translation>无法移除设备。重新打开设备管理后再试。</translation></message>
+    <message><source>Check board files</source><translation>检查板端文件</translation></message>
+    <message><source>Check the selected device, repair required files, and archive older runtime files on this computer?</source><translation>检查所选设备、修复所需文件，并将较早的运行文件归档到本机？</translation></message>
+    <message><source>Correction grid calibration is unavailable in offline mode.</source><translation>离线模式下无法重算矫正网格。</translation></message>
+    <message><source>Could not check the correction grid. Check the device connection.</source><translation>无法检查矫正网格，请检查设备连接。</translation></message>
+    <message><source>Checking the correction grid...</source><translation>正在检查矫正网格…</translation></message>
+    <message><source>Keep the depth camera still and the lighting steady. The device will collect 21 raw frames at six exposure levels to calculate the correction grid in memory. The frames will not be saved. The grid will be deployed after the ISP trial.</source><translation>请固定相机并保持光照稳定。设备将按六档曝光采集 21 帧原始图像，在内存中计算矫正网格。网格通过 ISP 试加载后部署。</translation></message>
+    <message><source>Choose Skip to continue connecting with the current camera settings.</source><translation>选择「跳过」可沿用当前相机设置继续连接。</translation></message>
+    <message><source>Check correction grid</source><translation>检查矫正网格</translation></message>
+    <message><source>Start calibration</source><translation>开始计算</translation></message>
+    <message><source>Skip</source><translation>跳过</translation></message>
+    <message><source>Capturing, calculating and applying the correction grid...</source><translation>正在采集、计算并应用矫正网格…</translation></message>
+    <message><source>This device does not have a compatible SC3336 correction grid.</source><translation>该设备缺少兼容的 SC3336 矫正网格。</translation></message>
+    <message><source>Could not start correction grid calibration. Stop capture and try again.</source><translation>无法启动矫正网格计算。停止采集后再试。</translation></message>
+    <message><source>Correction grid calibration cancelled.</source><translation>已取消矫正网格计算。</translation></message>
+    <message><source>The board IQ was replaced and verified.</source><translation>板端 IQ 已替换并通过读回验证。</translation></message>
+    <message><source>The board already uses this correction grid. The IQ was verified.</source><translation>板端正在使用该矫正网格，IQ 已通过验证。</translation></message>
+    <message><source>Correction grid replacement failed. The RAW exposure differences were insufficient. Improve the lighting and try again.</source><translation>矫正网格替换失败。RAW 曝光差异不足，改善照明后再试。</translation></message>
+    <message><source>Could not confirm the IQ replacement. Reconnect the device and check the grid status.</source><translation>无法确认 IQ 替换结果。重新连接后检查网格状态。</translation></message>
+    <message><source>Correction grid replacement failed. Check the device connection and read the grid status.</source><translation>矫正网格替换失败。检查设备连接后读取网格状态。</translation></message>
+    <message><source>Correction grid replacement failed. %1</source><translation>矫正网格替换失败。%1</translation></message>
+    <message><source>Device recovery is unavailable in offline mode.</source><translation>离线模式下无法恢复设备。</translation></message>
+    <message><source>Could not start device recovery. Stop capture and check the device connection.</source><translation>无法开始设备恢复。停止采集后检查设备连接。</translation></message>
+    <message><source>Board file check failed. Check the device connection and try again.</source><translation>板端文件检查失败。核对设备连接后再试。</translation></message>
+    <message><source>Recovering device...</source><translation>正在恢复设备…</translation></message>
+    <message><source>Checking board files...</source><translation>正在检查板端文件…</translation></message>
+    <message><source>Device recovery failed. Check the diagnostic report.</source><translation>设备恢复失败，请查看诊断报告。</translation></message>
+    <message><source>Device recovered. Click Start to begin capture.</source><translation>设备已恢复。点击「开始」采集。</translation></message>
+    <message><source>Board files checked. Archived rollback copies on this computer.</source><translation>已检查板端文件，并将回滚副本归档到本机。</translation></message>
+    <message><source>Board files are ready.</source><translation>板端文件已就绪。</translation></message>
+    <message><source>Host inference input rotation</source><translation>上位机推理输入朝向</translation></message>
+    <message><source>Inference input: 0°</source><translation>推理输入朝向 0°</translation></message>
+    <message><source>Inference input: 180°</source><translation>推理输入朝向 180°</translation></message>
+    <message><source>Saved devices</source><translation>已登记设备</translation></message>
+    <message><source>Recover device</source><translation>恢复设备</translation></message>
+    <message><source>Repair the board runtime and archive older rollback copies on this computer.</source><translation>修复板端运行文件，并将较早的回滚副本归档到本机。</translation></message>
 </context>
   <context>
     <name>RvTunerWidget</name>
@@ -3260,10 +3303,7 @@ Range %6 mm (radial) | SNR %7 | slot %8 | Signal %9 | Noise encoded %10</source>
       <source>Depth percentile 0%</source>
       <translation>深度百分位 0%</translation>
     </message>
-    <message>
-      <source>%1 / %2 frames · %3 triangles</source>
-      <translation>%1 / %2 帧 · %3 个三角面</translation>
-    </message>
+
     <message>
       <source>%1×%2 %3 · %4 triangles</source>
       <translation>%1×%2 %3 · %4 个三角面</translation>
@@ -3272,18 +3312,9 @@ Range %6 mm (radial) | SNR %7 | slot %8 | Signal %9 | Noise encoded %10</source>
       <source>48×32 ToF · %1 triangles</source>
       <translation>48×32 ToF · %1 个三角面</translation>
     </message>
-    <message>
-      <source>Accumulate point cloud</source>
-      <translation>叠加点云</translation>
-    </message>
-    <message>
-      <source>Overlay the latest 100 native ToF frames in camera coordinates.</source>
-      <translation>在相机坐标系中叠加最近 100 帧原生 ToF 点云。</translation>
-    </message>
-    <message>
-      <source>%1 / %2 frames · %3 points</source>
-      <translation>%1 / %2 帧 · %3 点</translation>
-    </message>
+
+
+
     <message>
       <source>Reset view</source>
       <translation>重置视角</translation>
@@ -3606,6 +3637,8 @@ Range %6 mm (radial) | SNR %7 | slot %8 | Signal %9 | Noise encoded %10</source>
   </message>
     <message><source>Inference Device...</source><translation>推理设备…</translation></message>
     <message><source>Open Settings &gt; Inference Device to detect usable devices, then click Start again.</source><translation>请在“设置 → 推理设备”中检测可用设备，然后重新点击开始。</translation></message>
+    <message><source>Could not connect the depth camera over USB.</source><translation>无法通过 USB 连接深度相机。</translation></message>
+    <message><source>The device needs board files before capture can start. Check and repair them now?</source><translation>采集需要更新板端文件。现在检查并修复？</translation></message>
 </context>
   <context>
     <name>RvUsbEnrollment</name>
@@ -3821,4 +3854,20 @@ SSH 指纹：%2
       <translation>网格间距 %1 m</translation>
     </message>
   </context>
+<context>
+    <name>DepthSdkClient</name>
+    <message><source>Starting capture...</source><translation>正在开始采集…</translation></message>
+    <message><source>Stopping capture...</source><translation>正在停止采集…</translation></message>
+    <message><source>Capture stopped</source><translation>采集已停止</translation></message>
+    <message><source>Could not start or resume capture. Check the device and try again.</source><translation>无法开始或恢复采集。检查设备后再试。</translation></message>
+    <message><source>Could not confirm that capture stopped. Try again.</source><translation>无法确认采集已停止，请重试。</translation></message>
+    <message><source>Camera is not started</source><translation>摄像头未启动</translation></message>
+</context>
+<context>
+    <name>TactileCanvas</name>
+    <message><source>Device disconnected / data unavailable</source><translation>设备未连接／数据不可用</translation></message>
+    <message><source>Interpolated counts</source><translation>插值计数</translation></message>
+    <message><source>Delta counts</source><translation>差值计数</translation></message>
+    <message><source>Raw counts</source><translation>原始计数</translation></message>
+</context>
 </TS>

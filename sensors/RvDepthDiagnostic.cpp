@@ -61,7 +61,7 @@ QImage paint(const std::vector<float> &z,const QSize &size,double lo,double hi,b
         for(int x=0;x<size.width();++x)p[x]=DepthColorScale::color(z[y*size.width()+x],lo,hi,true,black);}return image;
 }
 const RvCameraView::Profile &frameProfile(const QJsonObject &metadata) {
-    if(const auto *runtime=RvCameraView::depthPro2Runtime(metadata["assist_host_model"].toString()))
+    if(const auto *runtime=RvCameraView::recordedDepthPro2Runtime(metadata["assist_host_model"].toString()))
         return runtime->view;
     return RvCameraView::isPortrait(metadata)?RvCameraView::Portrait:RvCameraView::Rgb672VgaFp16;
 }
@@ -73,7 +73,7 @@ bool frameGridValid(const QJsonObject &metadata) {
 }
 bool validModelMetadata(const QJsonObject &metadata) {
     const auto model=metadata["assist_host_model"].toString();
-    const auto *runtime=RvCameraView::depthPro2Runtime(model);
+    const auto *runtime=RvCameraView::recordedDepthPro2Runtime(model);
     if(!runtime)return RvInferenceRuntime::validGraphMetadata(metadata);
     if(metadata["assist_backend"]!=QLatin1String(RvCameraView::DepthPro2Backend)
         ||metadata["assist_execution_device"]!=QLatin1String(RvCameraView::DepthPro2Backend))return false;
@@ -343,8 +343,10 @@ void SequenceRecorder::append(const QByteArray &depth,const QJsonObject &metadat
     const auto model = metadata["assist_host_model"].toString();
     const bool depthPro2 = RvCameraView::isDepthPro2(model);
     const bool split = metadata[RvAssistFusion::SplitCorrectionField] == true;
-    const auto revision = depthPro2 ? RvAssistFusion::vgaRevision(mode) : RvAssistFusion::portraitRevision(mode,split);
-    // Allow the faster VGA streams to absorb short disk stalls without blocking inference.
+    const auto revision = model == QLatin1String(RvCameraView::DepthPro2Model)
+        ? RvAssistFusion::DepthPro2PortraitRevision
+        : depthPro2 ? RvAssistFusion::vgaRevision(mode) : RvAssistFusion::portraitRevision(mode,split);
+    // Let the recorder absorb short disk stalls without blocking inference.
     const auto queueLimit = depthPro2 ? 32u : 8u;
     const bool pairValid = native.samples.isEmpty() ? metadata["dtof_present"] == false
                                                      : matchesPairedNative(metadata,native);
@@ -423,7 +425,8 @@ int replay(const QString &folder,const QString &reportPath,const QString &compar
         const bool current=portrait||depthPro2;
         require(m["assist_fusion_revision"]!=QLatin1String(RvAssistFusion::SplitCorrectionRevision),
                 "Split G replay requires the preceding RGB and ToF frame sequence");
-        const auto revision=depthPro2?RvAssistFusion::vgaRevision(mode):
+        const auto revision=depthPro2?(m["assist_host_model"]==QLatin1String(RvCameraView::DepthPro2Model)
+            ? RvAssistFusion::DepthPro2PortraitRevision : RvAssistFusion::vgaRevision(mode)):
             (portrait?RvAssistFusion::portraitRevision(mode):"global_scale_latest_native_rgb_v2");
         require((portrait&&archivedG(m))||((current?RvTofFrame::isHostFusionExperiment(mode):mode=="H")
                 &&m["assist_fusion_revision"]==QLatin1String(revision)),

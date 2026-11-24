@@ -1,5 +1,7 @@
 # UniDepth 推理设备选择
 
+本文记录退役的 UniDepth 多后端实现和历史安装包。运行示例使用当时版本的应用和模型包。
+
 推理设备支持当前 RGB672 UniDepth。启动时由独立进程枚举硬件、检查运行条件并显示候选。枚举最多运行 5 秒，超时使用已检测到的候选。实际执行推理时由当前设备加载并校验模型。
 
 启动时按设备身份恢复可用的已保存选项。默认优先顺序为 TensorRT-RTX、DirectML、OpenVINO GPU、OpenVINO CPU、ONNX Runtime CPU。混合 INT8 由用户手动选择。

@@ -5,8 +5,6 @@
 #include "UiStyle.h"
 #include "sensors/RvAssistDepth.h"
 #include "sensors/RvDepthDiagnostic.h"
-#include "sensors/RvInferenceSettings.h"
-#include "sensors/RvInferenceRuntime.h"
 #include "sensors/RvDeviceStore.h"
 #include "sensors/RvSessionController.h"
 #include "sensors/RvUsbEnrollment.h"
@@ -85,29 +83,12 @@ void configureSettings(const QString &directory,bool seedDefaults,bool importOri
 
 int main(int argc,char **argv)
 {
-    if(argc>1&&(std::strcmp(argv[1],"--inference-probe")==0||std::strcmp(argv[1],"--inference-enumerate")==0
-               ||std::strcmp(argv[1],"--inference-discovery-test")==0)){
-        QCoreApplication app(argc,argv);const auto args=app.arguments();
-        if(qEnvironmentVariable("RV_TEST_OFFLINE_ONLY")!="1")return 3;
-        if(args[1]=="--inference-enumerate"&&args.size()==3)return RvInferenceRuntime::writeEnumeration(args[2]);
-        if(args[1]=="--inference-probe"&&args.size()==4)return runRvInferenceProbe(args[2],args[3]);
-        if(args[1]=="--inference-discovery-test"&&args.size()==3){
-            QTemporaryDir settings;if(!settings.isValid())return 3;configureSettings(settings.path(),false);
-            return runRvInferenceDiscoveryTest(args[2]);
-        }
-        return 3;
-    }
     if(argc>1&&std::strcmp(argv[1],"--rv-assist-path-test")==0){
         QCoreApplication app(argc,argv);
         const auto args=app.arguments();
         if(args.size()!=3||qEnvironmentVariable("RV_TEST_OFFLINE_ONLY")!="1")return 3;
         extern int runRvAssistDepthTests(const QString &reportPath);
         return runRvAssistDepthTests(args[2]);
-    }
-    if(argc>1&&std::strcmp(argv[1],"--rv-assist-worker")==0){
-        QCoreApplication app(argc,argv);const auto args=app.arguments();
-        if(args.size()!=5||!RvAssistDepth::supportsHostModel(args[4]))return 3;
-        return runRvAssistWorker(args[2],args[3],args[4]);
     }
     if(argc>1&&std::strcmp(argv[1],"--rv-depth-diagnostic-replay")==0){
         QCoreApplication app(argc,argv);const auto args=app.arguments();
@@ -170,9 +151,9 @@ int main(int argc,char **argv)
         }
     }
     configureSettings(testing?temporary->path():configurationDirectory(),
-        !testing||flag=="--port-ui-smoke-test"||flag=="--inference-ui-test");
-    // USB validation observes G in its temporary test store.
-    if(usbEnrollmentLive)QSettings().setValue("depth/imagingScheme",QLatin1String(RvSessionController::GlobalRgbImagingScheme));
+        !testing||flag=="--port-ui-smoke-test");
+    // USB validation selects host assisted depth in its temporary test store.
+    if(usbEnrollmentLive)QSettings().setValue("depth/imagingScheme",QLatin1String(RvSessionController::HostAssistImagingScheme));
     LanguageManager language;
     if(flag=="--tactile-3d-test")return runTactile3DTests(report);
     if(flag=="--tactile-render-test")return runTactileRenderSmoke(report);
@@ -192,10 +173,8 @@ int main(int argc,char **argv)
         }
         return passed?0:1;
     }
-    if(flag=="--inference-ui-test"&&qEnvironmentVariable("RV_TEST_OFFLINE_ONLY")!="1")return 3;
-    if(testing&&flag!="--port-ui-smoke-test"&&flag!="--inference-ui-test"&&!live)return 3;
+    if(testing&&flag!="--port-ui-smoke-test"&&!live)return 3;
     SensorMainWindow window(&language);window.show();
-    if(flag=="--inference-ui-test")return runRvInferenceUiTest(&window,report);
     if(usbEnrollmentLive)return runUsbEnrollmentLiveValidation(window,report);
     if(hostAssistLive)return runHostAssistLiveValidation(window,report);
     if(hostThermalLive)return runHostThermalLiveValidation(window,report);
@@ -219,8 +198,5 @@ int main(int argc,char **argv)
         return result?result:(preserved?0:1);
     }
     if(qEnvironmentVariable("RV_TEST_OFFLINE_ONLY")!="1")window.tactile()->display()->connectDefaultSerial();
-    auto *inference=RvInferenceSettings::instance();
-    watchRvUsbDevices(window.session(),&window);
-    QTimer::singleShot(0,inference,&RvInferenceSettings::detectDevices);
     app.setQuitOnLastWindowClosed(true);return app.exec();
 }

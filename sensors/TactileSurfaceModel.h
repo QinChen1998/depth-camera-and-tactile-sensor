@@ -13,13 +13,15 @@ struct TactileInterpolatedPoint {
     QVector<double> weights;
 };
 
-// Offline mesh projection, in metres. The QML sensor root alone converts to mm.
+// Offline mesh projection, in metres.
 // This is display geometry, not a calibrated sensor or a control/collision model.
 struct TactileSurfaceModel {
     bool valid=false;
     QUrl mesh;
     QVector3D meshPosition, boundsCenter, boundsSize, resultantPosition;
     QQuaternion meshRotation;
+    QVector<QVector3D> meshVertices;
+    QVector<quint32> meshIndices;
     QVector<QVector3D> positions, normals;
     std::array<QVector<TactileInterpolatedPoint>,2> interpolation;
 };

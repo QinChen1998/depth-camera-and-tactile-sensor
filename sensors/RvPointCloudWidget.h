@@ -2,20 +2,17 @@
 
 #include "PointCloudColorScale.h"
 #include "RvTofFrame.h"
-#include "SceneInstanceBuffer.h"
+#include "RvPointCloudCanvas.h"
 #include <QFutureWatcher>
 #include <QPromise>
 #include <QTimer>
 #include <QVector3D>
 #include <QWidget>
-#include <deque>
 
 class QComboBox;
 class QDoubleSpinBox;
 class QLabel;
 class QPushButton;
-class QQuick3DGeometry;
-class QQuickWidget;
 class QVBoxLayout;
 class RvSessionController;
 namespace RvCameraView { struct Profile; }
@@ -35,13 +32,9 @@ private:
         QVector<SceneInstanceBuffer::InstanceTableEntry> points;
         QVector<quint32> indices;
     };
-    struct MeshVertex {
-        QVector3D position;
-        QVector4D color;
-    };
+    using MeshVertex = RvPointCloudCanvas::Vertex;
     struct MeshData {
         QByteArray vertices, indices;
-        QVector3D minimum, maximum;
     };
     struct DepthProjection {
         QByteArray points;
@@ -58,7 +51,7 @@ private:
     void presentLatest();
     void changeDisplayMode();
     NativeFrame projectTofFrame(bool mesh) const;
-    void presentNativeFrames();
+    void presentNativeFrame();
     void publishMesh(const MeshData &mesh);
     static MeshData makeMeshData(const QVector<MeshVertex> &vertices, const QVector<quint32> &indices);
     void startDepthConversion();
@@ -66,9 +59,6 @@ private:
     static void projectDepth(QPromise<DepthProjection> &work, const QByteArray &depth,
                              const RvCameraView::Profile &camera, double colorMinimum, double colorMaximum,
                              bool dynamic, bool mesh);
-    void setAccumulating(bool enabled);
-    void appendAccumulatedFrame();
-    void clearAccumulatedFrames();
     void colorNativeFrame(NativeFrame &frame) const;
     void setupDisplayControls(QVBoxLayout &layout);
     void applyDepthColorRange();
@@ -80,13 +70,11 @@ private:
     RvSessionController *const m_session;
     SceneInstanceBuffer *const m_instances;
     SceneInstanceBuffer *const m_depthInstances;
-    QQuick3DGeometry *const m_meshGeometry;
-    QQuickWidget *const m_view;
+    RvPointCloudCanvas *const m_view;
     QLabel *const m_status;
     QComboBox *const m_displayMode;
     QComboBox *const m_colorMode;
     QPushButton *const m_pause;
-    QPushButton *const m_accumulate;
     QPushButton *const m_reset;
     QWidget *const m_diameterControls;
     QWidget *const m_rangeControls;
@@ -101,8 +89,6 @@ private:
     QDoubleSpinBox *const m_colorMaximum;
     QPushButton *const m_applyRange;
     QTimer m_expiry;
-    QTimer m_accumulationUpdate;
-    std::deque<NativeFrame> m_accumulatedFrames;
     RvTofFrame m_latestTof;
     QByteArray m_latestDepth, m_latestMonocularDepth;
     QFutureWatcher<DepthProjection> m_depthConversion;

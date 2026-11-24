@@ -1,19 +1,39 @@
 #pragma once
 
 #include <QColor>
-#include <QQuaternion>
+#include <QObject>
 #include <QVector>
-#include <QtQuick3D/QQuick3DInstancing>
+#include <QVector3D>
+#include <QVector4D>
 #include <cstring>
 #include <utility>
 
-class SceneInstanceBuffer final : public QQuick3DInstancing {
+class SceneInstanceBuffer final : public QObject {
     Q_OBJECT
     Q_PROPERTY(int count READ count NOTIFY instanceTableChanged)
 
 public:
-    explicit SceneInstanceBuffer(QObject *owner) { QObject::setParent(owner); }
+    struct InstanceTableEntry {
+        QVector3D position;
+        float diameter;
+        QVector4D color;
+        QVector3D getPosition() const { return position; }
+    };
+
+    explicit SceneInstanceBuffer(QObject *owner) : QObject(owner) {}
     int count() const { return m_count; }
+    const QByteArray &table() const { return m_buffer; }
+    InstanceTableEntry instance(int index) const {
+        Q_ASSERT(index >= 0 && index < count());
+        InstanceTableEntry instance;
+        std::memcpy(&instance, m_buffer.constData() + qsizetype(index) * sizeof(instance), sizeof(instance));
+        return instance;
+    }
+    QVector3D instancePosition(int index) const { return instance(index).position; }
+    QColor instanceColor(int index) const {
+        const auto c = instance(index).color;
+        return QColor::fromRgbF(c.x(), c.y(), c.z(), c.w());
+    }
 
     void setEntries(const QVector<InstanceTableEntry> &entries)
     {
@@ -28,22 +48,11 @@ public:
         Q_ASSERT(table.size() % sizeof(InstanceTableEntry) == 0);
         m_count = int(table.size() / sizeof(InstanceTableEntry));
         m_buffer = std::move(table);
-        markDirty();
+        emit instanceTableChanged();
     }
 
-    static InstanceTableEntry entry(const QVector3D &position, const QVector3D &scale,
-                                    const QQuaternion &rotation, const QColor &color)
-    {
-        return calculateTableEntryFromQuaternion(position, scale, rotation, color);
-    }
-
-protected:
-    QByteArray getInstanceBuffer(int *count) override
-    {
-        if (count)
-            *count = m_count;
-        return m_buffer;
-    }
+signals:
+    void instanceTableChanged();
 
 private:
     QByteArray m_buffer;

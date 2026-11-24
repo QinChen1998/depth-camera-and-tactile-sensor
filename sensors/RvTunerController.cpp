@@ -60,6 +60,8 @@ void RvTunerController::start(const RvTuner::Settings &s){
     if(exclusive()||pending()||m_state==Preflight||m_state==Handover)return;
     try{
         s.validate(); // Capacity errors must precede all handover effects.
+        if(m_session->usesDepthSdk()&&!m_session->userStopped())
+            throw std::runtime_error("Stop SDK capture before opening the exclusive ToF tuner");
         if(m_session->busy()||m_session->m_previewControl->state()!=QProcess::NotRunning)throw std::runtime_error("A shared imaging transition is still active; wait for it to finish");
         if(!m_session->controlledSource())throw std::runtime_error("Select the trusted RV device source before tuning");
         RvDeviceStore store(m_session->deviceStorePath());const auto device=store.byId(m_session->deviceProfile().id);

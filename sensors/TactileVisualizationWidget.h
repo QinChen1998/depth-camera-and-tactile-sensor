@@ -14,7 +14,7 @@ class QPushButton;
 class QToolButton;
 class QComboBox;
 class QButtonGroup;
-class QQuickWidget;
+class TactileCanvas;
 class TactileSceneAdapter;
 class QCheckBox;
 class TactileCurveCanvas;
@@ -173,7 +173,7 @@ private:
     int m_finger = 0;
     std::array<int,3> m_selectedPoints{};
     tactile::Frame m_tareFrame;
-    QQuickWidget *m_canvas;
+    TactileCanvas *m_canvas;
     TactileSceneAdapter *m_adapter;
     QPushButton *m_pointsToggle;
     QPushButton *m_resultantToggle, *m_componentsToggle;

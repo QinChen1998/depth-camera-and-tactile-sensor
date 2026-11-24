@@ -1,7 +1,6 @@
 ﻿#include "TactileDockWidget.h"
 #include <QCloseEvent>
 #include <QAction>
-#include <QQuickWidget>
 TactileDockWidget::TactileDockWidget(QWidget *parent) : QDockWidget(parent)
 {
     setObjectName("tactileDock");
@@ -14,9 +13,6 @@ TactileDockWidget::TactileDockWidget(QWidget *parent) : QDockWidget(parent)
     m_visibilityTimer.setSingleShot(true); m_visibilityTimer.setInterval(150);
     connect(this,&QDockWidget::visibilityChanged,this,[this](bool visible){m_contentVisible=visible;m_visibilityTimer.start();});
     connect(this,&QDockWidget::topLevelChanged,this,[this]{m_visibilityTimer.start();});
-    connect(m_display->findChild<QQuickWidget *>("tactileQuickView"),&QQuickWidget::statusChanged,this,[this](QQuickWidget::Status status){
-        if(status==QQuickWidget::Ready) m_visibilityTimer.start();
-    });
     connect(&m_visibilityTimer,&QTimer::timeout,this,[this]{
         const bool visible=m_contentVisible && isVisible() && !isMinimized() && !window()->isMinimized();
         // restoreState() shows the dock without invoking its menu action.

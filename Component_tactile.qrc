@@ -1,11 +1,8 @@
 <RCC>
   <qresource prefix="/tactile">
     <file alias="surfaces.json">assets/tactile/surfaces.json</file>
-    <file alias="fingertip.mesh">assets/tactile/fingertip.mesh</file>
-    <file alias="terminal.mesh">assets/tactile/terminal.mesh</file>
-    <file alias="ultrathin.mesh">assets/tactile/ultrathin.mesh</file>
-  </qresource>
-  <qresource prefix="/qml">
-    <file alias="TactileView.qml">qml/TactileView.qml</file>
+    <file alias="fingertip.ply">assets/tactile/fingertip.ply</file>
+    <file alias="terminal.ply">assets/tactile/terminal.ply</file>
+    <file alias="ultrathin.ply">assets/tactile/ultrathin.ply</file>
   </qresource>
 </RCC>
