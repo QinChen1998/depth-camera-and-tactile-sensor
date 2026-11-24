@@ -10,6 +10,10 @@ constexpr int FreshMs=1000;
 // These LSG receipt fields are independent of the native measurement grid.
 constexpr int ReceiptWidth=256, ReceiptHeight=256;
 constexpr char NativeEngine[]="native-hd-capture-v1";
+constexpr int Native48ExtendedIntegrationK=1200;
+// The shared native source also uses these names when serializing LSG receipts.
+constexpr int Width=ReceiptWidth, Height=ReceiptHeight;
+inline const char *engine(int){return NativeEngine;}
 constexpr const char* Protocol="LSG1";
 constexpr const char* PairedProtocol="LSG2";
 constexpr const char* NativeCaptureProtocolV2="native-m48-m16-m8-v2";

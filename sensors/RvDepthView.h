@@ -2,12 +2,13 @@
 #include "ImagePresentation.h"
 #include "DepthColorScale.h"
 #include "ImageHoverTip.h"
+#include "RvTofFrame.h"
 #include <QtWidgets/QWidget>
 #include <QtGui/QPainter>
 #include <QtGui/QMouseEvent>
 #include <QtCore/QtEndian>
-#include <QtCore/QJsonObject>
 #include <QtCore/QJsonArray>
+#include <QtCore/QJsonObject>
 #include <QtCore/QTimer>
 #include <QtCore/QElapsedTimer>
 #include <vector>
@@ -17,6 +18,7 @@
 #include <cmath>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <chrono>
 
 // Metric display: host camera-Z or explicitly selected native radial metres.
@@ -30,7 +32,7 @@ public:
  static QString tr(const char* s){return QCoreApplication::translate("RvDepthView",s);}
  explicit RvDepthView(QWidget* parent=nullptr);
  ~RvDepthView() override;
- void setRadialMode(){radial=true;setDisplayRange(.1,1.4);setBlackOutsideRange(true);}
+ void setRadialMode(bool nativeOrientation=true){radial=true;nativeRadial=nativeOrientation;setDisplayRange(.1,1.4);setBlackOutsideRange(true);}
  void setDisplayRotationDegrees(int degrees){rotation=ImagePresentation::normalizedRotation(degrees);target={};refreshHover();update();}
  int displayRotationDegrees()const{return rotation;}
  void setNativeDisplayRotationDegrees(int degrees){
@@ -46,13 +48,20 @@ public:
  void setNativeGridSize(QSize size){nativeGridSize=size;target={};refreshHover();update();}
  QSizeF presentationSize()const{
   const auto grid=nativeGridSize.isEmpty()?depthSize:nativeGridSize;
+  if(nativeRadial)return QSizeF(grid.height(),grid.width());
   if(radial)return QSizeF(grid);
   if(!imageSourceRect.isEmpty()&&imageSourceRect!=image.rect())return imageSourceRect.size();
-  if(image.size()==QSize(480,640))return image.size();
+  if(image.size()==QSize(480,640)||image.size()==QSize(640,480))return image.size();
   return QSizeF(144,81);
  }
  QRect displayedSourceRect()const{return imageSourceRect;}
- bool setDepth(const QByteArray& bytes,const QJsonObject& metadata,const QByteArray& diagnostic={});
+ bool setDepth(const QByteArray& bytes,const QJsonObject& m,const QByteArray& diagnostic={},
+               const QImage &pairedRgb={},const RvTofFrame &tof={});
+ bool setMonocularVisible(bool visible);
+ void setTofPointsVisible(bool visible){showTofPoints=visible;update();}
+ void setPairedRgbVisible(bool visible);
+ bool hasPairedRgb()const{return !held&&!depthOverlay.rgb.isNull();}
+ bool setCoverage(const QByteArray &values);
  // Retain only display pixels; expired metric values must not remain queryable.
  void holdFrame();
  bool frameHeld()const{return held;}
@@ -66,6 +75,7 @@ public:
  double displayMaximum()const{return rangeMaximum;}
  void setBlackOutsideRange(bool enabled){if(blackOutside==enabled)return;blackOutside=enabled;recolor();}
  bool blackOutsideRange()const{return blackOutside;}
+ void setDynamicColoring(bool enabled);
  QRgb colorAt(int x,int y)const{const auto current=presentationImage();return current.isNull()?qRgb(0,0,0):current.pixel(x,y);}
  // Presentation may include predictions outside the dToF
  // field. Numeric snapshots and depthAt() retain the original geometric mask.
@@ -109,18 +119,26 @@ protected:
    QRectF fill=bar;fill.setWidth(width*loadingProgress/100.0);p.setBrush(QColor("#249cff"));p.drawRoundedRect(fill,4,4);
    p.setPen(QColor("#9ba9b9"));p.drawText(QRectF(10,bar.bottom()+12,this->width()-20,36),Qt::AlignCenter,loadingState==1?tr("Preparing GPU and model. Please wait..."):tr("Model ready"));return;
   }
-  if(image.isNull()){
-   p.drawText(rect(),Qt::AlignCenter,emptyReason.isEmpty()?tr("Waiting for RV1103 depth"):emptyReason);return;
+  const bool rgbView=showPairedRgb&&!held;
+  const auto &shown=rgbView?imageOverlay.rgb:image;
+  if(shown.isNull()){
+   p.drawText(rect(),Qt::AlignCenter,rgbView?tr("Waiting for a paired RGB frame...")
+        :emptyReason.isEmpty()?tr("Waiting for RV1103 depth"):emptyReason);
+   return;
   }
+  const auto source=rgbView?shown.rect():imageSourceRect;
   // Fit the calibrated presentation geometry before applying display rotation.
   target=nativeRotationEnabled?nativePresentationTransform().mapRect(QRectF(QPointF(),presentationSize()))
-      :ImagePresentation::fittedRect(QRectF(rect()).adjusted(8,8,-8,-8),presentationSize(),rotation);
+      :ImagePresentation::fittedRect(QRectF(rect()).adjusted(8,8,-8,-8),rgbView?QSizeF(source.size()):presentationSize(),rotation);
   setProperty("presentationRect",target);
+  const auto display=nativeRadial?shown.transformed(QTransform().rotate(-90)).flipped(Qt::Horizontal):shown;
+  p.setRenderHint(QPainter::SmoothPixmapTransform,radial&&depthSize!=QSize(48,32));
   if(nativeRotationEnabled){
    p.save();p.setTransform(nativePresentationTransform(),true);
-   p.drawImage(QRectF(QPointF(),presentationSize()),image,QRectF(imageSourceRect));p.restore();
-  }else ImagePresentation::drawImage(p,target,image,rotation,QRectF(imageSourceRect));
-  setProperty("displaySourceRect",imageSourceRect);
+   p.drawImage(QRectF(QPointF(),presentationSize()),display,nativeRadial?QRectF(display.rect()):QRectF(source));p.restore();
+  }else ImagePresentation::drawImage(p,target,display,rotation,nativeRadial?QRectF(display.rect()):QRectF(source));
+  paintTofPoints(p,source);
+  setProperty("displaySourceRect",source);
   if(!held&&(paintedId!=imageFrameId||paintedGeneration!=imageGeneration)){
    if(!fpsClock.isValid())fpsClock.start();
    const auto now=fpsClock.elapsed();
@@ -159,11 +177,26 @@ private:
  double guiSetDepthMs=0;
  ImageHoverTip hoverTip;
  void refreshHover();
- QByteArray monocularDiagnostic;
+ QByteArray sideDiagnostic;
+ QByteArray monocularDepth;
+ bool showMonocular=false;
+ bool showTofPoints=false,showPairedRgb=false;
+ struct OverlayFrame {
+  QImage rgb;
+  RvTofFrame native;
+  QJsonArray adopted;
+ };
+ struct TofPoint {QPointF pixel;float cameraZ;bool adopted;};
+ OverlayFrame depthOverlay;
+ mutable OverlayFrame imageOverlay;
+ mutable std::optional<std::vector<TofPoint>> imageTofPoints;
+ std::vector<TofPoint> projectTofPoints()const;
+ void paintTofPoints(QPainter &painter,const QRectF &source)const;
+ bool dynamicColoring=false;
  double sideScale=1;
  int sidePixels=0;
- mutable int imageSidePixels=0;
- bool held=false;QSize nativeGridSize;
+ mutable bool imagePresentationOnly=false;
+ bool nativeRadial=false,held=false;QSize nativeGridSize;
  struct Colorizer;
  std::unique_ptr<Colorizer> colorizer;
  void recolor();
@@ -182,6 +215,6 @@ private:
  double loadingProgress=0,finishFrom=0;QTimer loadingTimer;QElapsedTimer loadingClock;
  int rotation=0;
  int nativeRotation=0;bool nativeRotationEnabled=false,nativeDisplayMirrored=false;
- QString emptyReason;std::shared_ptr<const std::vector<float>> depth;QSize depthSize;mutable QImage image;QRectF target;
+ QString emptyReason;std::shared_ptr<const std::vector<float>> depth;QSize depthSize;QByteArray coverage;mutable QImage image;QRectF target;
  QRect depthSourceRect;mutable QRect imageSourceRect;
 };

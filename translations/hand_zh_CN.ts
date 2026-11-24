@@ -3,44 +3,45 @@
 <TS version="2.1" language="zh_CN" sourcelanguage="en_US">
   <context>
     <name>DepthMapWidget</name>
-    <message>
-      <source>Connecting to RV1103 automatically...</source>
-      <translation>正在自动连接 RV1103…</translation>
-    </message>
-    <message>
-      <source>RV1103 connected</source>
-      <translation>RV1103 已连接</translation>
-    </message>
-    <message>
-      <source>Checking the USB connection and board files...</source>
-      <translation>正在检查 USB 连接和板端文件…</translation>
-    </message>
-    <message>
-      <source>RV1103 detected. Checking available inference devices...</source>
-      <translation>已检测到 RV1103，正在识别可用的推理设备…</translation>
-    </message>
-    <message>
-      <source>Loading the inference model...</source>
-      <translation>正在加载推理模型…</translation>
-    </message>
-    <message>
-      <source>Starting camera and depth capture...</source>
-      <translation>正在启动摄像头和深度采集…</translation>
-    </message>
-    <message>
-      <source>Waiting for the first depth image...</source>
-      <translation>正在等待首帧深度图…</translation>
-    </message>
-    <message>
-      <source>RV1103 connection progress</source>
-      <translation>RV1103 连接进度</translation>
-    </message>
-    <message><source>Select how the depth map is generated.</source><translation>选择深度图的生成方式。</translation></message>
+    <message><source>Depth Pro 2-S (ToF G)</source><translation>Depth Pro 2-S（ToF G）</translation></message>
+    <message><source>Depth Pro 2-S (ToF B, reuse)</source><translation>Depth Pro 2-S（ToF B，复用）</translation></message>
+    <message><source>Depth Pro 2-B (ToF G)</source><translation>Depth Pro 2-B（ToF G）</translation></message>
+    <message><source>Depth Pro 2-B (ToF B, reuse)</source><translation>Depth Pro 2-B（ToF B，复用）</translation></message>
+    <message><source>Calibrated 640×480 RGB depth on NVIDIA TensorRT FP16.</source><translation>在 NVIDIA TensorRT FP16 上推理标定后的 640×480 RGB 深度。</translation></message>
+    <message><source>Fixed color range</source><translation>固定色标</translation></message>
+    <message><source>Dynamic + histogram equalization</source><translation>动态＋直方图均衡</translation></message>
+    <message><source>Depth map color mode</source><translation>深度图上色方式</translation></message>
+    <message><source>Equalize depths from 0.10 to 10.00 m in each frame. Colors can vary across frames.</source><translation>逐帧均衡 0.10–10.00 m 的有效深度。同一深度的颜色可能随帧变化。</translation></message>
+    <message><source>Show monocular depth only</source><translation>仅显示单目深度</translation></message>
+    <message><source>Restore corrected depth</source><translation>恢复校正深度</translation></message>
+    <message><source>Show the same frame before ToF correction in the depth map and point cloud.</source><translation>在深度图和点云中查看同一帧的校正前单目结果。</translation></message>
+    <message><source>Try split correction</source><translation>试用分区校正</translation></message>
+    <message><source>Show ToF points</source><translation>显示 ToF 测点</translation></message>
+    <message><source>Hide ToF points</source><translation>隐藏 ToF 测点</translation></message>
+    <message><source>Point centers use the measured depth color. White outlines mark points used to correct this frame.</source><translation>点的颜色表示测量深度，白圈标记参与本帧校正的测点。</translation></message>
+    <message><source>ToF / RGB alignment</source><translation>ToF / RGB 对照</translation></message>
+    <message><source>Return to depth</source><translation>返回深度图</translation></message>
+    <message><source>Show projected ToF points on the RGB image paired with this depth frame.</source><translation>在与当前深度帧配对的 RGB 图上显示 ToF 投影测点。</translation></message>
+    <message><source>Record diagnostic (10 s)</source><translation>录制诊断（10秒）</translation></message>
+    <message><source>Record paired RGB, native ToF, monocular and corrected depth for 10 seconds (about 1 GB).</source><translation>录制 10 秒配对 RGB、原生 ToF、单目深度和校正深度，约占 1 GB。</translation></message>
+    <message><source>Open recording folder</source><translation>打开录制目录</translation></message>
+    <message><source>Select diagnostic recording folder</source><translation>选择诊断录制目录</translation></message>
+    <message><source>Wait for a fresh host-assisted depth frame.</source><translation>请等待上位机辅助推理产生新的深度帧。</translation></message>
+    <message><source>Recording failed: %1</source><translation>录制失败：%1</translation></message>
+    <message><source>Recording %1 s</source><translation>还剩 %1 秒</translation></message>
+    <message><source>Recording: %1 frames, %2 dropped</source><translation>录制中，已写入 %1 帧，丢弃 %2 帧</translation></message>
+    <message><source>Saved %1 frames (%2 dropped) to %3</source><translation>已保存 %1 帧（丢弃 %2 帧）到 %3</translation></message>
+    <message><source>Restore original G</source><translation>恢复原 G</translation></message>
+    <message><source>Use verified distant ToF for the background and paired ToF for the near hand. Applies to the depth map and point cloud.</source><translation>背景使用已确认的远处 ToF，近手使用当前帧配对的 ToF，深度图和点云同步切换。</translation></message>
     <message><source>Input angle (%1°)</source><translation>输入角度（%1°）</translation></message>
     <message><source>Native ToF angle</source><translation>原生 ToF 角度</translation></message>
     <message><source>Clockwise angle (0–359°):</source><translation>顺时针角度（0–359°）：</translation></message>
     <message><source>Rotate both native ToF displays clockwise. UniDepth, raw measurements and saved images keep their orientation.</source><translation>顺时针旋转两档原生 ToF 显示。UniDepth、原始测量和保存图像的方向保持不变。</translation></message>
     <message><source>Board inference</source><translation>板端推理</translation></message>
+    <message><source>Board inference (1200K)</source><translation>板端推理（1200K）</translation></message>
+    <message><source>Ordinary 48×32 ToF with 1200K main integration.</source><translation>48×32 普通 ToF，主积分为 1200K。</translation></message>
+    <message><source>Board inference high accuracy (1200K)</source><translation>板端推理高精度（1200K）</translation></message>
+    <message><source>High-accuracy 48×32 ToF with 1200K main integration.</source><translation>48×32 高精度 ToF，主积分为 1200K。</translation></message>
     <message><source>Board inference high accuracy</source><translation>板端推理高精度</translation></message>
     <message><source>Native 48×32 ToF radial depth; no neural inference.</source><translation>原生 48×32 ToF 径向深度，不执行神经网络推理。</translation></message>
     <message>
@@ -50,6 +51,22 @@
     <message>
       <source>48x32 depth and photon input; 384x256 output. Same sensor field of view. Experimental weight reuse; physical accuracy is unverified.</source>
       <translation>48×32 深度和光子计数输入，384×256 输出，保持传感器原视场。实验性权重复用，实物精度尚未验证。</translation>
+    </message>
+    <message>
+      <source>Host-assisted inference (G)</source>
+      <translation>上位机辅助推理（G）</translation>
+    </message>
+    <message>
+      <source>Host-assisted inference (B, reuse ToF)</source>
+      <translation>上位机辅助推理（B，复用 ToF）</translation>
+    </message>
+    <message>
+      <source>RGB frames can reuse the latest eligible 48×32 ToF measurement within the 200 ms pairing budget.</source>
+      <translation>RGB 帧可在 200 ms 配对预算内复用最新的合格 48×32 ToF 测量。</translation>
+    </message>
+    <message>
+      <source>RGB frames trigger inference. Each fresh 48×32 ToF measurement can update the global scale once.</source>
+      <translation>RGB 帧触发推理。每份新的 48×32 ToF 测量只更新一次全局尺度。</translation>
     </message>
     <message>
       <source>Cannot open the folder. Please copy the path and open it manually.</source>
@@ -548,12 +565,20 @@
       <translation>RV1103 计算 | %1 | %2×%3</translation>
     </message>
     <message>
-      <source>Host-assisted inference</source>
-      <translation>上位机辅助推理</translation>
+      <source>DEPTHOR Small V3 FP32 (experimental)</source>
+      <translation>DEPTHOR Small V3 FP32（实验）</translation>
     </message>
     <message>
-      <source>RGB frames can reuse the latest eligible 48×32 ToF measurement within the 200 ms pairing budget.</source>
-      <translation>RGB 可在 200 ms 配对预算内复用最新的合格 48×32 ToF 测量。</translation>
+      <source>DEPTHOR Small V3 FP16 (experimental)</source>
+      <translation>DEPTHOR Small V3 FP16（实验）</translation>
+    </message>
+    <message>
+      <source>DEPTHOR Small V3 INT8 (accuracy degraded, experimental)</source>
+      <translation>DEPTHOR Small V3 INT8（精度退化，实验）</translation>
+    </message>
+    <message>
+      <source>Host-assisted inference</source>
+      <translation>上位机辅助推理</translation>
     </message>
     <message>
       <source>Requires saved 16 x 16 ordinary or high accuracy ToF settings with one target and Noise off. Does not change saved sensor settings.</source>
@@ -616,12 +641,40 @@
       <translation>A：原融合 / RGB 触发</translation>
     </message>
     <message>
+      <source>B: Current fusion / ToF</source>
+      <translation>B：原融合 / ToF 触发</translation>
+    </message>
+    <message>
+      <source>UniDepth only. A uses the original RGB inference cadence; B uses current fusion on each new ToF measurement; C adds edge-preserving residual correction. RGB preview stays independent. Switching clears old depth and waits for fresh input. C has not shown better held-out real-scene accuracy.</source>
+      <translation>仅用于 UniDepth。A 保持原 RGB 推理节奏；B 在每次新 ToF 测量时使用原融合；C 增加保边残差校正。RGB 预览保持独立。切换后清除旧深度并等待新输入。C 尚未证明实景留出点精度更好。</translation>
+    </message>
+    <message>
+      <source>B: Fusion + local recovery / ToF</source>
+      <translation>B：原融合 + 局部恢复 / ToF 触发</translation>
+    </message>
+    <message>
+      <source>G: Global scale only / RGB (fast trial)</source>
+      <translation>G：仅全局尺度 / RGB 触发（快速试验）</translation>
+    </message>
+    <message>
       <source>Host assisted depth inference (wide RGB 576, fast trial)</source>
       <translation>上位机辅助深度推理 宽视野 RGB 576（快速试验）</translation>
     </message>
     <message>
       <source>Host assisted depth inference (wide RGB 576 FP16, temporary candidate)</source>
       <translation>上位机辅助深度推理 宽视野 RGB 576 FP16（临时候选）</translation>
+    </message>
+    <message>
+      <source>UniDepth only. A uses original fusion at RGB cadence. B recovers coherent unsupported local groups on new ToF measurements. G uses global scale only at RGB cadence; it omits local corrections and can lose local metric accuracy. A fresh RGB prediction may use a clearly identified historical scale between ToF measurements. Diagnostic snapshots save one matched input only when clicked.</source>
+      <translation>仅用于 UniDepth。A 按 RGB 节奏运行原融合；B 在新 ToF 测量到达时恢复可信局部测点组；G 按 RGB 节奏只校正全局尺度，省略局部校正，局部米制精度可能降低。两次 ToF 测量之间的新 RGB 预测可能使用明确标记的历史尺度。诊断快照仅在点击时保存一份配对输入。</translation>
+    </message>
+    <message>
+      <source>UniDepth only. A uses original fusion at RGB cadence. B recovers coherent unsupported local groups on new ToF measurements. RGB preview stays independent. Diagnostic snapshots save one matched input only when clicked.</source>
+      <translation>仅用于 UniDepth。A 按 RGB 节奏运行原融合；B 在新 ToF 测量到达时恢复可信的局部测点组。RGB 预览独立。诊断快照仅在点击时保存一份配对输入。</translation>
+    </message>
+    <message>
+      <source>UniDepth only. A keeps the original fusion and RGB cadence. B keeps supported original results and recovers coherent unsupported local groups on new ToF measurements. C uses the full edge-residual experiment. RGB preview stays independent. Diagnostic snapshots save one matched input only when clicked.</source>
+      <translation>仅用于 UniDepth。A 保留旧融合与 RGB 节奏；B 保留已有支持的旧结果，在新 ToF 测量中恢复一致但缺少局部支持的区域；C 保留全分辨率残差试验。RGB 预览独立。只有点击诊断快照才保存一次配对输入。</translation>
     </message>
     <message>
       <source>Diagnostic snapshot saved to:
@@ -643,6 +696,43 @@
       <source>H uses global scale at RGB cadence and may reuse the newest dToF measurement within 100 ms. Reuse is labeled; it is not a new measurement. Without a valid pair, only the historical scale is retained.</source>
       <translation>H 按 RGB 节奏做全局尺度校正，允许复用配对时间差 100 ms 内最新的 dToF 测量。界面标注复用，不视为新测量；没有有效配对时仅沿用历史尺度。</translation>
     </message>
+    <message>
+    <source>Select the imaging scheme for the shared depth and camera session.</source>
+    <translation>选择深度图和原视频共享会话的成像方案。</translation>
+  </message>
+    <message>
+      <source>Connecting to RV1103 automatically...</source>
+      <translation>正在自动连接 RV1103…</translation>
+    </message>
+    <message>
+      <source>RV1103 connected</source>
+      <translation>RV1103 已连接</translation>
+    </message>
+    <message>
+      <source>Checking the USB connection and board files...</source>
+      <translation>正在检查 USB 连接和板端文件…</translation>
+    </message>
+    <message>
+      <source>RV1103 detected. Checking available inference devices...</source>
+      <translation>已检测到 RV1103，正在识别可用的推理设备…</translation>
+    </message>
+    <message>
+      <source>Loading the inference model...</source>
+      <translation>正在加载推理模型…</translation>
+    </message>
+    <message>
+      <source>Starting camera and depth capture...</source>
+      <translation>正在启动摄像头和深度采集…</translation>
+    </message>
+    <message>
+      <source>Waiting for the first depth image...</source>
+      <translation>正在等待首帧深度图…</translation>
+    </message>
+    <message>
+      <source>RV1103 connection progress</source>
+      <translation>RV1103 连接进度</translation>
+    </message>
+    <message><source>Select how the depth map is generated.</source><translation>选择深度图的生成方式。</translation></message>
 </context>
   <context>
     <name>ImagePresentation</name>
@@ -778,6 +868,8 @@
   </context>
   <context>
     <name>RvAssistDepth</name>
+    <message><source>The %1 TensorRT runtime is missing or invalid.</source><translation>%1 的 TensorRT 运行包缺失或无效。</translation></message>
+    <message><source>%1 requires a compatible NVIDIA GPU.</source><translation>%1 需要兼容的 NVIDIA GPU。</translation></message>
     <message>
       <source>Host inference worker identity mismatch</source>
       <translation>上位机推理进程身份校验失败。</translation>
@@ -983,15 +1075,21 @@
       <translation>无法为 TensorRT-RTX 推理程序和模型准备可读的运行路径。</translation>
     </message>
       <message><source>Inference device changed; waiting for a new paired frame</source><translation>推理设备已切换，等待新的配对帧</translation></message>
-    <message><source>Host depth inference is paused during benchmarking.</source><translation>测速期间暂停上位机深度推理。</translation></message>
+      <message><source>Host depth inference is paused during benchmarking.</source><translation>测速期间暂停上位机深度推理。</translation></message>
     <message><source>Detecting available inference devices...</source><translation>正在检测可用的推理设备…</translation></message>
-    <message><source>No usable inference device was found. Open Inference Device in Settings to retry.</source><translation>未找到可用的推理设备，请在设置中的“推理设备”重新检测。</translation></message>
+    <message><source>No usable inference device was found. Open Inference Device in Settings to retry.</source><translation>未找到可用的推理设备。请打开“设置 → 推理设备”，点击“开始测速”重试。</translation></message>
     <message><source>No NVIDIA GPU was detected. Open Inference Device in Settings to select a CPU or compatible GPU.</source><translation>未检测到 NVIDIA 显卡，请在设置中的“推理设备”选择 CPU 或兼容显卡。</translation></message>
     <message><source>Loading the host-assisted inference model...</source><translation>正在加载上位机辅助推理模型…</translation></message>
 </context>
   <context>
     <name>RvDepthView</name>
-    <message><source>(%1, %2) dToF estimate: %3 m</source><translation>（%1，%2）dToF 补点估计 %3 m</translation></message>
+    <message><source>Waiting for a paired RGB frame...</source><translation>等待与深度配对的 RGB 帧…</translation></message>
+    <message><source>Waiting for a fresh monocular depth frame...</source><translation>等待新的单目深度帧…</translation></message>
+    <message><source>(%1, %2) monocular: %3 m camera-Z</source><translation>(%1, %2) 单目深度：%3 m 相机 Z</translation></message>
+    <message>
+      <source>(%1, %2) raw prediction: %3 m (radial, unfiltered)</source>
+      <translation>(%1, %2) 原始预测：%3 m（径向，未筛选）</translation>
+    </message>
     <message>
       <source>Waiting for RV1103 depth</source>
       <translation>等待RV1103深度数据</translation>
@@ -1102,7 +1200,8 @@ Projected camera-Z %8 m</source>
       <source>new measurement</source>
       <translation>新测量</translation>
     </message>
-  </context>
+      <message><source>(%1, %2) dToF estimate: %3 m</source><translation>（%1，%2）dToF 补点估计 %3 m</translation></message>
+</context>
   <context>
     <name>RvDtofBoardStream</name>
     <message>
@@ -1164,15 +1263,16 @@ Projected camera-Z %8 m</source>
   </context>
   <context>
     <name>RvSessionController</name>
-    <message>
-      <source>Starting camera and depth capture...</source>
-      <translation>正在启动摄像头和深度采集…</translation>
-    </message>
+    <message><source>The sensor did not confirm 1200K main integration.</source><translation>传感器未确认主积分为 1200K。</translation></message>
+    <message><source>Waiting for a new G correction frame...</source><translation>正在等待切换后的 G 校正帧…</translation></message>
     <message><source>Native ToF depth expired</source><translation>原生 ToF 深度已过期</translation></message>
-    <message><source>The previous board capture identity is unavailable. Reconnect from Device Manager.</source><translation>无法确认上一轮板端采集的身份。请在设备管理中重新连接。</translation></message>
     <message>
       <source>The required host inference files are missing or invalid.</source>
       <translation>上位机推理所需的文件缺失或无效。</translation>
+    </message>
+    <message>
+      <source>Depth 256 | raw prediction (unfiltered, radial m) | inference %1 ms</source>
+      <translation>深度 256 | 原始预测（未筛选，径向米）| 推理 %1 ms</translation>
     </message>
     <message>
       <source>Imaging scheme switch was not accepted</source>
@@ -1439,6 +1539,14 @@ Projected camera-Z %8 m</source>
       <translation>深度 256 | 有效覆盖 %1% | 推理 %2 ms | 帧龄 %3 ms</translation>
     </message>
     <message>
+      <source>DEPTHOR V3 %1 | inference %2 ms | age %3 ms | experimental</source>
+      <translation>DEPTHOR V3 %1 | 推理 %2 ms | 帧龄 %3 ms | 实验</translation>
+    </message>
+    <message>
+      <source>This host depth model requires 48×32 dToF. Stop capture and save compatible settings before switching from DEPTHOR V3 with 8×8.</source>
+      <translation>此主机深度模型要求 48×32 dToF。请先停止采集并保存兼容参数，再从使用 8×8 的 DEPTHOR V3 切换。</translation>
+    </message>
+    <message>
       <source>Selected model does not support the current %1×%2 native ToF grid. Stop capture and save compatible settings first.</source>
       <translation>所选模型不支持当前%1×%2原生ToF网格。请先停止采集并保存兼容参数。</translation>
     </message>
@@ -1507,10 +1615,6 @@ Projected camera-Z %8 m</source>
       <translation>新测量</translation>
     </message>
     <message>
-      <source>reused measurement</source>
-      <translation>复用测量</translation>
-    </message>
-    <message>
       <source>Connect a device using USB one-click connection in Device Manager.</source>
       <translation>请在「设置 → 设备管理」中使用「USB 一键连接」添加设备。</translation>
     </message>
@@ -1522,6 +1626,15 @@ Projected camera-Z %8 m</source>
     <source>The board capture runtime is incomplete.</source>
     <translation>板端采集运行文件不完整。</translation>
   </message>
+    <message>
+      <source>Starting camera and depth capture...</source>
+      <translation>正在启动摄像头和深度采集…</translation>
+    </message>
+    <message><source>The previous board capture identity is unavailable. Reconnect from Device Manager.</source><translation>无法确认上一轮板端采集的身份。请在设备管理中重新连接。</translation></message>
+    <message>
+      <source>reused measurement</source>
+      <translation>复用测量</translation>
+    </message>
     <message><source>Metric depth unavailable: waiting for reliable dToF correction</source><translation>米制深度暂不可用，等待可靠的 ToF 校正</translation></message>
 </context>
   <context>
@@ -2200,8 +2313,6 @@ After reconnecting power, click 'Connect selected module' using the new values.<
   </context>
   <context>
     <name>RvDeviceManagerDialog</name>
-    <message><source>Connect via USB to read the public key automatically.</source><translation>点击“USB 一键连接”后会自动读取公钥。</translation></message>
-    <message><source>The RV1103 is connected. Imaging will start after inference device detection.</source><translation>RV1103 已连接，推理设备检测完成后将自动启动成像。</translation></message>
     <message><source>2026-11-09 calibration / F=6 (automatic)</source><translation>2026-11-09 标定 / F=6（自动应用）</translation></message>
     <message>
       <source>Read automatically when connecting</source>
@@ -2672,6 +2783,30 @@ New: %2</source>
     <translation>安装板端采集支持…</translation>
   </message>
   <message>
+    <source>Maintain board files</source>
+    <translation>维护板端文件</translation>
+  </message>
+  <message>
+    <source>Check the capture files against the deployment list. Replace changed or extra runtime files and archive older rollback copies on this computer.</source>
+    <translation>按部署清单核对采集文件。发现变更或多余文件时更新板端运行目录，并将旧回滚副本归档到本机。</translation>
+  </message>
+  <message>
+    <source>Board file maintenance is unavailable in offline mode.</source>
+    <translation>离线模式无法维护板端文件。</translation>
+  </message>
+  <message>
+    <source>Board files were updated and verified on %1.</source>
+    <translation>已更新并核验 %1 上的板端文件。</translation>
+  </message>
+  <message>
+    <source>Board files match the deployment list on %1.</source>
+    <translation>%1 上的板端文件符合部署清单。</translation>
+  </message>
+  <message>
+    <source>Archived %1 rollback copies to %2.</source>
+    <translation>已将 %1 份回滚副本归档至 %2。</translation>
+  </message>
+  <message>
     <source>Verified %1. Automatic dToF support is missing. Use Install board capture support to install the required files.</source>
     <translation>已验证 %1。缺少自动 dToF 支持，请点击“安装板端采集支持”补装文件。</translation>
   </message>
@@ -2707,6 +2842,8 @@ New: %2</source>
     <source>Verified %1. The existing board capture runtime checksum differs.</source>
     <translation>已验证 %1。板端采集运行文件的校验值不匹配。</translation>
   </message>
+    <message><source>Connect via USB to read the public key automatically.</source><translation>点击“USB 一键连接”后会自动读取公钥。</translation></message>
+    <message><source>The RV1103 is connected. Imaging will start after inference device detection.</source><translation>RV1103 已连接，推理设备检测完成后将自动启动成像。</translation></message>
 </context>
   <context>
     <name>RvTunerWidget</name>
@@ -2961,6 +3098,10 @@ Range %6 mm (radial) | SNR %7 | slot %8 | Signal %9 | Noise encoded %10</source>
       <translation>测量序号</translation>
     </message>
     <message>
+    <source>All supported resolutions can be saved permanently. Apply pending edits first. Both native service and host capture command lines are backed up and verified. Host-assisted imaging uses a 48×32 session preset.</source>
+    <translation>所有支持的分辨率均可长期保存，请先应用待修改参数。原生服务与上位机采集命令均会备份并回读验证。上位机辅助成像使用 48×32 会话预设。</translation>
+  </message>
+    <message>
     <source>All supported resolutions can be saved permanently. Apply pending edits first. Both native service and host capture command lines are backed up and verified. Host-assisted imaging uses a separate 48×32 session preset.</source>
     <translation>所有支持的分辨率均可长期保存，请先应用待修改参数。原生服务与上位机采集命令均会备份并回读验证。上位机辅助成像使用独立的 48×32 会话预设。</translation>
   </message>
@@ -3060,6 +3201,14 @@ Range %6 mm (radial) | SNR %7 | slot %8 | Signal %9 | Noise encoded %10</source>
       <translation>正在等待完整 DTN1 测量…</translation>
     </message>
     <message>
+      <source>dToF settings saved. Host-assisted inference (640×480) supports these 16×16 ToF settings.</source>
+      <translation>dToF参数已保存。上位机辅助推理（640×480）支持此16×16 ToF配置。</translation>
+    </message>
+    <message>
+    <source>dToF settings saved and read back. Host-assisted imaging uses the 48×32 session preset.</source>
+    <translation>dToF 参数已保存并回读验证。上位机辅助成像使用 48×32 会话预设。</translation>
+  </message>
+    <message>
     <source>dToF settings saved and read back. Imaging uses a 48×32 session preset without changing the saved settings.</source>
     <translation>dToF 参数已保存并回读验证。成像使用 48×32 会话预设，不修改已保存的参数。</translation>
   </message>
@@ -3070,17 +3219,71 @@ Range %6 mm (radial) | SNR %7 | slot %8 | Signal %9 | Noise encoded %10</source>
       <source>Invalid dToF output support contract</source>
       <translation>dToF 输出支持范围契约无效</translation>
     </message>
-      <message><source>Too few stationary dToF anchors for a background scale update</source><translation>静止背景 ToF 点不足，暂不更新全局尺度</translation></message>
+        <message><source>Too few stationary dToF anchors for a background scale update</source><translation>静止背景 ToF 点不足，暂不更新全局尺度</translation></message>
 </context>
   <context>
-    <name>RvPointCloudView</name>
-    <message>
-      <source>Grid step %1 m</source>
-      <translation>网格间距 %1 m</translation>
-    </message>
-  </context>
-  <context>
     <name>RvPointCloudWidget</name>
+    <message><source>Stop point cloud</source><translation>停止点云</translation></message>
+    <message><source>Resume point cloud</source><translation>恢复点云</translation></message>
+    <message><source>Point cloud stopped</source><translation>点云已停止</translation></message>
+    <message><source>monocular depth</source><translation>单目深度</translation></message>
+    <message><source>assisted depth</source><translation>辅助深度</translation></message>
+    <message>
+      <source>Points</source>
+      <translation>点状</translation>
+    </message>
+    <message>
+      <source>Mesh</source>
+      <translation>网格</translation>
+    </message>
+    <message>
+      <source>Point cloud display mode</source>
+      <translation>点云显示方式</translation>
+    </message>
+    <message>
+      <source>Fixed Z color range</source>
+      <translation>固定 Z 色标</translation>
+    </message>
+    <message>
+      <source>Dynamic + histogram equalization</source>
+      <translation>动态＋直方图均衡</translation>
+    </message>
+    <message>
+      <source>Point cloud color mode</source>
+      <translation>点云着色模式</translation>
+    </message>
+    <message>
+      <source>Equalize depths from 0.10 to 10.00 m in each frame. Colors can vary across frames.</source>
+      <translation>逐帧均衡 0.10–10.00 m 的有效深度。同一深度的颜色可能随帧变化。</translation>
+    </message>
+    <message>
+      <source>Depth percentile 0%</source>
+      <translation>深度百分位 0%</translation>
+    </message>
+    <message>
+      <source>%1 / %2 frames · %3 triangles</source>
+      <translation>%1 / %2 帧 · %3 个三角面</translation>
+    </message>
+    <message>
+      <source>%1×%2 %3 · %4 triangles</source>
+      <translation>%1×%2 %3 · %4 个三角面</translation>
+    </message>
+    <message>
+      <source>48×32 ToF · %1 triangles</source>
+      <translation>48×32 ToF · %1 个三角面</translation>
+    </message>
+    <message>
+      <source>Accumulate point cloud</source>
+      <translation>叠加点云</translation>
+    </message>
+    <message>
+      <source>Overlay the latest 100 native ToF frames in camera coordinates.</source>
+      <translation>在相机坐标系中叠加最近 100 帧原生 ToF 点云。</translation>
+    </message>
+    <message>
+      <source>%1 / %2 frames · %3 points</source>
+      <translation>%1 / %2 帧 · %3 点</translation>
+    </message>
     <message>
       <source>Reset view</source>
       <translation>重置视角</translation>
@@ -3126,8 +3329,8 @@ Range %6 mm (radial) | SNR %7 | slot %8 | Signal %9 | Noise encoded %10</source>
       <translation>48×32 ToF · %1 / %2 点</translation>
     </message>
     <message>
-      <source>%1×%2 assisted depth · %3 / %4 points</source>
-      <translation>%1×%2 辅助深度 · %3 / %4 点</translation>
+      <source>%1×%2 %3 · %4 / %5 points</source>
+      <translation>%1×%2 %3 · %4 / %5 点</translation>
     </message>
     <message>
       <source>Select an imaging scheme in Depth Map.</source>
@@ -3145,9 +3348,126 @@ Range %6 mm (radial) | SNR %7 | slot %8 | Signal %9 | Noise encoded %10</source>
       <source>Waiting for a fresh 48×32 ToF frame...</source>
       <translation>等待新的 48×32 ToF 帧…</translation>
     </message>
+      <message>
+      <source>%1×%2 assisted depth · %3 / %4 points</source>
+      <translation>%1×%2 辅助深度 · %3 / %4 点</translation>
+    </message>
+</context>
+  <context>
+    <name>MeasurementCaptureDialog</name>
+    <message>
+      <source>Measurement Capture</source>
+      <translation>测量采集</translation>
+    </message>
+    <message>
+      <source>Device</source>
+      <translation>采集设备</translation>
+    </message>
+    <message>
+      <source>Duration</source>
+      <translation>录制时长</translation>
+    </message>
+    <message>
+      <source>Measured distance</source>
+      <translation>实测距离</translation>
+    </message>
+    <message>
+      <source>Scene</source>
+      <translation>场景备注</translation>
+    </message>
+    <message>
+      <source>Output folder</source>
+      <translation>保存目录</translation>
+    </message>
+    <message>
+      <source>Select measurement folder</source>
+      <translation>选择测量数据目录</translation>
+    </message>
+    <message>
+      <source> s</source>
+      <translation> 秒</translation>
+    </message>
+    <message>
+      <source> mm</source>
+      <translation> mm</translation>
+    </message>
+    <message>
+      <source>Unspecified</source>
+      <translation>未填写</translation>
+    </message>
+    <message>
+      <source>Browse…</source>
+      <translation>浏览…</translation>
+    </message>
+    <message>
+      <source>Start recording</source>
+      <translation>开始录制</translation>
+    </message>
+    <message>
+      <source>Stop recording</source>
+      <translation>停止录制</translation>
+    </message>
+    <message>
+      <source>Open folder</source>
+      <translation>打开目录</translation>
+    </message>
+    <message>
+      <source>Hide</source>
+      <translation>隐藏</translation>
+    </message>
+    <message>
+      <source>Uses the imaging mode selected in Depth Map.</source>
+      <translation>录制深度图中选定的 RV1103 成像模式。</translation>
+    </message>
+    <message>
+      <source>Records Gemini 335 native depth at 1280 × 800 and 15 FPS.</source>
+      <translation>录制 Gemini 335 的 1280×800、15 FPS 原生深度。</translation>
+    </message>
+    <message>
+      <source>Finishing recording…</source>
+      <translation>正在结束录制…</translation>
+    </message>
+    <message>
+      <source>Waiting for the first depth frame…</source>
+      <translation>等待首帧深度数据…</translation>
+    </message>
+    <message>
+      <source>Recording · %1 s · %2 frames</source>
+      <translation>录制中 · %1 秒 · %2 帧</translation>
+    </message>
+    <message>
+      <source>Saved %1 frames · %2 s</source>
+      <translation>已保存 %1 帧 · %2 秒</translation>
+    </message>
+    <message>
+      <source>Stopped · %1 frames saved</source>
+      <translation>已停止 · 保存 %1 帧</translation>
+    </message>
+    <message>
+      <source>Recording ended · %1 frames saved
+%2</source>
+      <translation>录制已结束 · 保存 %1 帧
+%2</translation>
+    </message>
+    <message>
+      <source>Ready</source>
+      <translation>就绪</translation>
+    </message>
+    <message>
+      <source>RV1103 depth stream ended during recording</source>
+      <translation>录制期间 RV1103 深度流中断</translation>
+    </message>
+    <message>
+      <source>RV1103 session or imaging mode changed during recording</source>
+      <translation>录制期间 RV1103 会话或成像模式发生变化</translation>
+    </message>
   </context>
   <context>
     <name>SensorMainWindow</name>
+    <message>
+      <source>Measurement Capture...</source>
+      <translation>测量采集…</translation>
+    </message>
     <message>
       <source>RV1103 connection</source>
       <translation>RV1103 连接</translation>
@@ -3289,12 +3609,6 @@ Range %6 mm (radial) | SNR %7 | slot %8 | Signal %9 | Noise encoded %10</source>
 </context>
   <context>
     <name>RvUsbEnrollment</name>
-    <message><source>ADB did not detect any device. Check the USB data cable and the ADB Interface driver in Windows Device Manager. The USB network adapter alone is not sufficient.</source><translation>ADB 未检测到设备。请检查 USB 数据线，以及 Windows 设备管理器中的 ADB Interface 驱动；仅识别到 USB 网卡还不能完成连接。</translation></message>
-    <message><source>ADB detected multiple possible RV1103 connections. Disconnect other ADB devices and reconnect this board, then retry.</source><translation>ADB 检测到多个可能的 RV1103 连接。请断开其他 ADB 设备，重新插拔本设备后再试。</translation></message>
-    <message><source>The RV1103 ADB connection is offline. Wait for the board to finish booting, then reconnect its USB cable and retry.</source><translation>RV1103 的 ADB 连接处于离线状态。请等待设备启动完成，重新插拔 USB 数据线后再试。</translation></message>
-    <message><source>The RV1103 ADB connection is unauthorized. Check the board's ADB authorization settings; entering an SSH public key here will not resolve it.</source><translation>RV1103 的 ADB 连接尚未授权。请检查板端 ADB 授权设置；在此输入 SSH 公钥无法解决这个问题。</translation></message>
-    <message><source>ADB found the device but did not provide its USB transport ID. Restart the application and retry using the bundled platform-tools.</source><translation>ADB 检测到了设备，但未提供 USB 传输编号。请重启软件，使用安装包自带的 platform-tools 后重试。</translation></message>
-    <message><source>ADB found devices, but none is a supported RV1103 USB connection. Check the ADB device list in the diagnostic report.</source><translation>ADB 检测到了设备，但没有符合要求的 RV1103 USB 连接。请查看诊断报告中的 ADB 设备列表。</translation></message>
     <message>
       <source>Camera mounting angle</source>
       <translation>摄像头安装角度</translation>
@@ -3413,7 +3727,13 @@ SSH 指纹：%2
       <source>The device was added. The board capture script is unavailable or unsupported.</source>
       <translation>设备已添加。板端采集脚本缺失或版本不受支持。</translation>
     </message>
-  </context>
+      <message><source>ADB did not detect any device. Check the USB data cable and the ADB Interface driver in Windows Device Manager. The USB network adapter alone is not sufficient.</source><translation>ADB 未检测到设备。请检查 USB 数据线，以及 Windows 设备管理器中的 ADB Interface 驱动；仅识别到 USB 网卡还不能完成连接。</translation></message>
+    <message><source>ADB detected multiple possible RV1103 connections. Disconnect other ADB devices and reconnect this board, then retry.</source><translation>ADB 检测到多个可能的 RV1103 连接。请断开其他 ADB 设备，重新插拔本设备后再试。</translation></message>
+    <message><source>The RV1103 ADB connection is offline. Wait for the board to finish booting, then reconnect its USB cable and retry.</source><translation>RV1103 的 ADB 连接处于离线状态。请等待设备启动完成，重新插拔 USB 数据线后再试。</translation></message>
+    <message><source>The RV1103 ADB connection is unauthorized. Check the board's ADB authorization settings; entering an SSH public key here will not resolve it.</source><translation>RV1103 的 ADB 连接尚未授权。请检查板端 ADB 授权设置；在此输入 SSH 公钥无法解决这个问题。</translation></message>
+    <message><source>ADB found the device but did not provide its USB transport ID. Restart the application and retry using the bundled platform-tools.</source><translation>ADB 检测到了设备，但未提供 USB 传输编号。请重启软件，使用安装包自带的 platform-tools 后重试。</translation></message>
+    <message><source>ADB found devices, but none is a supported RV1103 USB connection. Check the ADB device list in the diagnostic report.</source><translation>ADB 检测到了设备，但没有符合要求的 RV1103 USB 连接。请查看诊断报告中的 ADB 设备列表。</translation></message>
+</context>
   <context>
     <name>UiStyle</name>
     <message>
@@ -3494,4 +3814,11 @@ SSH 指纹：%2
     <message><source>Mixed INT8 trades some depth accuracy for speed. Local testing found 1.34% mean output difference from the original model, with larger differences in some scenes. Verify it for your application.</source><translation>混合 INT8 以部分深度精度换取速度。本地测试与原模型的平均输出差异为 1.34%，部分场景差异更大，请按实际用途验证。</translation></message>
     <message><source>The benchmark estimates model FPS and pauses host depth inference while it runs.</source><translation>测速估算模型帧率，期间会暂停上位机深度推理。</translation></message>
 </context>
+<context>
+    <name>RvPointCloudView</name>
+    <message>
+      <source>Grid step %1 m</source>
+      <translation>网格间距 %1 m</translation>
+    </message>
+  </context>
 </TS>

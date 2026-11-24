@@ -1,13 +1,21 @@
-# RV1103 原生采集与构建
+# RV1103 原生采集
 
-「上位机辅助推理」和「板端推理」使用 mode24 的 48×32 普通 ToF。「板端推理高精度」使用 mode25 的 48×32 高精度 ToF。mode14 提供工程用 Native16。会话为单目标，关闭 Signal 和 Noise，周期、SNR 和积分沿用保存值。
+板端采集 dToF 和 H.265 视频。mode14 对应 Native16，mode24 对应 48×32 普通，mode25 对应 48×32 高精度。普通和高精度模式都提供本次会话主积分为 1200K 的独立档位，切回基础档即使用保存的积分。各档均采用单目标、关闭 Signal/Noise，周期与 SNR 沿用保存值。
 
-`bash tools/rv_capture/build.sh /absolute/new-output` 使用 `RV1103_CROSS_PREFIX` 指定的 ARM 工具链，默认位于 `/opt/rv1103-sdk/`。输出目录必须不存在，生成的 `native-fov6.bin` 与 F6 标定和 `tools/rv_control/build_inputs.json` 的 SHA256 配套。
+```bash
+bash tools/rv_capture/build.sh /absolute/new-native-output
+```
 
-`common/` 和 `native/runtime/` 实现原生 IPC、SPI 和 H.265 进度。`payload/native_gui.sh` 验证并启动采集程序。USB 导入时将 `payload/dtof-host.sh` 嵌入会话脚本，并核对标定、会话预设、相机配置及完整运行载荷。
+输出目录必须不存在。默认交叉工具链在 `/opt/rv1103-sdk/`，可用 `RV1103_CROSS_PREFIX` 覆盖；不需要 RKNN SDK、模型密文或私有密钥。只生成 `native-fov6.bin`，与 2026-11-09 默认标定成组维护。
 
-候选协调器通过 `capabilities` 报告 `clean-candidate-restart-v1`。它验证同 boot 的上一采集代次已正常退出，确认没有故障锁、占用进程或监听端口后，再开始新一代采集。
+`common/` 和 `native/runtime/` 保存原生 IPC、SPI 与 H.265 进度实现。`Contract.h` 接受 mode14/24/25，并保留 LSG2 的 Native48 补洞扩展。板端深度图可以请求补洞数据，点云、测量采集和上位机 ToF 矫正读取原生测点。`payload/dtof-host.sh` 提供采集档位切换，导入时嵌入板端 `session.sh`。USB 导入会验证 F6 采集能力与原生、补洞协议，并在激活前后比对同一份能力回执。
+
+详见 [默认标定与原生 ToF 模式](../../docs/DEFAULT_CALIBRATION_NATIVE_TOF.md)。
 
 TMF8829 驱动通过 [prepare_spi_driver.py](../rv_control/prepare_spi_driver.py) 复制厂商源码后应用 F6 配置和 SPI 时钟修复。修复使用 SPI 结果头传输的单调时间估计传感器时钟，按完整帧锁定校正值。补丁和估计器位于本地的 `common/`。运行脚本生成的 `build.sh` 可交叉编译 `tof_driver` 并执行 FOV 和时钟回归。将验证过的驱动放在 `tools/rv_control/bootstrap/tof_driver` 后，重新构建桌面程序会同步更新板端载荷摘要。
 
-本次修复对应的 `tof_driver` SHA-256 为 `f272722063a8d5f123c9b6dcc933e1836cc87323b8d7ff1e4164af6e83d14d23`。
+产品采集和工程调参使用 `observe-0x08`。有效位 `0x01` 可以与提示位 `0x08`、`0x10` 单独或同时出现，原始状态与提示字段必须一致。`0x19` 的提示字段为 `0x18`，随测量保留。含 `0x20`、`0x40`、`0x80` 或其他未知位的状态仍会被拒绝。
+
+当前 `tof_driver` SHA-256 为 `6c9c56d1ff1746aa807ae5b18c1023066177f543b8f3bbfe1de7f83f7fcdc341`。
+
+`tools/rv_control/build.ps1 -CheckInputsOnly` 核对构建 SDK 和本地板端文件的版本。集成后的采集程序和驱动摘要见 [构建输入清单](../rv_control/build_inputs.json)。

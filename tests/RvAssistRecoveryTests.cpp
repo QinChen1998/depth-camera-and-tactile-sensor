@@ -2,8 +2,14 @@
 #include "../sensors/RvAssistFusion.h"
 #include "../sensors/RvCameraView.h"
 #include "../sensors/RvDepthDiagnostic.h"
+#include "../sensors/RvInferenceRuntime.h"
+#include <QtCore/QDir>
 #include <QtCore/QFile>
+#include <QtCore/QFileInfo>
+#include <QtCore/QJsonDocument>
+#include <QtCore/QTemporaryDir>
 #include <QtCore/QTextStream>
+#include <QtGui/QColor>
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -11,144 +17,391 @@
 
 namespace {
 using namespace RvAssistFusion;
-
+std::vector<float> decode(const QByteArray &b){
+    std::vector<float> z(b.size()/4);
+    for(int i=0;i<int(z.size());++i){auto bits=qFromLittleEndian<quint32>(b.constData()+4*i);std::memcpy(&z[i],&bits,4);}return z;
+}
 struct Scene {
-    const RvCameraView::Profile &view=RvCameraView::Portrait;
-    const Calibration &cal=calibrationForFov(6);
+    QString model;
+    const RvCameraView::Profile &view;
+    Calibration cal;
     RvTofFrame tof;
-    std::vector<float> mono=std::vector<float>(view.outputWidth*view.outputHeight,1.f);
-
-    Scene(){
-        tof.samples=QByteArray(cal.nativeCount()*4,0);
-        tof.metadata={{"work_mode","rgb_tof"},{"source_protocol","HDA1"},{"assist_experiment","B"},
-            {"assist_host_model",RvCameraView::UniDepthVgaNative48},{"dtof_present",true},
-            {"frame_id",1},{"generation",3},{"source_generation",QString(32,'a')},
+    std::vector<float> mono;
+    explicit Scene(const char *id=RvCameraView::LegacyNative16Model,int fov=1):
+        model(QLatin1String(id)),view(RvCameraView::profile(model)),cal(calibrationForNativeGrid(fov,16,16)),
+        mono(view.outputWidth*view.outputHeight,1.f){
+        tof.samples=QByteArray(1024,0);
+        tof.metadata={{"work_mode","rgb_tof"},{"source_protocol","HDA1"},{"assist_experiment","H"},{"assist_host_model",model},
+            {"dtof_present",true},{"frame_id",1},{"generation",3},{"source_generation",QString(32,'a')},
             {"boot_id","11111111-2222-3333-4444-555555555555"},{"tof_sequence",1},{"tof_timestamp_ns",1000000000.},
-            {"rgb_timestamp_ns",835000000.},{"tof_reused",false},{"tof_warning_flags",0},
-            {"pairing_policy",RvTofFrame::FreshRgbPairPolicy},{"pair_clock_source","rtcp_prft_board_realtime_monotonic"},
-            {"pair_delta_ms",165.},{"pair_clock_uncertainty_ms",35.},
-            {"dtof_width",48},{"dtof_height",32},{"dtof_bytes",6144},{"dtof_fov_correction",6},
-            {"source_candidate_mode",24},{"dtof_format","range_uq2_u16le_snr_u8_valid_u8"},{"dtof_range_unit","0.25_mm"},
+            {"rgb_timestamp_ns",990000000.},{"tof_reused",false},{"tof_warning_flags",0},
+            {"pairing_policy",RvTofFrame::GlobalScaleReusePolicy},{"pair_clock_source","rtcp_prft_board_realtime_monotonic"},
+            {"pair_delta_ms",10.},{"pair_clock_uncertainty_ms",35.},
+            {"dtof_width",16},{"dtof_height",16},{"dtof_bytes",1024},{"dtof_fov_correction",fov},
+            {"dtof_format","range_uq2_u16le_snr_u8_valid_u8"},{"dtof_range_unit","0.25_mm"},
             {"dtof_source","tmf8829_ipc_first_peak"},{"dtof_coordinate","sensor_radial_native"},
             {"rgb_width",view.inputWidth},{"rgb_height",view.inputHeight},{"rectify_map_sha256",view.mapSha},
             {"simulation",true},{"input_origin","SIMULATED"}};
-        plane(.18);
-        tof.metadata.insert(NativeProjectionField,defaultNativeProjection(tof));
+        plane(2.);
     }
-
-    void plane(double z){
-        for(int i=0;i<cal.nativeCount();++i){
-            const auto radial=(z-cal.translation[2])/cal.cameraRays[i][2];
-            qToLittleEndian<quint16>(quint16(std::lround(radial/.00025)),tof.samples.data()+4*i);
-            tof.samples[4*i+2]=30;
-            tof.samples[4*i+3]=1;
-        }
-    }
-
-    Result fit()const{
-        return fuseGlobalScale(mono,tof,cal,view);
-    }
+    void plane(double z){for(int i=0;i<256;++i){const auto r=(z-cal.translation[2])/cal.cameraRays[i][2];
+        qToLittleEndian<quint16>(quint16(std::lround(r/.00025)),tof.samples.data()+4*i);tof.samples[4*i+2]=30;tof.samples[4*i+3]=1;}}
+    Result fit()const{return fuseGlobalScale(mono,tof,cal,view);}
 };
 }
-
 int runRvAssistRecoveryTests(const QString &path){
-    QFile report(path);
-    if(!report.open(QIODevice::WriteOnly|QIODevice::Text))return 3;
-    QTextStream out(&report);
-    bool all=true;
-    const auto check=[&](const QString &name,bool ok){
-        out<<name<<' '<<(ok?"PASS":"FAIL")<<Qt::endl;
-        all&=ok;
-    };
-    Scene scene;
-    const auto &graph=RvCameraView::Rgb672VgaFp16;
-    const auto &view=scene.view;
-    check("PORTRAIT_GRAPH_AND_OUTPUT_DISTINCT",graph.outputSize()==QSize(640,480)&&view.outputSize()==QSize(480,640)
-        &&view.graphSha==graph.graphSha&&view.mapSha==graph.mapSha&&view.inputSize()==graph.inputSize());
-    bool aligned=true;
-    for(int i=0;i<scene.cal.nativeCount();++i)for(double radial:{.05,.2,1.}){
-        const auto landscape=projectNativePoint(radial,i,scene.cal,graph);
-        const auto portrait=projectNativePoint(radial,i,scene.cal,view);
-        if(portrait.cameraZ<=0)continue;
-        const auto input=RvCameraView::inputPixel(portrait.pixel,view.outputSize());
-        aligned&=std::abs(input.x()-landscape.pixel.x()-16)<1e-9&&std::abs(input.y()-landscape.pixel.y()-12)<1e-9;
+    QFile report(path);if(!report.open(QIODevice::WriteOnly|QIODevice::Text))return 3;
+    QTextStream out(&report);bool all=true;
+    const auto check=[&](const QString &name,bool ok){out<<name<<' '<<(ok?"PASS":"FAIL")<<Qt::endl;all&=ok;};
+    {
+        const auto &view=RvCameraView::Portrait;
+        const auto &cal=calibrationForFov(6);
+        Scene fixture;
+        auto tof=fixture.tof;
+        tof.samples=QByteArray(48*32*4,0);
+        tof.metadata["source_candidate_mode"]=RvCaptureContract::Native48;
+        tof.metadata["assist_experiment"]="B";
+        tof.metadata["assist_host_model"]=RvCameraView::UniDepthVgaNative48;
+        tof.metadata["dtof_width"]=48;tof.metadata["dtof_height"]=32;
+        tof.metadata["dtof_bytes"]=tof.samples.size();tof.metadata["dtof_fov_correction"]=6;
+        tof.metadata["pairing_policy"]=RvTofFrame::FreshRgbReusePolicy;
+        for(int i=0;i<cal.nativeCount();++i){
+            const double radial=(.6-cal.translation[2])/cal.cameraRays[i][2];
+            qToLittleEndian<quint16>(quint16(std::lround(radial/.00025)),tof.samples.data()+4*i);
+            tof.samples[4*i+2]=30;tof.samples[4*i+3]=1;
+        }
+        const std::vector<float> mono(view.outputWidth*view.outputHeight,1.f);
+        const auto fitted=fuseGlobalScale(mono,tof,cal,view);
+        const auto visible=limitTofFieldOfView(fitted,cal,view);
+        check("PORTRAIT_F6_NATIVE48_SCALE_AND_GEOMETRIC_COVERAGE",cal.valid&&fitted.ok()&&visible.ok()
+            &&fitted.diagnostics["tof_total_zones"]==1536&&fitted.diagnostics["anchors_inlier"].toInt()>1200
+            &&std::abs(fitted.diagnostics["scale"].toDouble()-.6)<.0005
+            &&visible.diagnostics["fov_pixels"].toInt()>.99*mono.size());
+        for(double delta:{-165.,165.,-165.001,165.001}){
+            auto pair=tof;
+            pair.metadata["pair_delta_ms"]=delta;
+            pair.metadata["rgb_timestamp_ns"]=1e9-delta*1e6;
+            pair.metadata["tof_reused"]=true;
+            check(QString("PORTRAIT_NATIVE48_PAIR_BUDGET_%1").arg(delta,0,'f',3),
+                fuseGlobalScale(mono,pair,cal,view).ok()==(std::abs(delta)<=165.));
+        }
+        tof.metadata["tof_warning_flags"]=16;
+        check("PORTRAIT_NATIVE48_WARNED_MEASUREMENT_REJECTED",!fuseGlobalScale(mono,tof,cal,view).ok());
+        tof.metadata["tof_warning_flags"]=0;
+        tof.metadata["assist_experiment"]="G";
+        check("PORTRAIT_G_ACCEPTS_FRESH_MEASUREMENT",tof.isValidForHostFusion());
+        tof.metadata["tof_reused"]=true;
+        check("PORTRAIT_G_REJECTS_REUSED_MEASUREMENT",!tof.isValidForHostFusion());
+        tof.metadata["tof_reused"]=false;
+        const auto base=projectNativePoint((.10-cal.translation[2])/cal.cameraRays[800][2],800,cal,view,tof);
+        tof.metadata[NativeProjectionField]=defaultNativeProjection(tof);
+        const auto shifted=projectNativePoint((.10-cal.translation[2])/cal.cameraRays[800][2],800,cal,view,tof);
+        check("PORTRAIT_INHERITS_F6_CLOSE_PROJECTION",tof.metadata[NativeProjectionField]==QLatin1String(CloseNative48Projection)
+            &&std::abs((shifted.pixel.x()-base.pixel.x())-view.focal*.0065/.10)<1e-8
+            &&std::abs((shifted.pixel.y()-base.pixel.y())-view.focal*.00725/.10)<1e-8
+            &&shifted.cameraZ==base.cameraZ);
+        const auto resized=RvCameraView::portraitDepth(std::vector<float>(640*480,1.25f));
+        check("PORTRAIT_MONOCULAR_RESAMPLE_PRESERVES_METRIC_SCALE",resized.size()==480*640
+            &&std::all_of(resized.begin(),resized.end(),[](float z){return z==1.25f;}));
+
+        QTemporaryDir diagnostics(QFileInfo(path).absolutePath()+"/gb-diagnostic-SIMULATED-XXXXXX");
+        diagnostics.setAutoRemove(false);
+        QImage pairedRgb(view.outputSize(),QImage::Format_RGB888);
+        pairedRgb.fill(QColor(90,100,110));
+        QImage recordingInput(RvCameraView::Rgb672VgaFp16.inputSize(),QImage::Format_RGB888);
+        recordingInput.fill(QColor(70,90,100));
+        for(const auto &mode : {QStringLiteral("G"),QStringLiteral("B")}){
+            auto paired=tof;
+            paired.metadata["assist_experiment"]=mode;
+            paired.metadata["tof_reused"]=mode=="B";
+            auto metadata=paired.metadata;
+            metadata["width"]=view.outputWidth;
+            metadata["height"]=view.outputHeight;
+            metadata["depth_unit"]="camera-Z_m_float32";
+            metadata["depth_K"]=RvCameraView::intrinsics(view);
+            metadata["assist_output_grid"]=RvCameraView::PortraitGrid;
+            metadata["assist_model_depth_size"]=QJsonArray{640,480};
+            metadata["assist_model_crop_xywh"]=QJsonArray{140,0,360,480};
+            metadata["assist_graph_sha256"]=view.graphSha;
+            metadata["assist_provisional_model"]=true;
+            metadata["assist_candidate_parity_mean_limit"]=view.parityMeanLimit;
+            metadata["assist_input_rotation_degrees"]=0;
+            metadata["assist_output_restored_to_calibrated_grid"]=true;
+            metadata["assist_diagnostic_payload"]="mono_reasons_v1";
+            metadata["assist_diagnostic_native_count"]=RvDepthDiagnostic::ReasonBytes;
+            metadata["assist_fusion_revision"]=portraitRevision(mode);
+            metadata["assist_output_policy"]=FieldOfViewPolicy;
+            metadata["assist_tof_fov_correction"]=6;
+            ScaleContinuity continuity;
+            auto fit=continuity.apply(fuseGlobalScale(mono,paired,cal,view),1000,1,3,1);
+            const auto corrected=limitTofFieldOfView(std::move(fit),cal,view);
+            metadata["assist_fusion"]=corrected.diagnostics;
+            const auto payload=RvDepthDiagnostic::encode(mono,corrected);
+            RvDepthDiagnostic::Snapshot snapshot{{corrected.depth,{},pairedRgb,metadata,QDateTime::currentDateTimeUtc()},paired,payload,{}};
+            QString folder;
+            check(mode+"_PAIRED_DIAGNOSTIC_REPLAYS",snapshot.save(diagnostics.path(),&folder)
+                &&RvDepthDiagnostic::replay(folder,diagnostics.filePath(mode+"-paired.json"))==0);
+            auto wrongPair=paired;
+            wrongPair.metadata["tof_sequence"]=2;
+            check(mode+"_OVERLAY_REJECTS_OTHER_MEASUREMENT",!RvDepthDiagnostic::matchesPairedNative(metadata,wrongPair));
+
+            auto rgbOnly=snapshot;
+            const auto held=limitTofFieldOfView(continuity.apply(monocular(mono,"RGB only",view.outputSize()),1033,1,3,2),cal,view);
+            rgbOnly.native={};
+            rgbOnly.output.metresFloat32LE=held.depth;
+            rgbOnly.output.metadata["assist_fusion"]=held.diagnostics;
+            rgbOnly.output.metadata["dtof_present"]=false;
+            for(const auto *key : {NativeProjectionField,"tof_sequence","tof_timestamp_ns","tof_reused","dtof_bytes","pair_delta_ms"})
+                rgbOnly.output.metadata.remove(key);
+            rgbOnly.payload=RvDepthDiagnostic::encode(mono,held);
+            check(mode+"_RGB_ONLY_HELD_SCALE_REPLAYS",held.diagnostics["fusion_mode"]=="held_scale"
+                &&rgbOnly.save(diagnostics.path(),&folder)
+                &&RvDepthDiagnostic::replay(folder,diagnostics.filePath(mode+"-held.json"))==0);
+
+            QString sequenceFolder,recordError;
+            bool started=false;
+            {
+                RvDepthDiagnostic::SequenceRecorder recorder;
+                started=recorder.start(diagnostics.path(),&recordError);
+                sequenceFolder=recorder.status()["folder"].toString();
+                recorder.append(corrected.depth,metadata,recordingInput,paired,payload);
+                recorder.append(corrected.depth,metadata,recordingInput,wrongPair,payload);
+            }
+            QFile receipt(QDir(sequenceFolder).filePath("recording.json"));
+            const auto recorded=receipt.open(QIODevice::ReadOnly)?QJsonDocument::fromJson(receipt.readAll()).object():QJsonObject{};
+            QFile stream(QDir(sequenceFolder).filePath("frames.bin"));
+            QByteArray frame;
+            if(stream.open(QIODevice::ReadOnly))frame=stream.readAll();
+            const int headerBytes=frame.size()>=4?int(qFromLittleEndian<quint32>(frame.constData())):0;
+            const auto header=QJsonDocument::fromJson(frame.mid(4,headerBytes)).object();
+            const int rgbBytes=header["rgb_bytes"].toInt();
+            check(mode+"_SEQUENCE_PRESERVES_MATCHED_TOF_AND_DEPTH",started&&recorded["complete"]==true
+                &&recorded["error"]==""&&recorded["frames"]==1&&recorded["dropped_frames"]==1
+                &&header["metadata"].toObject()==metadata&&header["native_metadata"].toObject()==paired.metadata
+                &&rgbBytes==672*504*3&&frame.mid(4+headerBytes+rgbBytes)==payload+paired.samples+corrected.depth);
+
+            if(mode=="G"){
+                snapshot.output.metadata["assist_fusion_revision"]="global_scale_fresh_rgb_portrait_v1";
+                snapshot.output.metadata["tof_warning_flags"]=8;
+                snapshot.native.metadata["tof_warning_flags"]=8;
+                check("ARCHIVED_G_REPLAYS_RECORDED_SCALE_WITH_INFORMATIONAL_WARNING",
+                    snapshot.save(diagnostics.path(),&folder)
+                    &&RvDepthDiagnostic::replay(folder,diagnostics.filePath("G-archived.json"))==0);
+            }
+        }
+
+        for(const auto *modelId:{RvCameraView::DepthPro2VgaModel,RvCameraView::DepthPro2BVgaModel}){
+            const QString model=QLatin1String(modelId);
+            const auto &vga=RvCameraView::outputProfile(model);
+            const auto *runtime=RvCameraView::depthPro2Runtime(model);
+            auto measurement=tof;
+            measurement.metadata["assist_host_model"]=model;
+            measurement.metadata["rgb_width"]=vga.inputWidth;
+            measurement.metadata["rgb_height"]=vga.inputHeight;
+            measurement.metadata["assist_tof_fov_correction"]=6;
+            for(int i=0;i<cal.nativeCount();++i){
+                const double radial=(1.2-cal.translation[2])/cal.cameraRays[i][2];
+                qToLittleEndian<quint16>(quint16(std::lround(radial/.00025)),measurement.samples.data()+4*i);
+            }
+            std::vector<float> prediction(vga.outputWidth*vga.outputHeight,.8f);
+            prediction[0]=0;
+            for(const auto &mode:{QStringLiteral("G"),QStringLiteral("B")}){
+                const auto name=model+'_'+mode;
+                auto paired=measurement;
+                paired.metadata["assist_experiment"]=mode;
+                paired.metadata["tof_reused"]=mode=="B";
+                paired.metadata[NativeProjectionField]=defaultNativeProjection(paired);
+                ScaleContinuity continuity;
+                const auto fitted=continuity.apply(fuseGlobalScale(prediction,paired,cal,vga),1000,1,3,1,true);
+                const auto z=decode(fitted.depth);
+                check(name+"_VGA_F6_SCALE_PRESERVES_MISSING_PIXELS",
+                    paired.metadata[NativeProjectionField]==QLatin1String(CloseNative48Projection)
+                    &&fitted.ok()&&fitted.diagnostics["dtof_corrected"]==true&&z.size()==prediction.size()
+                    &&fitted.diagnostics["anchors_inlier"].toInt()>1000
+                    &&std::abs(fitted.diagnostics["scale"].toDouble()-1.5)<.0005
+                    &&z.front()==0&&std::abs(z.back()-1.2f)<.0005);
+
+                const auto held=continuity.apply(monocular(prediction,"RGB only",vga.outputSize(),true),1033,1,3,2,true);
+                const auto newSession=continuity.apply(monocular(prediction,"RGB only",vga.outputSize(),true),1066,2,4,3,true);
+                check(name+"_RGB_ONLY_HOLDS_SCALE_WITHOUT_POINTS_AND_RESETS_ON_EPOCH",
+                    held.ok()&&held.depth==fitted.depth&&held.diagnostics["fusion_mode"]=="held_scale"
+                    &&held.diagnostics["used_native_indices"].toArray().isEmpty()
+                    &&newSession.ok()&&newSession.diagnostics["fusion_mode"]=="monocular"
+                    &&newSession.diagnostics["scale"]==1.);
+
+                if(mode=="B"){
+                    auto freshOnly=paired;
+                    freshOnly.metadata["assist_experiment"]="G";
+                    check(name+"_REUSED_MEASUREMENT_IS_REJECTED_BY_G",!fuseGlobalScale(prediction,freshOnly,cal,vga).ok());
+                }
+                QImage rgb(vga.inputSize(),QImage::Format_RGB888);
+                rgb.fill(QColor(90,110,130));
+                auto metadata=paired.metadata;
+                const auto identity=RvCameraView::depthPro2Identity(model,*runtime);
+                for(auto it=identity.begin();it!=identity.end();++it)metadata["assist_"+it.key()]=it.value();
+                metadata["assist_backend"]=RvCameraView::DepthPro2Backend;
+                metadata["assist_execution_device"]=RvCameraView::DepthPro2Backend;
+                metadata["width"]=vga.outputWidth;metadata["height"]=vga.outputHeight;
+                metadata["depth_stride"]=vga.outputWidth*4;
+                metadata["depth_unit"]="camera-Z_m_float32";metadata["depth_K"]=RvCameraView::intrinsics(vga);
+                metadata["assist_output_grid"]=RvCameraView::DepthPro2Grid;
+                metadata["assist_input_rotation_degrees"]=180;metadata["assist_output_restored_to_calibrated_grid"]=true;
+                metadata["assist_diagnostic_payload"]="mono_reasons_v1";
+                metadata["assist_diagnostic_native_count"]=RvDepthDiagnostic::ReasonBytes;
+                metadata["assist_fusion_revision"]=vgaRevision(mode);
+                metadata["assist_fusion"]=fitted.diagnostics;
+                const auto payload=RvDepthDiagnostic::encode(prediction,fitted);
+                RvDepthDiagnostic::Snapshot snapshot{{fitted.depth,{},rgb,metadata,QDateTime::currentDateTimeUtc()},paired,payload,{}};
+                QString folder;
+                check(name+"_VGA_DIAGNOSTIC_REPLAYS",
+                    snapshot.save(diagnostics.path(),&folder)
+                    &&RvDepthDiagnostic::replay(folder,diagnostics.filePath(name+"-paired.json"))==0);
+
+                snapshot.output.metresFloat32LE=held.depth;
+                snapshot.output.metadata["assist_fusion"]=held.diagnostics;
+                snapshot.output.metadata["dtof_present"]=false;
+                snapshot.output.metadata.remove(NativeProjectionField);
+                snapshot.native={};
+                snapshot.payload=RvDepthDiagnostic::encode(prediction,held);
+                check(name+"_VGA_HELD_DIAGNOSTIC_REPLAYS",
+                    snapshot.save(diagnostics.path(),&folder)
+                    &&RvDepthDiagnostic::replay(folder,diagnostics.filePath(name+"-held.json"))==0);
+            }
+        }
+
+        // A far wall on the left and a coherently measured close surface on the right.
+        for(int i=0;i<cal.nativeCount();++i){
+            const double z=projectNativePoint((1.-cal.translation[2])/cal.cameraRays[i][2],i,cal,view,tof).pixel.x()<270?1.:.25;
+            const double radial=(z-cal.translation[2])/cal.cameraRays[i][2];
+            qToLittleEndian<quint16>(quint16(std::lround(radial/.00025)),tof.samples.data()+4*i);
+        }
+        const auto original=[&](float z){
+            auto result=monocular(std::vector<float>(mono.size(),z),"Simulated scale",view.outputSize());
+            result.diagnostics["scale"]=z;
+            return result;
+        };
+        const QByteArray rgb(view.rgbBytes(),char(76));
+        SplitCorrection split;
+        const auto input=original(1.);
+        auto warm=input;
+        for(int frame=0;frame<8;++frame){
+            warm=input;
+            split.apply(warm,mono,rgb,tof,cal,frame*65,1,3,true);
+        }
+        check("G_SPLIT_USES_FRESH_CLOSE_MEASUREMENTS",warm.diagnostics["split_current_near_pixels"].toInt()>0
+            &&decode(warm.depth)[320*480+385]>=.44f&&decode(warm.depth)[320*480+385]<.9f);
+        auto low=original(.5),off=low;
+        split.apply(off,mono,rgb,{},cal,520,1,3,false);
+        check("G_SPLIT_OFF_PRESERVES_ORIGINAL_G_BITS",off.depth==low.depth&&off.diagnostics==low.diagnostics);
+        auto held=low;
+        split.apply(held,mono,rgb,{},cal,555,1,3,true);
+        const auto heldDepth=decode(held.depth);
+        check("G_SPLIT_RETAINS_VERIFIED_BACKGROUND_WITHOUT_REUSING_NEAR_TOF",
+            heldDepth[320*480+110]>.95f&&heldDepth[320*480+385]==.5f
+            &&held.diagnostics["split_background_pixels"].toInt()>0&&held.diagnostics["split_current_near_pixels"].toInt()==0
+            &&held.globalReasons==low.globalReasons);
+        auto changed=low;
+        split.apply(changed,mono,QByteArray(rgb.size(),char(150)),{},cal,585,1,3,true);
+        check("G_SPLIT_DROPS_REFERENCES_WHEN_RGB_CHANGES",changed.depth==low.depth);
+        for(int frame=0;frame<8;++frame){
+            auto trained=input;
+            split.apply(trained,mono,rgb,tof,cal,650+frame*65,1,3,true);
+        }
+        auto otherSession=low;
+        split.apply(otherSession,mono,rgb,{},cal,1200,2,3,true);
+        check("G_SPLIT_CLEARS_BACKGROUND_ON_NEW_EPOCH",otherSession.depth==low.depth);
     }
-    check("PORTRAIT_SAME_PHYSICAL_RAYS_NO_AXIS_SWAP",aligned);
-    std::vector<float> ramp(640*480);
-    for(int y=0;y<480;++y)for(int x=0;x<640;++x)ramp[y*640+x]=1.f+x*.001f+y*.002f;
-    const auto resized=RvCameraView::portraitDepth(ramp);
-    check("PORTRAIT_ISOTROPIC_METRIC_CROP",resized.size()==480*640
-        &&std::abs(resized[320*480+240]-(1+320*.001+240*.002))<.002);
-
-    const auto original=scene.tof.samples;
-    auto distant=scene;distant.plane(2.);
-    const auto distantFit=distant.fit();
-    bool beyond256=false;
-    for(const auto id:distantFit.diagnostics["used_native_indices"].toArray())beyond256|=id.toInt()>=256;
-    check("NATIVE48_FITS_FULL_MEASURED_PLANE",distantFit.ok()&&distantFit.diagnostics["dtof_corrected"]==true
-        &&distantFit.diagnostics["tof_total_zones"]==1536&&beyond256
-        &&std::abs(distantFit.diagnostics["scale"].toDouble()-2)<.0005);
-    auto confused=scene;confused.tof.metadata["assist_host_model"]="unidepth_rgb672_vga_fp16_tof16";
-    auto conflicting=scene;conflicting.tof.metadata["tof_fov_correction"]=1;
-    auto wrongProjection=scene;wrongProjection.tof.metadata[NativeProjectionField]="invalid";
-    check("B_REJECTS_WRONG_MODEL_FOV_OR_PROJECTION",!confused.fit().ok()&&!conflicting.fit().ok()&&!wrongProjection.fit().ok());
-    auto invalidModel=scene;invalidModel.mono[0]=std::numeric_limits<float>::quiet_NaN();
-    check("B_REJECTS_NONFINITE_MODEL",!invalidModel.fit().ok());
-
-    GlobalRgbContinuity history;
-    const auto global=history.apply(scene.fit(),1000,1,3,1);
-    int projected=0;
-    for(int id=0;id<scene.cal.nativeCount();++id){
-        const auto point=projectNativePoint(scene.tof.rangeUq2(id)*.00025,id,scene.cal,view);
-        const auto pixel=point.pixel+QPointF(.0065,.00725)*(view.focal/point.cameraZ);
-        projected+=pixel.x()>=3&&pixel.x()<=476&&pixel.y()>=3&&pixel.y()<=636;
+    for(const char *model:{RvCameraView::LegacyNative16Model})for(int fov:{1,2,6}){
+        Scene scene(model,fov);const auto original=scene.tof.samples;const auto fit=scene.fit();
+        const QString prefix=scene.model+"_F"+QString::number(fov)+"_";
+        check(prefix+"PINNED_NATIVE16_CALIBRATION",scene.cal.valid&&scene.tof.isValidForHostFusion());
+        check(prefix+"KNOWN_PLANE_SCALE",fit.ok()&&std::abs(fit.diagnostics["scale"].toDouble()-2.)<.0005);
+        const auto z=decode(fit.depth);
+        check(prefix+"METRIC_PLANE_AND_NO_LOCAL_FIELD",z.size()==scene.mono.size()&&std::all_of(z.begin(),z.end(),[](float v){return std::abs(v-2)<.0005;})
+            &&fit.localReasons==QByteArray(256,NoMeasurement)&&fit.diagnostics["local_used_native_indices"].toArray().isEmpty());
+        check(prefix+"INPUT_UNCHANGED",scene.tof.samples==original);
+        const auto bounded=limitTofFieldOfView(fit,scene.cal,scene.view);
+        const auto bz=decode(bounded.depth);int inside=0,outside=0;bool exact=bounded.ok()&&bz.size()==z.size();
+        for(int i=0;i<int(bz.size());++i){if(bz[i]){++inside;exact&=bz[i]==z[i];}else ++outside;}
+        check(prefix+"FOV_MASK_PRESERVES_METRES",exact&&inside>0&&outside>0&&fit.depth!=bounded.depth&&decode(fit.depth)==z);
+        auto sparse=scene;for(int i=0;i<256;++i)sparse.tof.samples[4*i+3]=0;
+        const auto empty=sparse.fit();check(prefix+"NO_ANCHOR_MONOCULAR_FALLBACK",empty.ok()&&empty.diagnostics["dtof_corrected"]==false
+            &&empty.diagnostics["used_native_indices"].toArray().isEmpty());
+        auto weak=scene;for(int i=0;i<256;++i)weak.tof.samples[4*i+2]=5;
+        check(prefix+"LOW_SNR_NOT_USED",weak.fit().diagnostics["dtof_corrected"]==false);
+        auto bad=scene;bad.tof.samples[3]=2;check(prefix+"INVALID_NATIVE_BIT_REJECTED",!bad.fit().ok());
+        bad.tof=scene.tof;bad.tof.metadata["rectify_map_sha256"]="foreign";check(prefix+"FOREIGN_GEOMETRY_REJECTED",!bad.fit().ok());
+        auto invalidMono=scene.mono;invalidMono[0]=std::numeric_limits<float>::quiet_NaN();
+        check(prefix+"NONFINITE_MODEL_REJECTED",!fuseGlobalScale(invalidMono,scene.tof,scene.cal,scene.view).ok());
+        check(prefix+"WRONG_MODEL_SHAPE_REJECTED",!fuseGlobalScale(std::vector<float>(16,1),scene.tof,scene.cal,scene.view).ok());
+        for(double delta:{-100.,100.,-100.001,100.001}){
+            auto pair=scene.tof;pair.metadata["pair_delta_ms"]=delta;pair.metadata["rgb_timestamp_ns"]=1000000000.-delta*1e6;
+            check(prefix+QString("PAIR_BOUNDARY_%1").arg(delta,0,'f',3),fuseGlobalScale(scene.mono,pair,scene.cal,scene.view).ok()==(std::abs(delta)<=100));
+        }
+        auto reuse=scene.tof;reuse.metadata["tof_reused"]=true;
+        check(prefix+"REUSE_EXPLICIT_AND_BOUNDED",!reuse.isValid()&&reuse.isValidForHostFusion()&&fuseGlobalScale(scene.mono,reuse,scene.cal,scene.view).depth==fit.depth);
+        reuse.metadata["pairing_policy"]="foreign";check(prefix+"REUSE_POLICY_REJECTED",!reuse.isValidForHostFusion());
+        ScaleContinuity history;auto first=history.apply(fit,1000,1,3,1);
+        auto held=history.apply(monocular(scene.mono,"RGB only",scene.view.outputSize()),1033,1,3,2);
+        check(prefix+"HELD_SCALE_NO_OLD_ANCHORS",held.ok()&&held.diagnostics["fusion_mode"]=="held_scale"
+            &&held.diagnostics["used_native_indices"].toArray().isEmpty()&&held.globalReasons==QByteArray(1536,NoMeasurement)
+            &&held.diagnostics["scale_reference_frame_id"]==1&&held.diagnostics["scale_reference_age_ms"]==33);
+        scene.plane(4);auto next=history.apply(scene.fit(),1066,1,3,3);
+        check(prefix+"SCALE_STEP_BOUNDED",next.ok()&&next.diagnostics["scale"].toDouble()>first.diagnostics["scale"].toDouble()
+            &&next.diagnostics["scale"].toDouble()<=first.diagnostics["scale"].toDouble()*1.100001);
+        for(int cause=0;cause<3;++cause){ScaleContinuity h;h.apply(fit,1000,1,3,1);
+            auto reset=h.apply(monocular(scene.mono,"RGB only",scene.view.outputSize()),cause==0?999:1033,cause==1?2:1,cause==2?4:3,2);
+            check(prefix+QString("SCALE_RESET_%1").arg(cause),reset.ok()&&reset.diagnostics["fusion_mode"]=="monocular"&&reset.diagnostics["scale"]==1.);
+        }
+        const auto payload=RvDepthDiagnostic::encode(scene.mono,bounded,256);
+        check(prefix+"DIAGNOSTIC_FIXED_SLOTS",RvDepthDiagnostic::validPayload(payload,scene.view.depthBytes())
+            &&payload.mid(scene.view.depthBytes()+256,1280)==QByteArray(1280,0));
     }
-    check("B_FRESH_PAIR_USES_CORRECTED_PROJECTION_AND_GLOBAL_SCALE_ONLY",
-        global.ok()&&global.diagnostics["fusion_mode"]=="global_scale"
-        &&global.diagnostics["tof_projected_in_view"]==projected&&scene.tof.samples==original
-        &&global.diagnostics["local_used_native_indices"].toArray().isEmpty()
-        &&global.localReasons==QByteArray(1536,NoMeasurement)
-        &&std::abs(global.diagnostics["scale"].toDouble()-.18)<.0005);
-
-    auto retired=scene;retired.tof.metadata["assist_experiment"]="G";
-    auto late=scene;late.tof.metadata["pair_delta_ms"]=165.01;late.tof.metadata["rgb_timestamp_ns"]=834990000.;
-    check("B_REJECTS_RETIRED_SCHEME_OR_OUT_OF_BUDGET_TOF",!retired.fit().ok()&&!late.fit().ok());
-    auto warning=scene;warning.tof.metadata["tof_warning_flags"]=8;
-    auto tinyGain=scene;std::fill(tinyGain.mono.begin(),tinyGain.mono.end(),100.f);
-    check("B_CURRENT_WARNING_AND_GAIN_LIMITS",!warning.fit().ok()
-        &&tinyGain.fit().diagnostics["fusion_mode"]=="monocular");
-    const auto rgbOnly=monocular(scene.mono,"RGB only",view.outputSize());
-    const auto between=history.apply(rgbOnly,7033,1,3,2);
-    check("B_RGB_ONLY_KEEPS_LAST_SCALAR_AND_REFERENCE_AGE",between.ok()&&between.diagnostics["fusion_mode"]=="held_scale"
-        &&between.diagnostics["used_native_indices"].toArray().isEmpty()&&between.diagnostics["scale_reference_age_ms"]==6033);
-    auto far=scene;far.plane(1.8);
-    const auto next=history.apply(far.fit(),7283,1,3,3);
-    check("B_GAIN_UPDATE_IS_CAPPED",next.ok()&&next.diagnostics["scale_reference_frame_id"]==3
-        &&std::abs(next.diagnostics["scale"].toDouble()/global.diagnostics["scale"].toDouble()-1.1)<1e-12);
-    const auto reset=history.apply(rgbOnly,7316,1,4,4);
-    check("B_NEW_GENERATION_SHOWS_RAW_MONOCULAR",reset.depth==rgbOnly.depth
-        &&reset.diagnostics["fusion_mode"]=="monocular"&&reset.diagnostics["scale_reference_age_ms"]==-1);
-
-    GlobalRgbContinuity historyB;
-    historyB.apply(scene.fit(),1000,1,3,1);
-    auto reusedB=scene;
-    reusedB.tof.metadata["frame_id"]=2;
-    reusedB.tof.metadata["rgb_timestamp_ns"]=1033000000.;
-    reusedB.tof.metadata["pair_delta_ms"]=-33.;
-    reusedB.tof.metadata["tof_reused"]=true;
-    std::fill(reusedB.mono.begin(),reusedB.mono.end(),1.25f);
-    const auto nextB=historyB.apply(reusedB.fit(),1033,1,3,2);
-    check("B_REUSED_TOF_REFITS_THE_CURRENT_RGB",nextB.ok()&&nextB.diagnostics["dtof_corrected"]==true
-        &&reusedB.tof.samples==scene.tof.samples&&nextB.diagnostics["scale_reference_frame_id"]==2
-        &&std::abs(nextB.diagnostics["measured_scale"].toDouble()-.18/1.25)<.0005);
-    auto lateB=reusedB;
-    lateB.tof.metadata["pair_delta_ms"]=165.01;
-    lateB.tof.metadata["rgb_timestamp_ns"]=834990000.;
-    check("B_REUSE_STILL_REJECTS_EXCESS_TIMESTAMP_DELTA",!lateB.fit().ok());
-
-    const auto visible=limitTofFieldOfView(nextB,scene.cal,view);
-    const auto payload=RvDepthDiagnostic::encode(reusedB.mono,visible);
-    check("B_VIEWPORT_PAYLOAD_HAS_POSITIVE_PREDICTION_AND_REASON_SLOTS",visible.ok()
-        &&visible.depth.size()==view.depthBytes()&&RvDepthDiagnostic::validPayload(payload));
+    Scene scene;const auto fused=scene.fit();const auto visible=limitTofFieldOfView(fused,scene.cal,scene.view);
+    auto m=scene.tof.metadata;m["width"]=scene.view.outputWidth;m["height"]=scene.view.outputHeight;m["depth_unit"]="camera-Z_m_float32";
+    m["assist_graph_sha256"]=scene.view.graphSha;m["depth_K"]=RvCameraView::intrinsics(scene.view);
+    m["assist_provisional_model"]=true;m["assist_candidate_parity_mean_limit"]=scene.view.parityMeanLimit;
+    m["assist_input_rotation_degrees"]=0;m["assist_output_restored_to_calibrated_grid"]=true;
+    m["assist_fusion"]=visible.diagnostics;m["assist_fusion_revision"]="global_scale_latest_native_rgb_v2";
+    m["assist_output_policy"]=FieldOfViewPolicy;m["assist_diagnostic_native_count"]=256;
+    QImage rgb(scene.view.outputWidth,scene.view.outputHeight,QImage::Format_RGB888);rgb.fill(QColor(90,100,110));
+    RvDepthDiagnostic::Snapshot snapshot{{visible.depth,{},rgb,m,QDateTime::currentDateTimeUtc()},scene.tof,RvDepthDiagnostic::encode(scene.mono,visible,256),{}};
+    check("H_DIAGNOSTIC_MATCHED",snapshot.valid());
+    QTemporaryDir temporary(QFileInfo(path).absolutePath()+"/h-diagnostic-SIMULATED-XXXXXX");temporary.setAutoRemove(false);
+    QString folder,second;const bool saved=snapshot.save(temporary.path(),&folder);
+    check("H_DIAGNOSTIC_EXPLICIT_SAVE",saved&&QFileInfo::exists(folder+"/points.csv")&&QFileInfo::exists(folder+"/tof.bin")&&!QFileInfo::exists(folder+"/legacy.f32"));
+    check("H_DIAGNOSTIC_NEVER_OVERWRITES",snapshot.save(temporary.path(),&second)&&second!=folder);
+    if(saved){
+        const auto rp=temporary.filePath("replay.json");
+        check("H_DIAGNOSTIC_OFFLINE_REPLAY",RvDepthDiagnostic::replay(folder,rp)==0);
+        QFile f(rp);f.open(QIODevice::ReadOnly);const auto result=QJsonDocument::fromJson(f.readAll()).object();
+        check("H_DIAGNOSTIC_REPRODUCES_METRES",result["replayed_correction"]=="H"&&result["repaired_vs_saved_max_m"].toDouble(100)<1e-5);
+        const auto comparison=temporary.filePath("comparison");
+        check("H_DIAGNOSTIC_EXPORT",RvDepthDiagnostic::replay(folder,temporary.filePath("comparison.json"),comparison)==0
+            &&QFileInfo(comparison+"/current_depth.f32").size()==scene.view.depthBytes());
+        check("H_DIAGNOSTIC_EXPORT_OVERWRITE_REJECTED",RvDepthDiagnostic::replay(folder,temporary.filePath("overwrite.json"),folder)==2
+            &&RvDepthDiagnostic::replay(folder,temporary.filePath("existing.json"),comparison)==2);
+        QFile csv(folder+"/points.csv");csv.open(QIODevice::ReadOnly);check("H_DIAGNOSTIC_NATIVE256_CSV",csv.readAll().count('\n')==257);
+        QFile raw(folder+"/tof.bin");raw.open(QIODevice::Append);raw.write("!");raw.close();
+        check("H_DIAGNOSTIC_NATIVE_TAMPER_REJECTED",RvDepthDiagnostic::replay(folder,temporary.filePath("tampered.json"))==2);
+        QFile image(second+"/paired_rgb.png");image.open(QIODevice::Append);image.write("!");image.close();
+        check("H_DIAGNOSTIC_RGB_TAMPER_REJECTED",RvDepthDiagnostic::replay(second,temporary.filePath("rgb_tampered.json"))==2);
+    }
+    auto mismatch=snapshot;mismatch.native.metadata["tof_sequence"]=8;
+    check("H_DIAGNOSTIC_OTHER_MEASUREMENT_REJECTED",!mismatch.valid());
+    for(const auto *old:{"unidepth","unidepth_wide","colorsr_rgb","depthor_v3_fp32"})
+        check(QString("RETIRED_MODEL_REJECTED_")+old,!RvCameraView::isHostDepth(QLatin1String(old))&&!RvCameraView::supportsNativeGrid(QLatin1String(old),8,8));
+    auto quantized=snapshot;
+    auto &qm=quantized.output.metadata;
+    const auto quantizedIdentity=RvInferenceRuntime::identity("openvino:INT8");
+    for(auto it=quantizedIdentity.begin();it!=quantizedIdentity.end();++it)qm["assist_"+it.key()]=it.value();
+    qm["assist_execution_device"]="openvino:INT8";qm["assist_backend"]="openvino-native";
+    check("INT8_DIAGNOSTIC_EXPLICIT_IDENTITY",quantized.valid());
+    auto wrongQuantized=quantized;wrongQuantized.output.metadata["assist_source_graph_sha256"]=QString(64,'0');
+    check("INT8_DIAGNOSTIC_WRONG_SOURCE_REJECTED",!wrongQuantized.valid());
+    wrongQuantized=quantized;wrongQuantized.output.metadata["assist_execution_device"]="cpu";
+    check("INT8_DIAGNOSTIC_WRONG_DEVICE_REJECTED",!wrongQuantized.valid());
+    wrongQuantized=quantized;wrongQuantized.output.metadata["assist_graph_sha256"]=scene.view.graphSha;
+    check("INT8_DIAGNOSTIC_ORIGINAL_HASH_REJECTED",!wrongQuantized.valid());
     return all?0:2;
 }

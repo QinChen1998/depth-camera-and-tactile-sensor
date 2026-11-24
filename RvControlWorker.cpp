@@ -16,6 +16,7 @@
 #include <QtCore/QFile>
 #include <QtCore/QJsonArray>
 #include <QtCore/QJsonDocument>
+#include <QtCore/QSaveFile>
 #include <QtCore/QScopedValueRollback>
 #include <QtCore/QThread>
 #include <QtCore/QTimer>
@@ -274,7 +275,7 @@ public:
         device.serial=serial;
         m_serialCredentials->authenticated();m_serialCredentials.reset();
     }
-    QByteArray execute(const QString &command, int timeoutMs=0, const QByteArray &input={}) {
+    QByteArray execute(const QString &command, int timeoutMs=0, const QByteArray &input={}, QIODevice *download=nullptr) {
         m_timeout=timeoutMs>0?timeoutMs:sshTimeout();
         m_clock.restart(); LIBSSH2_CHANNEL *channel = nullptr;
         while (!(channel = libssh2_channel_open_session(m_session.value))) {
@@ -297,7 +298,10 @@ public:
             for (int stream = 0; stream < 2; ++stream) {
                 const auto count = libssh2_channel_read_ex(channel, stream, buffer, sizeof(buffer));
                 if (count > 0) {
-                    received = true; if (!stream) output.append(buffer, qsizetype(count)); else errors += count;
+                    received = true;
+                    if (stream) errors += count;
+                    else if (download) require(download->write(buffer, count) == count, "Cannot write the local board archive");
+                    else output.append(buffer, qsizetype(count));
                     require(output.size() <= 65536 && errors <= 65536, "Oversized board control response");
                 } else require(count == 0 || count == LIBSSH2_ERROR_EAGAIN, "RV SSH response read failed", 4);
             }
@@ -313,6 +317,7 @@ public:
             throw Error(QString::fromUtf8(diagnostic));
         }
         require(code == 0, QStringLiteral("Board configure rejected (exit %1); lifecycle locks preserved").arg(code));
+        require(!download || errors == 0, "The board reported an error while creating the archive");
         return output;
     }
 private:
@@ -484,12 +489,15 @@ QString readDeviceSerial(Ssh &connection) {
     require(!matches.hasNext(),"Device returned more than one CPU Serial");
     return serial;
 }
-void verifyDevice(Ssh &connection) {
+void verifyDeviceIdentity(Ssh &connection) {
     if(!deviceStore && !factoryLogin)return;
     require(device.ready(),"Device calibration or inference orientation is unconfirmed; open Device Manager");
-    // Fixed read-only commands. Profile strings never become shell commands.
     const auto serial=readDeviceSerial(connection);
     require(serial==device.serial,"Authenticated RV serial differs from the trusted device profile");
+}
+void verifyDevice(Ssh &connection) {
+    if(!deviceStore && !factoryLogin)return;
+    verifyDeviceIdentity(connection);
     const auto geometry=connection.execute(QStringLiteral("sha256sum /root/r144_depth/M48_geometry.bin")).simplified().split(' ').value(0);
     require(geometry==device.geometrySha().toLatin1(),"Device GEO2 calibration differs from its profile; capture was not configured");
 }
@@ -614,7 +622,7 @@ int run(const QStringList &input) {
             // The receiver may still be completing its normal asynchronous STOP.
             // Wait for that owner; never remove its lock or signal an unknown PID.
             connection.execute("set -eu\nn=0\nwhile [ -e /run/r144_fusion_20260923 ] || [ -n \"$(pidof tmf8829_ext tmf8829_tuner native_hd_gui litesr_near_gui || true)\" ]; do n=$((n+1));[ \"$n\" -lt 300 ] || exit 2;sleep .1;done\n",35000);
-            const bool installed=ensureUsbRuntime(connection,root,boot);
+            const bool installed=ensureUsbRuntime(connection,root,boot).changed;
             verifyDevice(connection);
             connection.execute("sh /etc/init.d/S99zdepth start");
             const int cameraHelpersReleased=prepareFactoryCamera(connection,root);
@@ -673,6 +681,29 @@ int run(const QStringList &input) {
         const auto bytes=QJsonDocument(withDevice({{"capture_runtime","ready"},{"automatic_tof","ready"}})).toJson(QJsonDocument::Compact);
         std::fwrite(bytes.constData(),1,size_t(bytes.size()),stdout);return 0;
     }
+    if(args.size()==3 && args[1]=="--maintain-capture-runtime") {
+        require(bool(deviceStore) && qEnvironmentVariable("RV_TEST_OFFLINE_ONLY")!="1",
+            "Board file maintenance requires a selected device and online mode");
+        require(QDir::isAbsolutePath(args[2]), "The local board archive path must be absolute");
+        pinSelectedProfile=true;
+        Ssh connection(known);
+        verifyDeviceIdentity(connection);
+        const auto boot=QString::fromLatin1(connection.execute("cat /proc/sys/kernel/random/boot_id").trimmed());
+        const QDir archiveDirectory(args[2]);
+        QJsonArray archives;
+        int archived=archiveOlderUsbRollbacks(connection,archiveDirectory,boot,archives);
+        const auto update=ensureUsbRuntime(connection,root,boot,true);
+        verifyDevice(connection);
+        require(captureRuntimeState(connection)=="ready" && automaticTofState(connection)=="ready",
+            "Maintained board files did not pass capture verification");
+        if (update.changed)
+            archived+=archiveOlderUsbRollbacks(connection,archiveDirectory,boot,archives,update.rollback);
+        const auto result=withDevice({{"capture_runtime","ready"},{"automatic_tof","ready"},
+            {"runtime_replaced",update.changed},{"archived_rollbacks",archived},{"archives",archives}});
+        const auto bytes=QJsonDocument(result).toJson(QJsonDocument::Compact);
+        std::fwrite(bytes.constData(),1,size_t(bytes.size()),stdout);
+        return 0;
+    }
 #ifdef RV_CONTROL_TRANSPORT_TEST
     if(args.size()==3&&args[1]=="--tuner-save-fixture") {
         const auto request=QJsonDocument::fromJson(readFile(args[2])).object();
@@ -713,12 +744,20 @@ int run(const QStringList &input) {
     }
     if(args.size()>=2&&args[1]=="--dtof") {
         require(args.size()>=5,"Incomplete candidate request");
-        QString recovery,expectedBoot,previousGeneration;
-        bool automaticStart=false;
+        QString hostModel,recovery,expectedBoot,previousGeneration;
+        bool automaticStart=false, extendedIntegration=false;
         for(int i=5;i<args.size();++i){
-            if(args[i]=="--automatic-start"){
+            if(args[i]=="--host-model"){
+                require(hostModel.isEmpty()&&i+1<args.size(),"Invalid host model selection");hostModel=args[++i];
+                require(RvCameraView::isHostDepth(hostModel)||hostModel==QLatin1String(RvCameraView::LegacyNative16Model),"Unsupported host model");
+            }
+            else if(args[i]=="--automatic-start"){
                 require(!automaticStart,"Duplicate automatic start option");
                 automaticStart=true;
+            }
+            else if(args[i]=="--native48-1200k"){
+                require(!extendedIntegration,"Duplicate 1200K integration option");
+                extendedIntegration=true;
             }
             else if(args[i]=="--expected-boot"||args[i]=="--previous-generation"){
                 auto &value=args[i]=="--expected-boot"?expectedBoot:previousGeneration;
@@ -733,6 +772,13 @@ int run(const QStringList &input) {
         require(ok&&RvCaptureContract::supports(mode)&&token.size()==32&&token.toLatin1().toHex().size()==64,"Invalid candidate selection");
         for(auto ch:token)require(QStringLiteral("0123456789abcdef").contains(ch),"Invalid candidate generation");
         RvCaptureContract::validate(mode,token.toStdString(),csv.toStdString());
+        if(mode==RvCaptureContract::NativeHd&&hostModel.isEmpty())hostModel=QLatin1String(RvCameraView::LegacyNative16Model);
+        require(hostModel.isEmpty()||(mode==RvCaptureContract::NativeHd&&hostModel==QLatin1String(RvCameraView::LegacyNative16Model))
+                ||(mode==RvCaptureContract::Native48&&RvCameraView::isHostDepth(hostModel)),
+                "Host model does not match the native capture preset");
+        require(!extendedIntegration||(hostModel.isEmpty()
+                &&(mode==RvCaptureContract::Native48||mode==RvCaptureContract::Native48HighAccuracy)),
+                "1200K integration requires board-native 48x32 capture");
         require(!automaticStart||(bool(deviceStore)&&recovery.isEmpty()&&qEnvironmentVariable("RV_TEST_OFFLINE_ONLY")!="1"),
                 "Automatic start requires an online trusted device");
         const bool streamRecovery=recovery=="--recover-stream-fault";
@@ -762,6 +808,7 @@ int run(const QStringList &input) {
         const auto saved=RvTuner::scriptSettings(session,true);
         auto effective=saved;
         effective.mode=RvCaptureContract::sensorMode(mode);
+        if(extendedIntegration)effective.iterations=RvCaptureContract::Native48ExtendedIntegrationK;
         effective.objects=1;
         effective.signal=false;
         effective.noise=false;
@@ -777,20 +824,40 @@ int run(const QStringList &input) {
         const auto priorOwner=streamRecovery?QString(" %1 %2").arg(previousGeneration,expectedBoot):QString();
         const int sessionFov=deviceStore?device.fov():RvCalibration::Fov;
         require(sessionFov==RvCalibration::Fov,"The current F6 calibration is required before capture");
+        const auto preset=extendedIntegration?QStringLiteral("48-1200"):QString::number(effective.size().width());
         const auto output=connection.execute(QStringLiteral("DCTS_PROCESSING_FOV=%6 DCTS_DTOF_PRESET=%1 /root/dtof_candidates_20261009/control.sh %2 %3 %4 %5")
-                                              .arg(effective.size().width()).arg(action).arg(mode).arg(token,csv).arg(sessionFov)+priorOwner,
+                                              .arg(preset,action).arg(mode).arg(token,csv).arg(sessionFov)+priorOwner,
                                               streamRecovery?40000:0);
         QJsonParseError error;const auto doc=QJsonDocument::fromJson(output,&error);auto r=doc.object();
         require(error.error==QJsonParseError::NoError&&doc.isObject()&&dtofBoardReceipt(r,mode,token,csv),"Candidate receipt mismatch");
         {
-            const auto calibration=QJsonDocument::fromJson(connection.execute("cat /run/dtof_candidates/sensor_readback.json.calibration.json"),&error).object();
+            const auto readbacks=QJsonDocument::fromJson(connection.execute(R"SH(
+set -e
+printf '{"calibration":'
+cat /run/dtof_candidates/sensor_readback.json.calibration.json
+printf ',"sensor":'
+if [ -r /run/dtof_candidates/sensor_readback.json ]; then
+ cat /run/dtof_candidates/sensor_readback.json
+else
+ printf 'null'
+fi
+printf '}'
+)SH"),&error).object();
+            const auto calibration=readbacks["calibration"].toObject();
             require(error.error==QJsonParseError::NoError&&RvCaptureCalibration::valid(calibration,token,sessionFov,true),"Default FOV calibration receipt mismatch");
             r["tof_calibration"]=calibration;
+            const auto sensor=readbacks["sensor"].toObject();
+            const bool verified=sensor["verified"]==true&&sensor["iterations"].toInt()>0;
+            require(!extendedIntegration||(verified&&sensor["iterations"]==RvCaptureContract::Native48ExtendedIntegrationK),
+                    "TMF8829 did not confirm 1200K main integration");
+            if(verified)r["tof_sensor_readback"]=QJsonObject{{"main_iterations_k",sensor["iterations"]},
+                {"period_ms",sensor["period_ms"]},{"snr_threshold",sensor["threshold"]}};
         }
         require(nativeCaptureGrid(r)==effective.size()&&r["native_hole_fill_protocol"]==RvCaptureContract::NativeHoleFillProtocol,
                 "Board imaging receipt differs from the automatic preset");
         require(expectedBoot.isEmpty()||r["boot_id"]==expectedBoot,"Candidate boot changed during start");
         r["candidate_stream_recovery"]=recoveryProtocol;
+        r["requested_host_model"]=hostModel;
         r["capture_settings"]=effective.json();r["saved_capture_settings"]=saved.json();
 
         const auto response=QJsonDocument(withDevice(r)).toJson(QJsonDocument::Compact);std::fwrite(response.constData(),1,size_t(response.size()),stdout);return 0;

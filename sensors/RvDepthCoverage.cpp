@@ -3,16 +3,18 @@
 #include "RvCameraView.h"
 #include "RvInferenceRuntime.h"
 #include <QtCore/QtEndian>
+#include <algorithm>
 #include <cmath>
 #include <cstring>
 
 namespace RvDepthCoverage {
 namespace {
-bool fieldIdentity(const QJsonObject &metadata){
+bool fieldIdentity(const QByteArray &depth,const QJsonObject &metadata){
     const auto model=metadata["assist_host_model"].toString();
-    const auto &profile=RvCameraView::Portrait;
-    if(!RvCameraView::validOutputGrid(metadata)||!RvCameraView::isWide(model)
-       ||metadata["depth_unit"]!="camera-Z_m_float32"
+    const auto &profile=RvCameraView::outputProfile(model);
+    const int width=profile.outputWidth,height=profile.outputHeight;
+    if(!RvCameraView::isWide(model)||!RvCameraView::validOutputGrid(metadata)||metadata["width"]!=width||metadata["height"]!=height
+       ||depth.size()!=profile.depthBytes()||metadata["depth_unit"]!="camera-Z_m_float32"
        ||metadata["assist_output_policy"]!=QLatin1String(RvAssistFusion::FieldOfViewPolicy)
        ||metadata["assist_camera_profile"]!="wide"||metadata["assist_output_restored_to_calibrated_grid"]!=true
        ||(metadata["assist_input_rotation_degrees"]!=0&&metadata["assist_input_rotation_degrees"]!=180))return false;
@@ -32,34 +34,34 @@ bool fieldIdentity(const QJsonObject &metadata){
     const auto fit=metadata["assist_fusion"].toObject();
     return fit["output_policy"]==QLatin1String(RvAssistFusion::FieldOfViewPolicy)&&fit["fov_geometry_only"]==true;
 }
-}
-
-bool decodeDepth(const QByteArray &depth,const QJsonObject &metadata,
-                 std::vector<float> &values,DepthField &field){
-    field={};
-    values.clear();
+DepthField scan(const QByteArray &depth,const QJsonObject &metadata,std::vector<float> *decoded,bool &finite){
+    finite=false;DepthField result;
+    const bool admitted=fieldIdentity(depth,metadata);
+    if(!decoded&&!admitted)return result;
     const int width=metadata["width"].toInt(),height=metadata["height"].toInt();
-    constexpr qsizetype bytesPerPixel=sizeof(float);
-    const auto pixels=depth.size()/bytesPerPixel;
-    if(width<=0||height<=0||qint64(width)*height!=pixels||depth.size()%bytesPerPixel!=0)return false;
-
-    values.resize(pixels);
-    const auto *data=depth.constData();
-    qsizetype positive=0;
+    if(width<=0||height<=0||qint64(width)*height*4!=depth.size())return result;
+    if(decoded)decoded->resize(size_t(width)*height);
+    auto *values=decoded?decoded->data():nullptr;
     bool nonnegative=true;
-    for(qsizetype i=0;i<pixels;++i){
-        const quint32 bits=qFromLittleEndian<quint32>(data+i*bytesPerPixel);
-        float z;
-        std::memcpy(&z,&bits,bytesPerPixel);
-        if(!std::isfinite(z)){values.clear();return false;}
-        values[i]=z;
-        nonnegative&=z>=0;
-        positive+=z>0;
+    int count=0;
+    for(int y=0;y<height;++y)for(int x=0;x<width;++x){
+        const quint32 bits=qFromLittleEndian<quint32>(depth.constData()+4*(y*width+x));float z;std::memcpy(&z,&bits,4);
+        if(!std::isfinite(z)){if(decoded)decoded->clear();return {};}
+        if(values)values[y*width+x]=z;
+        if(admitted){
+            nonnegative&=z>=0;
+            if(z>0)++count;
+        }
     }
-    // Keep the calibrated viewport fixed as the parallax mask moves with depth.
-    if(nonnegative&&positive>0&&fieldIdentity(metadata)
-       &&metadata["assist_fusion"].toObject()["fov_pixels"].toDouble(-1)==double(positive))
-        field.sourceRect=QRect(0,0,width,height);
-    return true;
+    finite=true;
+    if(!admitted||!nonnegative||count==0||metadata["assist_fusion"].toObject()["fov_pixels"].toDouble(-1)!=count)return result;
+    // Both schemes keep the full calibrated viewport across current and held scale.
+    result.sourceRect=QRect(0,0,width,height);
+    return result;
+}
+}
+DepthField depthField(const QByteArray &depth,const QJsonObject &metadata){bool finite=false;return scan(depth,metadata,nullptr,finite);}
+bool decodeDepth(const QByteArray &depth,const QJsonObject &metadata,std::vector<float> &values,DepthField &field){
+    bool finite=false;field=scan(depth,metadata,&values,finite);return finite;
 }
 }

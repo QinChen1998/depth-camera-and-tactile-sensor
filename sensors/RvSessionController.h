@@ -30,8 +30,8 @@ class RvHdVideoStream;
 class RvDtofBoardStream;
 class RvAssistDepth;
 class RvTunerController;
-class LanguageManager;
 class SensorMainWindow;
+class LanguageManager;
 struct RtspVlcBackend;
 
 // One RV device session, independent of either display widget. All public calls
@@ -72,10 +72,27 @@ public:
     quint64 presentationEpoch() const {return m_presentationEpoch;}
     bool assistDepthEnabled() const;
     bool hostHdAssist() const {return m_hostAssistSelected&&m_dtofMode==RvDtofCandidates::Native48&&m_config.cameraWidth==2304;}
+    static constexpr char GlobalRgbImagingScheme[]="host_unidepth_rgb672_vga_fp16_tof48_g";
+    static constexpr char ReuseLatestTofImagingScheme[]="host_unidepth_rgb672_vga_fp16_tof48_b";
+    static constexpr char DepthPro2ImagingScheme[]="host_depthpro2_s_vga_fp16";
+    static constexpr char DepthPro2BImagingScheme[]="host_depthpro2_b_vga_fp16";
+    static constexpr char DepthPro2ReuseImagingScheme[]="host_depthpro2_s_vga_fp16_reuse_tof";
+    static constexpr char DepthPro2BReuseImagingScheme[]="host_depthpro2_b_vga_fp16_reuse_tof";
+    static QString depthPro2ModelForScheme(const QString &scheme);
+    static QString depthPro2Scheme(const QString &model,bool reuse);
+    static bool reusesLatestTof(const QString &scheme);
+    static constexpr char Native48ExtendedIntegrationScheme[]="board_native_tof48_1200k";
+    static constexpr char Native48HighAccuracy1200KScheme[]="board_native_tof48_high_accuracy_1200k";
+    bool native48ExtendedIntegration() const { return m_native48ExtendedIntegration; }
+    bool monocularDisplay() const {return m_monocularDisplay;}
+    void setMonocularDisplay(bool enabled);
+    bool splitCorrectionAvailable() const;
+    bool splitCorrectionEnabled() const;
+    void setSplitCorrectionEnabled(bool enabled);
+    QString assistExperiment() const;
     int assistInputRotationDegrees() const;
     QString assistHostModel() const;
     QString currentImagingScheme() const;
-    static constexpr char ReuseLatestTofImagingScheme[]="host_unidepth_rgb672_vga_fp16_tof48_b";
     static QString imagingHostModel(const QString &scheme);
     QString hostInferencePreflightError() const;
     QString assistDepthInfoText() const {return m_assistInfo;}
@@ -129,7 +146,10 @@ signals:
     void photonStreamCleared(const QString &reason);
     void depthStreamCleared(const QString &reason);
     void assistStateChanged();
-    void assistDepthSnapshotReady(const QByteArray &depth,const QJsonObject &metadata,const QImage &camera,const QByteArray &diagnostic={});
+    void monocularDisplayChanged(bool enabled);
+    void assistDepthSnapshotReady(const QByteArray &depth,const QJsonObject &metadata,const QImage &camera,
+                                  const RvTofFrame &tof=RvTofFrame(),const QByteArray &diagnostic=QByteArray(),
+                                  const QImage &inferenceInput=QImage());
     void assistDepthStreamCleared(const QString &reason);
     void imagingSwitchStarted(const QString &scheme,int estimatedMs);
     void imagingSwitchFinished(const QString &scheme,qint64 elapsedMs);
@@ -149,6 +169,7 @@ private:
     friend int runRvDtofCandidatesTests(const QString &reportPath);
     friend int runRvAssistDepthTests(const QString &reportPath);
     friend int runRvImagingSwitchTests(const QString &reportPath);
+    friend int runPortSmokeTests(SensorMainWindow &,LanguageManager &,const QString &);
     struct Configuration {
         int cameraWidth = 576;
         QString model = QStringLiteral("Native");
@@ -173,8 +194,9 @@ private:
     bool startVlc(const QUrl &source);
     void presentHostHdVideo();
     void takeHostHdPrepared();
+    void prepareHostHdFrame(const QImage &image,const QJsonObject &source,quint64 epoch,const QByteArray &native);
     void observeHostHdClock(const QJsonObject& metadata);
-    const RvTofFrame *pairedHostTof(qint64 rgbNs) const;
+    const RvTofFrame *pairedHostTof(qint64 rgbBoardNs,qint64 nowNs) const;
     bool prepareManagedVlc();
     void pollManagedStatus();
     void stopManagedStatus();
@@ -197,6 +219,7 @@ private:
     AutomaticConnectionStage m_automaticConnectionStage = AutomaticConnectionStage::Idle;
     quint64 m_stopRevision=0;
     int m_dtofMode=-1;
+    bool m_native48ExtendedIntegration=false;
     RvDtofCandidates::Settings m_dtofSettings;
     QString m_dtofOptions,m_dtofToken;
     QJsonObject m_dtofReceipt;
@@ -245,7 +268,7 @@ private:
     quint64 m_presentationEpoch = 0;
     bool m_transitioning = false;
     bool m_imagingSwitchActive=false,m_imagingSwitchBoardRestart=false;
-    bool m_hostAssistSelected=false;
+    bool m_hostAssistSelected=false,m_monocularDisplay=false;
     int m_imagingSwitchEstimateMs=0;
     QString m_imagingSwitchScheme;
     QElapsedTimer m_imagingSwitchClock;

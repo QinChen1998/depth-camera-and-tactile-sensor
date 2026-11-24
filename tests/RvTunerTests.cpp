@@ -45,7 +45,7 @@ QByteArray packet(const RvTuner::Settings &s,quint32 sequence=1){
 }
 bool rejects(const std::function<void()> &fn){try{fn();return false;}catch(const std::exception &){return true;}}
 }
-// Exercise the production asynchronous Native16 transport with fragmentation.
+// Exercise the production asynchronous native transport with fragmentation.
 enum class StreamOutcome { InfrastructureFailure, Accepted, Rejected };
 using StreamOutput=RvDtofBoardStream::Output;
 enum class HoleFillFixture { None, Valid, WrongSize, MeasuredIndex, WrongProtocol };
@@ -140,6 +140,7 @@ int runRvTunerTests(const QString &path){
  for(int mode:{9,10,11,12,13,15,16,17,18,19,20,21,22})check(QString("RETIRED_BOARD_MODE_%1_REJECTED").arg(mode),!RvDtofCandidates::supports(mode));
  for(int mode:{24,25}){
    check(QString("NATIVE48_F6_TRANSPORT_%1").arg(mode),nativeStreamCase(0,0,mode)==StreamOutcome::Accepted);
+   check(QString("NATIVE48_COMBINED_INFO_PRESERVED_%1").arg(mode),nativeStreamCase(0x18,0,mode)==StreamOutcome::Accepted);
    check(QString("BOARD_DEPTH_FILL_PRESERVES_RAW_%1").arg(mode),nativeStreamCase(0,0,mode,StreamOutput::BoardDepth,HoleFillFixture::Valid)==StreamOutcome::Accepted);
    check(QString("BOARD_DEPTH_WITHOUT_ELIGIBLE_HOLES_%1").arg(mode),nativeStreamCase(0,0,mode,StreamOutput::BoardDepth)==StreamOutcome::Accepted);
    for(int defect:{3,4,5,6,11,14})check(QString("NATIVE48_REJECT_%1_%2").arg(mode).arg(defect),nativeStreamCase(0,defect,mode)==StreamOutcome::Rejected);
@@ -150,7 +151,7 @@ int runRvTunerTests(const QString &path){
  check("BOARD_DEPTH_REFUSES_MALFORMED_ESTIMATE_SIZE",nativeStreamCase(0,0,25,StreamOutput::BoardDepth,HoleFillFixture::WrongSize)==StreamOutcome::Rejected);
  check("BOARD_DEPTH_REFUSES_ESTIMATE_OVER_MEASUREMENT",nativeStreamCase(0,0,25,StreamOutput::BoardDepth,HoleFillFixture::MeasuredIndex)==StreamOutcome::Rejected);
  check("BOARD_DEPTH_REFUSES_UNKNOWN_ESTIMATE_PROTOCOL",nativeStreamCase(0,0,25,StreamOutput::BoardDepth,HoleFillFixture::WrongProtocol)==StreamOutcome::Rejected);
- for(int warning:{0,8,16,24,32,64,128})check(QString("NATIVE16_FRAGMENTED_WARNING_%1").arg(warning),nativeStreamCase(warning,0)==(warning==0||warning==8||warning==16?StreamOutcome::Accepted:StreamOutcome::Rejected));
+ for(int warning:{0,8,16,24,32,64,128})check(QString("NATIVE16_FRAGMENTED_WARNING_%1").arg(warning),nativeStreamCase(warning,0)==(warning==0||warning==8||warning==16||warning==24?StreamOutcome::Accepted:StreamOutcome::Rejected));
  for(int defect=1;defect<=19;++defect)check(QString("NATIVE16_OUTPUT_IDENTITY_REJECT_%1").arg(defect),nativeStreamCase(0,defect)==StreamOutcome::Rejected);
  QTemporaryDir temporary;if(!temporary.isValid())return 3;QSettings::setDefaultFormat(QSettings::IniFormat);QSettings::setPath(QSettings::IniFormat,QSettings::UserScope,temporary.path());QSettings::setPath(QSettings::IniFormat,QSettings::SystemScope,temporary.path());
  using namespace RvTuner;Settings s;s.signal=true;
@@ -172,7 +173,10 @@ int runRvTunerTests(const QString &path){
  check("OVERSIZED_BUFFER_REJECTED",rejects([&]{Decoder(Token,s,1).feed(QByteArray(512*1024+1,0));}));
  auto warning=bytes;warning[49]=warning[50]=9;qToLittleEndian<quint32>(8,warning.data()+52);check("OBSERVE_08_PRESERVED",Decoder(Token,s,1).feed(warning).first().warnings==8);
  {auto b=bytes;b[49]=b[50]=17;qToLittleEndian<quint32>(16,b.data()+52);check("INFO_10_PRESERVED",Decoder(Token,s,1).feed(b).first().warnings==16);
- b[49]=b[50]=25;qToLittleEndian<quint32>(24,b.data()+52);check("MIXED_08_10_REJECTED",rejects([&]{Decoder(Token,s,1).feed(b);}));}
+ b[49]=0x19;b[50]=0x09;b[51]=0x11;qToLittleEndian<quint32>(0x18,b.data()+52);
+ check("COMBINED_INFO_PRESERVED_ACROSS_SUBFRAMES",Decoder(Token,s,1).feed(b).first().warnings==0x18);
+ b[51]=0x01;check("COMBINED_INFO_REQUIRES_MATCHING_SUBFRAMES",rejects([&]{Decoder(Token,s,1).feed(b);}));
+ b[51]=0x10;check("COMBINED_INFO_REQUIRES_VALID_SUBFRAMES",rejects([&]{Decoder(Token,s,1).feed(b);}));}
  s.signal=false;const auto noSignal=Decoder(Token,s,1).feed(packet(s)).first();check("MISSING_SIGNAL_IS_CHANNEL_ABSENCE",!noSignal.settings.signal);auto forged=packet(s);forged[76]=1;check("MISSING_SIGNAL_NOT_ZERO_MEASUREMENT",rejects([&]{Decoder(Token,s,1).feed(forged);}));
  check("CHIP_ENCODING_SHARED_WITH_PHOTON",rv_photon_count(0x8002)==512&&rv_photon_count(0x7fff)==32767&&rv_photon_count(0xffff)==8388352);
  s.signal=true;auto frame=Decoder(Token,s,1).feed(packet(s)).first();check("TARGET_MAJOR_SAME_FRAME",frame.sample(2,0).range==1064&&frame.sample(1,0).range==1000);check("INVALID_TARGET_REJECTED",rejects([&]{frame.sample(4,0);}));

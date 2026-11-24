@@ -83,6 +83,9 @@
     <ClCompile Include="LanguageManager.cpp"/>
     <ClCompile Include="TactileDockWidget.cpp"/>
     <ClCompile Include="sensors\DepthMapWidget.cpp"/>
+    <ClCompile Include="sensors\DepthMeasurement.cpp"/>
+    <ClCompile Include="sensors\GeminiMeasurement.cpp"/>
+    <ClCompile Include="sensors\MeasurementCaptureDialog.cpp"/>
     <ClCompile Include="sensors\RvPointCloudWidget.cpp"/>
     <ClCompile Include="sensors\ImageDisplaySettings.cpp"/>
     <ClCompile Include="sensors\RtspCameraPage.cpp"/>
@@ -129,9 +132,11 @@
     <ClInclude Include="TactileDockWidget.h"/>
     <ClInclude Include="UiStyle.h"/>
     <ClInclude Include="sensors\DepthColorScale.h"/>
+    <ClInclude Include="sensors\PointCloudColorScale.h"/>
     <QtMoc Include="sensors\DepthMapWidget.h"/>
     <ClInclude Include="sensors\DockableQuick3DWidget.h"/>
     <QtMoc Include="sensors\RvPointCloudWidget.h"/>
+    <QtMoc Include="sensors\MeasurementCaptureDialog.h"/>
     <QtMoc Include="sensors\SceneInstanceBuffer.h"/>
     <ClInclude Include="sensors\DepthPost.h"/>
     <ClInclude Include="sensors\DepthSnapshot.h"/>
@@ -147,6 +152,7 @@
     <ClInclude Include="sensors\RvDepthCoverage.h"/>
     <ClInclude Include="sensors\RvDepthDiagnostic.h"/>
     <ClInclude Include="sensors\RvDepthView.h"/>
+    <ClInclude Include="sensors\DepthMeasurement.h"/>
     <QtMoc Include="sensors\RvDeviceManagerDialog.h"/>
     <ClInclude Include="sensors\RvDeviceStore.h"/>
     <ClInclude Include="sensors\RvCalibration.h" />
@@ -176,6 +182,9 @@
     <None Include="qml\RvPointCloudView.qml"/>
     <None Include="qml\RvCloudPoint.vert"/>
     <None Include="qml\RvCloudPoint.frag"/>
+    <None Include="qml\RvCloudNativePoint.vert"/>
+    <None Include="qml\RvCloudMesh.vert"/>
+    <None Include="qml\RvCloudMesh.frag"/>
     <QtRcc Include="Component_tactile.qrc"/>
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets"/>
