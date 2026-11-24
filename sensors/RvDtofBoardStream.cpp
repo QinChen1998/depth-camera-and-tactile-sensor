@@ -1,4 +1,5 @@
 #include "RvDtofBoardStream.h"
+#include "../tools/rv_capture/StatusPolicy.h"
 #include <QtConcurrent/QtConcurrentRun>
 #include <atomic>
 
@@ -111,7 +112,7 @@ RvDtofBoardStream::Decoded RvDtofBoardStream::decode(const std::shared_ptr<Decod
         out.rawAge=m["raw_age_ms"].toDouble(-1);
         if(!seqOk||!stampOk||seq<=last.rawSequence||stamp<=last.rawCapture||seq>9007199254740991ULL||stamp>9007199254740991ULL
             ||!std::isfinite(out.rawAge)||out.rawAge<0||m["raw_fov_correction"]!=expectedFov||m["raw_columns"]!=grid.width()||m["raw_rows"]!=grid.height()
-            ||(m["tof_warning_flags"]!=0&&m["tof_warning_flags"]!=8&&m["tof_warning_flags"]!=16))
+            ||!RvCaptureStatus::allowedWarnings(unsigned(m["tof_warning_flags"].toInt(-1))))
             return reject(tr("Invalid candidate measurement identity"));
         out.identities.rawSequence=seq;out.identities.rawCapture=stamp;
         out.native=nativeMeasurement(buffer.mid(HeaderBytes+jsonSize,rawSize),m,grid,seq,stamp,expectedFov);

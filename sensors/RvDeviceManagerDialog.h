@@ -42,7 +42,7 @@ private:
     void activate();
     void remove();
     void importDevices();
-    void installCaptureRuntime(bool confirmed = false);
+    void prepareCaptureRuntime(const QString &operation, bool resumeImaging = false);
     void exportDevices();
     void runWorker(const QString &operation);
     void readDeviceInformation();
@@ -71,7 +71,7 @@ private:
     QLabel *m_calibration;
     QCheckBox *m_legacy,*m_confirm;
     QLabel *m_status,*m_fingerprint,*m_active;
-    QPushButton *m_save,*m_use,*m_remove,*m_probe,*m_verify,*m_forget,*m_readSerial,*m_installCapture;
+    QPushButton *m_save,*m_use,*m_remove,*m_probe,*m_verify,*m_forget,*m_readSerial,*m_installCapture,*m_maintainCapture;
     QPlainTextEdit *m_serialHelp;
     QVector<QPushButton*> m_actions;
     QProcess *m_worker;

@@ -3,6 +3,7 @@
 #include "RenderingSettings.h"
 #include "TactileDockWidget.h"
 #include "sensors/DepthMapWidget.h"
+#include "sensors/MeasurementCaptureDialog.h"
 #include "sensors/RtspCameraPage.h"
 #include "sensors/RvDeviceManagerDialog.h"
 #include "sensors/RvInferenceSettings.h"
@@ -95,6 +96,21 @@ SensorMainWindow::SensorMainWindow(LanguageManager *language, QWidget *parent)
     });
 
     m_file=menuBar()->addMenu(QString());m_file->setObjectName("fileMenu");
+    m_measurementAction = m_file->addAction(QString());
+    m_measurementAction->setObjectName("measurementCaptureAction");
+    connect(m_measurementAction, &QAction::triggered, this, [this] {
+        if (!m_measurement) {
+            m_measurement = new MeasurementCaptureDialog(m_session, this);
+            connect(m_measurement, &MeasurementCaptureDialog::recordingFinished, this, [this] {
+                if (m_closing)
+                    QTimer::singleShot(0, this, &QWidget::close);
+            });
+        }
+        m_measurement->show();
+        m_measurement->raise();
+        m_measurement->activateWindow();
+    });
+    m_file->addSeparator();
     m_exit=m_file->addAction(QString());connect(m_exit,&QAction::triggered,this,&QWidget::close);
     m_view=menuBar()->addMenu(QString());m_view->setObjectName("viewMenu");
     for(auto *dock:m_docks)m_view->addAction(dock->toggleViewAction());
@@ -219,6 +235,7 @@ SensorMainWindow::~SensorMainWindow()
     m_closing=true;
     m_tactile->display()->stop();m_session->stop();
     // Destroy subscribers while the session is still alive.
+    if(m_measurement)delete m_measurement;
     for(auto *dock:m_docks)delete dock;
     if(m_devices)delete m_devices;
     delete m_session;
@@ -270,6 +287,12 @@ void SensorMainWindow::savePreset()
 
 void SensorMainWindow::closeEvent(QCloseEvent *event)
 {
+    if (m_measurement && m_measurement->recording()) {
+        event->ignore();
+        m_closing = true;
+        m_measurement->stopRecording();
+        return;
+    }
     if(m_session->tuner()->shutdownPending()&&!m_tunerCloseReady){
         event->ignore();m_closing=true;m_session->tuner()->stop();return;
     }
@@ -288,6 +311,7 @@ void SensorMainWindow::retranslate()
     m_pointCloudDock->setWindowTitle(tr("Point Cloud"));
     m_cameraDock->setWindowTitle(tr("Camera raw video"));
     m_file->setTitle(tr("File"));m_exit->setText(tr("Exit"));m_view->setTitle(tr("View"));
+    m_measurementAction->setText(tr("Measurement Capture..."));
     m_reset->setText(tr("Reset layout"));m_presets->setTitle(tr("Layout Presets"));
     m_savePreset->setText(tr("Save layout..."));m_deletePreset->setText(tr("Delete layout..."));
     m_settings->setTitle(tr("Settings"));m_deviceAction->setText(tr("Device Manager..."));

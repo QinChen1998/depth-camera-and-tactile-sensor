@@ -6,6 +6,7 @@
 #include <QtCore/QDateTime>
 #include <QtCore/QFile>
 #include "RvDeviceManagerDialog.h"
+#include "RvInferenceSettings.h"
 #include "RvSessionController.h"
 #include "RvTunerController.h"
 #include "../RuntimeDiscovery.h"
@@ -429,6 +430,11 @@ private:
             });
         });
     }
+    bool waitingForHostInference() const
+    {
+        return m_session->hostHdAssist() && m_session->assistDepthEnabled()
+            && RvInferenceSettings::instance()->scanning();
+    }
     QWidget *promptParent() const
     {
         return m_requester ? static_cast<QWidget *>(m_requester.data()) : m_window;
@@ -724,6 +730,11 @@ private:
     void registerAndStart()
     {
         if(!operationAllowed())return;
+        // The imaging scheme may have changed while checking the board files.
+        if (m_automatic && waitingForHostInference()) {
+            m_seen.clear();
+            return;
+        }
         try {
             RvDeviceStore store(m_session->deviceStorePath());
             if(store.revision()!=m_registryRevision)throw std::runtime_error("Device registry changed during USB setup; retry the connection.");
