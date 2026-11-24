@@ -18,6 +18,7 @@
 #include <QtCore/QWaitCondition>
 #include <atomic>
 #include "DepthPost.h"
+#include "RvCameraView.h"
 #include "RvTofFrame.h"
 #include <cstring>
 #include <memory>
@@ -84,6 +85,10 @@ public:
    }
   }
   return rectify(small,calibration);
+ }
+ static QImage prepareHostDepthInput(const QImage &decoded) {
+  const auto portrait=prepareHd(decoded,hdVgaCalibration(),RvCameraView::TofPortraitRoi);
+  return portrait.scaled(RvCameraView::DepthPro2Portrait.inputSize(),Qt::IgnoreAspectRatio,Qt::SmoothTransformation);
  }
  static QImage process(const QByteArray& nv,const Calibration& calibration,QImage* scratch=nullptr) {
   const int w=calibration.w,h=calibration.h,ch=(h+1)/2*2;

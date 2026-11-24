@@ -7,7 +7,6 @@
 #include "sensors/MeasurementCaptureDialog.h"
 #include "sensors/RtspCameraPage.h"
 #include "sensors/RvDeviceManagerDialog.h"
-#include "sensors/RvInferenceSettings.h"
 #include "sensors/RvImportDiagnostics.h"
 #include "sensors/RvPointCloudWidget.h"
 #include "sensors/RvTunerController.h"
@@ -71,7 +70,6 @@ SensorMainWindow::SensorMainWindow(LanguageManager *language, QWidget *parent)
         m_inferenceWarning=dialog;
         dialog->setObjectName("hostInferenceUnavailable");
         dialog->setTextFormat(Qt::PlainText);
-        dialog->setInformativeText(tr("Open Settings > Inference Device to detect usable devices, then click Start again."));
         if(!detail.isEmpty())dialog->setDetailedText(detail);
         dialog->setAttribute(Qt::WA_DeleteOnClose);
         dialog->open();
@@ -161,8 +159,6 @@ SensorMainWindow::SensorMainWindow(LanguageManager *language, QWidget *parent)
     m_settings=menuBar()->addMenu(QString());m_settings->setObjectName("settingsMenu");
     m_deviceAction=m_settings->addAction(QString());m_deviceAction->setObjectName("rvDeviceManagerAction");
     connect(m_deviceAction,&QAction::triggered,this,[this]{showDeviceManager();});
-    m_inferenceAction=m_settings->addAction(QString());m_inferenceAction->setObjectName("inferenceDeviceAction");
-    connect(m_inferenceAction,&QAction::triggered,this,[this]{RvInferenceSettings::instance()->createDialog(this)->show();});
     m_rendering=m_settings->addMenu(QString());m_rendering->setObjectName("renderModeMenu");
     auto *renderGroup=new QActionGroup(this);renderGroup->setExclusive(true);
     m_standard=m_rendering->addAction(QString());m_standard->setObjectName("actionRenderStandard");
@@ -349,7 +345,6 @@ void SensorMainWindow::retranslate()
     m_reset->setText(tr("Reset layout"));m_presets->setTitle(tr("Layout Presets"));
     m_savePreset->setText(tr("Save layout..."));m_deletePreset->setText(tr("Delete layout..."));
     m_settings->setTitle(tr("Settings"));m_deviceAction->setText(tr("Device Manager..."));
-    m_inferenceAction->setText(tr("Inference Device..."));
     m_rendering->setTitle(tr("Rendering Mode"));m_standard->setText(tr("Standard Mode"));m_smooth->setText(tr("Smooth Mode"));
     m_languages->setTitle(tr("Language"));m_english->setText(tr("English"));m_chinese->setText(tr("Simplified Chinese"));
     m_about->setText(tr("About"));

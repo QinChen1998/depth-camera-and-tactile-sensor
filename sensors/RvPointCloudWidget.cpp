@@ -15,7 +15,6 @@
 #include <QLocale>
 #include <QPushButton>
 #include <QSettings>
-#include <QSignalBlocker>
 #include <QVBoxLayout>
 #include <QtConcurrent/QtConcurrentRun>
 #include <QtEndian>
@@ -31,8 +30,6 @@
 namespace {
 constexpr int Columns = 48;
 constexpr int Rows = 32;
-constexpr int AccumulationFrameLimit = 100;
-constexpr int AccumulationUpdateMs = 100;
 constexpr double MillimetresPerMetre = 1000.0;
 constexpr double DefaultDiameter = 2.4;
 constexpr double MaximumColorRangeM = 11.0;
@@ -167,7 +164,7 @@ RvPointCloudWidget::RvPointCloudWidget(RvSessionController *session, QWidget *pa
       m_view(new RvPointCloudCanvas(m_instances, m_depthInstances, this)),
       m_status(new QLabel(this)), m_displayMode(new QComboBox(this)),
       m_colorMode(new QComboBox(this)), m_pause(new QPushButton(this)),
-      m_accumulate(new QPushButton(this)), m_reset(new QPushButton(this)),
+      m_reset(new QPushButton(this)),
       m_diameterControls(new QWidget(this)), m_rangeControls(new QWidget(this)), m_colorLegend(new QLabel(this)),
       m_legendMinimum(new QLabel(this)), m_legendMaximum(new QLabel(this)),
       m_diameterLabel(new QLabel(m_diameterControls)), m_rangeLabel(new QLabel(m_rangeControls)),
@@ -189,14 +186,11 @@ RvPointCloudWidget::RvPointCloudWidget(RvSessionController *session, QWidget *pa
     m_displayMode->addItems({QString(), QString()});
     m_pause->setObjectName("rvPointCloudPause");
     m_pause->setCheckable(true);
-    m_accumulate->setObjectName("rvPointCloudAccumulate");
-    m_accumulate->setCheckable(true);
     m_reset->setObjectName("rvPointCloudReset");
     auto *toolbar = new QHBoxLayout;
     toolbar->addWidget(m_status, 1);
     toolbar->addWidget(m_pause);
     toolbar->addWidget(m_displayMode);
-    toolbar->addWidget(m_accumulate);
     toolbar->addWidget(m_reset);
     auto *layout = new QVBoxLayout(this);
     layout->setContentsMargins(8, 8, 8, 8);
@@ -218,11 +212,7 @@ RvPointCloudWidget::RvPointCloudWidget(RvSessionController *session, QWidget *pa
     m_expiry.setSingleShot(true);
     m_expiry.setTimerType(Qt::PreciseTimer);
     connect(&m_expiry, &QTimer::timeout, this, &RvPointCloudWidget::clearTofFrame);
-    m_accumulationUpdate.setSingleShot(true);
-    m_accumulationUpdate.setInterval(AccumulationUpdateMs);
-    connect(&m_accumulationUpdate, &QTimer::timeout, this, &RvPointCloudWidget::presentLatest);
     connect(m_pause, &QPushButton::toggled, this, &RvPointCloudWidget::setPaused);
-    connect(m_accumulate, &QPushButton::toggled, this, &RvPointCloudWidget::setAccumulating);
     connect(m_displayMode, &QComboBox::currentIndexChanged, this, &RvPointCloudWidget::changeDisplayMode);
     connect(m_session, &RvSessionController::tofFrameReady, this, &RvPointCloudWidget::acceptTofFrame);
     connect(m_session, &RvSessionController::assistDepthSnapshotReady, this, &RvPointCloudWidget::acceptAssistedDepth);
@@ -345,8 +335,6 @@ void RvPointCloudWidget::applyDepthColorRange()
 void RvPointCloudWidget::refreshColors()
 {
     updateColorLegend();
-    for (auto &frame : m_accumulatedFrames)
-        colorNativeFrame(frame);
     changeDisplayMode();
 }
 
@@ -407,10 +395,7 @@ void RvPointCloudWidget::acceptTofFrame(const RvTofFrame &frame)
 
     m_latestTof = frame;
     m_expiry.start(std::max(1, RvCaptureContract::FreshMs - int(std::ceil(age))));
-    if (m_accumulate->isChecked())
-        appendAccumulatedFrame();
-    else
-        presentLatest();
+    presentLatest();
 }
 
 void RvPointCloudWidget::acceptAssistedDepth(const QByteArray &depth, const QJsonObject &metadata, const QImage &,
@@ -446,11 +431,6 @@ void RvPointCloudWidget::acceptAssistedDepth(const QByteArray &depth, const QJso
 
 void RvPointCloudWidget::clearFrames()
 {
-    clearAccumulatedFrames();
-    if (!capturesNative48(*m_session)) {
-        const QSignalBlocker blocker(m_accumulate);
-        m_accumulate->setChecked(false);
-    }
     m_expiry.stop();
     m_latestTof = {};
     m_instances->setEntries({});
@@ -475,11 +455,9 @@ void RvPointCloudWidget::clearAssistedDepth()
 void RvPointCloudWidget::clearTofFrame()
 {
     m_latestTof = {};
-    if (!m_accumulate->isChecked()) {
-        m_instances->setEntries({});
-        if (capturesNative48(*m_session))
-            publishMesh({});
-    }
+    m_instances->setEntries({});
+    if (capturesNative48(*m_session))
+        publishMesh({});
     updateStatus();
 }
 
@@ -488,7 +466,7 @@ void RvPointCloudWidget::presentLatest()
     if (!m_renderingActive || m_pause->isChecked())
         return;
     m_view->setAssisted(capturesAssistedDepth(*m_session));
-    if (capturesNative48(*m_session)) presentNativeFrames();
+    if (capturesNative48(*m_session)) presentNativeFrame();
     startDepthConversion();
     updateStatus();
 }
@@ -534,30 +512,6 @@ RvPointCloudWidget::NativeFrame RvPointCloudWidget::projectTofFrame(bool mesh) c
     return projected;
 }
 
-void RvPointCloudWidget::setAccumulating(bool enabled)
-{
-    clearAccumulatedFrames();
-    if (enabled && m_expiry.remainingTime() > 0)
-        appendAccumulatedFrame();
-    presentLatest();
-}
-
-void RvPointCloudWidget::appendAccumulatedFrame()
-{
-    if (m_accumulatedFrames.size() == AccumulationFrameLimit)
-        m_accumulatedFrames.pop_front();
-    m_accumulatedFrames.push_back(projectTofFrame(true));
-    // Keep every admitted frame while coalescing uploads to the view.
-    if (m_renderingActive && !m_accumulationUpdate.isActive())
-        m_accumulationUpdate.start();
-}
-
-void RvPointCloudWidget::clearAccumulatedFrames()
-{
-    m_accumulationUpdate.stop();
-    m_accumulatedFrames.clear();
-}
-
 void RvPointCloudWidget::colorNativeFrame(NativeFrame &frame) const
 {
     if (frame.points.isEmpty())
@@ -574,60 +528,21 @@ void RvPointCloudWidget::colorNativeFrame(NativeFrame &frame) const
     }
 }
 
-void RvPointCloudWidget::presentNativeFrames()
+void RvPointCloudWidget::presentNativeFrame()
 {
-    m_accumulationUpdate.stop();
-    const bool accumulating = m_accumulate->isChecked();
     const bool mesh = m_displayMode->currentIndex() == Mesh;
-    const bool fresh = m_expiry.remainingTime() > 0;
-    if (!mesh && !accumulating) {
-        m_instances->setEntries(fresh ? projectTofFrame(false).points : QVector<Instance>{});
-        publishMesh({});
-        return;
-    }
-    NativeFrame latest;
-    QList<const NativeFrame *> frames;
-    if (accumulating) {
-        for (const auto &frame : m_accumulatedFrames)
-            frames.append(&frame);
-    } else if (fresh) {
-        latest = projectTofFrame(true);
-        frames.append(&latest);
-    }
-
-    qsizetype pointCount = 0;
-    qsizetype indexCount = 0;
-    for (const auto *frame : frames) {
-        pointCount += frame->points.size();
-        indexCount += frame->indices.size();
-    }
+    const auto frame = m_expiry.remainingTime() > 0 ? projectTofFrame(mesh) : NativeFrame{};
     if (!mesh) {
-        QByteArray table;
-        table.reserve(pointCount * sizeof(Instance));
-        for (const auto *frame : frames) {
-            if (!frame->points.isEmpty())
-                table.append(reinterpret_cast<const char *>(frame->points.constData()), frame->points.size() * sizeof(Instance));
-        }
-        m_instances->setTable(std::move(table));
+        m_instances->setEntries(frame.points);
         publishMesh({});
         return;
     }
-
     QVector<MeshVertex> vertices;
-    QVector<quint32> indices;
-    vertices.reserve(pointCount);
-    indices.reserve(indexCount);
-    for (const auto *frame : frames) {
-        if (frame->indices.isEmpty())
-            continue;
-        const auto base = quint32(vertices.size());
-        for (const auto &point : frame->points)
-            vertices.append({point.getPosition(), point.color});
-        for (const auto index : frame->indices)
-            indices.append(base + index);
-    }
+    vertices.reserve(frame.points.size());
+    for (const auto &point : frame.points)
+        vertices.append({point.getPosition(), point.color});
     m_instances->setEntries({});
-    publishMesh(makeMeshData(vertices, indices));
+    publishMesh(makeMeshData(vertices, frame.indices));
 }
 
 RvPointCloudWidget::MeshData RvPointCloudWidget::makeMeshData(const QVector<MeshVertex> &vertices,
@@ -776,23 +691,18 @@ void RvPointCloudWidget::updateStatus()
     m_view->setAssisted(assisted);
     if (m_diameterControls->isHidden() == assisted)
         m_diameterControls->setVisible(assisted);
-    const bool accumulating = m_accumulate->isChecked();
     const int pointCount = assisted ? m_depthInstances->count() : m_instances->count();
     const qsizetype triangleCount = m_view->indexData().size() / (3 * sizeof(quint32));
     const bool native = capturesNative48(*m_session);
     const bool meshSelected = m_displayMode->currentIndex() == Mesh;
     const bool showingMesh = triangleCount > 0 || (meshSelected && pointCount == 0);
     m_displayMode->setEnabled(ready && (native || assisted));
-    m_accumulate->setEnabled(ready && native);
     m_diameter->setEnabled(!paused && !meshSelected);
     m_pause->setText(paused ? tr("Resume point cloud") : tr("Stop point cloud"));
-    m_reset->setEnabled(ready && (pointCount > 0 || triangleCount > 0) && (accumulating || assisted || tofAvailable));
+    m_reset->setEnabled(ready && (pointCount > 0 || triangleCount > 0) && (assisted || tofAvailable));
     QString text;
     if (paused) {
         text = tr("Point cloud stopped");
-    } else if (ready && accumulating && !m_accumulatedFrames.empty()) {
-        text = (showingMesh ? tr("%1 / %2 frames · %3 triangles") : tr("%1 / %2 frames · %3 points"))
-            .arg(m_accumulatedFrames.size()).arg(AccumulationFrameLimit).arg(showingMesh ? triangleCount : pointCount);
     } else if (ready && assisted && m_hasDepthFrame) {
         const auto size = RvCameraView::outputProfile(m_session->assistHostModel()).outputSize();
         const auto label = m_session->monocularDisplay() ? tr("monocular depth") : tr("assisted depth");
@@ -835,8 +745,6 @@ void RvPointCloudWidget::retranslate()
     m_colorMode->setItemText(DynamicColor, tr("Dynamic + histogram equalization"));
     m_colorMode->setAccessibleName(tr("Point cloud color mode"));
     m_colorMode->setItemData(DynamicColor, tr("Equalize depths from 0.10 to 10.00 m in each frame. Colors can vary across frames."), Qt::ToolTipRole);
-    m_accumulate->setText(tr("Accumulate point cloud"));
-    m_accumulate->setToolTip(tr("Overlay the latest 100 native ToF frames in camera coordinates."));
     m_reset->setText(tr("Reset view"));
     m_diameterLabel->setText(tr("Point diameter"));
     m_rangeLabel->setText(tr("Z color range"));

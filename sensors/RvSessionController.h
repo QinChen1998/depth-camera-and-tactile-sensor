@@ -73,26 +73,16 @@ public:
     quint64 presentationEpoch() const {return m_presentationEpoch;}
     bool assistDepthEnabled() const;
     bool hostHdAssist() const {return m_hostAssistSelected&&m_dtofMode==RvDtofCandidates::Native48&&m_config.cameraWidth==2304;}
-    static constexpr char GlobalRgbImagingScheme[]="host_unidepth_rgb672_vga_fp16_tof48_g";
-    static constexpr char ReuseLatestTofImagingScheme[]="host_unidepth_rgb672_vga_fp16_tof48_b";
-    static constexpr char DepthPro2ImagingScheme[]="host_depthpro2_s_vga_fp16";
-    static constexpr char DepthPro2ReuseImagingScheme[]="host_depthpro2_s_vga_fp16_reuse_tof";
-    static QString depthPro2ModelForScheme(const QString &scheme);
-    static QString depthPro2Scheme(const QString &model,bool reuse);
-    static bool reusesLatestTof(const QString &scheme);
+    static constexpr char HostAssistImagingScheme[]="host_assisted_depth";
     static constexpr char Native48ExtendedIntegrationScheme[]="board_native_tof48_1200k";
     static constexpr char Native48HighAccuracy1200KScheme[]="board_native_tof48_high_accuracy_1200k";
     bool native48ExtendedIntegration() const { return m_native48ExtendedIntegration; }
     bool monocularDisplay() const {return m_monocularDisplay;}
     void setMonocularDisplay(bool enabled);
-    bool splitCorrectionAvailable() const;
-    bool splitCorrectionEnabled() const;
-    void setSplitCorrectionEnabled(bool enabled);
     QString assistExperiment() const;
     int assistInputRotationDegrees() const;
     QString assistHostModel() const;
     QString currentImagingScheme() const;
-    static QString imagingHostModel(const QString &scheme);
     QString hostInferencePreflightError() const;
     QString assistDepthInfoText() const {return m_assistInfo;}
     int assistLoadingState() const {return m_assistLoadingState;}
@@ -182,6 +172,8 @@ private:
     Configuration withCameraWidth(int width) const;
     Configuration withDepthWidth(int width) const;
     void setAutomaticConnectionStage(AutomaticConnectionStage stage);
+    bool selectNativeDepth(const char *scheme, int mode, const RvDtofCandidates::Settings &settings, bool rememberSelection);
+    bool fallBackToBoardDepth();
     void startImaging(bool automatic,const QString &expectedBoot = QString());
     void submitConfiguration(const Configuration &candidate, bool previewChange, bool modelChange,
                              bool startAfter = false, bool reconnecting = false, bool automatic = false,const QString &expectedBoot = QString());
@@ -231,6 +223,7 @@ private:
     AutomaticConnectionStage m_automaticConnectionStage = AutomaticConnectionStage::Idle;
     quint64 m_stopRevision=0;
     int m_dtofMode=-1;
+    QString m_hostInferenceStartupError;
     bool m_native48ExtendedIntegration=false;
     RvDtofCandidates::Settings m_dtofSettings;
     QString m_dtofOptions,m_dtofToken;

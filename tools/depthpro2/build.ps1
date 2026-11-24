@@ -16,7 +16,7 @@ $projectRoot=Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
 . (Join-Path $projectRoot 'tools/resolve_vs2022_toolchain.ps1')
 $MSBuild=(Resolve-Vs2022Toolchain -MSBuild $MSBuild -RequireMSBuild).MSBuild
 $QtRoot=Resolve-Qt611Root -QtRoot $QtRoot -MSBuild $MSBuild
-$engineName='depthpro2-s-vga-fp16.engine'
+$engineName='depthpro2-s-480x640-fp16.engine'
 if(!$OutputDirectory){$OutputDirectory=Join-Path $projectRoot 'DepthPro2Runtime'}
 
 $buildArgs=@((Join-Path $PSScriptRoot 'DepthPro2Worker.vcxproj'),'/t:Build','/p:Configuration=Release','/p:Platform=x64',

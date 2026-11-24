@@ -54,10 +54,9 @@ struct SdkPair {
     double ageMs = 0;
 };
 
-SdkPair selectSdkPair(const std::deque<RvTofFrame> &frames, qint64 rgbNs, qint64 nowNs, bool latest)
+SdkPair selectSdkPair(const std::deque<RvTofFrame> &frames, qint64 rgbNs, qint64 nowNs)
 {
     SdkPair selected;
-    double bestDistance = std::numeric_limits<double>::infinity();
     for (const auto &frame : frames) {
         const auto &m = frame.metadata;
         const double boardAge = m["raw_board_age_ms"].toDouble(-1);
@@ -71,10 +70,8 @@ SdkPair selectSdkPair(const std::deque<RvTofFrame> &frames, qint64 rgbNs, qint64
         const double age = (nowNs - sampleNs) / 1e6 + uncertainty;
         const double distance = std::abs(delta) / 1e6 + uncertainty;
         if (age > 1000 || distance > RvTofFrame::FreshRgbPairBudgetMs) continue;
-        if (latest ? selected.tof && m["tof_sequence"].toInteger() <= selected.tof->metadata["tof_sequence"].toInteger()
-                   : distance >= bestDistance) continue;
+        if (selected.tof && m["tof_sequence"].toInteger() <= selected.tof->metadata["tof_sequence"].toInteger()) continue;
         selected = {&frame, delta, uncertainty, age};
-        bestDistance = distance;
     }
     return selected;
 }
@@ -269,9 +266,8 @@ void RvSessionController::acceptSdkVideo(const QImage &image, quint64 sequence, 
         {"host_decoded_monotonic_ns", decodedNs}, {"rectify_map_sha256", QLatin1String(view.mapSha)},
         {"width", 0}, {"height", 0}, {"assist_camera_profile", "wide"},
         {"assist_tof_fov_correction", RvCalibration::Fov}};
-    if (!RvCameraView::isDepthPro2(model)) source["assist_output_policy"] = RvAssistFusion::FieldOfViewPolicy;
 
-    const auto pair = selectSdkPair(m_hdNativeFrames, decodedNs, RvHdVideoStream::nowNs(), assistExperiment() == "B");
+    const auto pair = selectSdkPair(m_hdNativeFrames, decodedNs, RvHdVideoStream::nowNs());
     QByteArray samples;
     if (pair.tof && pair.tof->metadata["tof_timestamp_ns"].toInteger() > pair.deltaNs) {
         const auto &measurement = pair.tof->metadata;

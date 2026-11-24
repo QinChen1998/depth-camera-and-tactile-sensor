@@ -1,12 +1,10 @@
 #include "RvUsbEnrollment.h"
 #include "RvImportDiagnostics.h"
-#include "RvInferenceSettings.h"
 #include <QtCore/QJsonArray>
 #include <QtCore/QTemporaryDir>
 #include <QtCore/QDateTime>
 #include <QtCore/QFile>
 #include "RvDeviceManagerDialog.h"
-#include "RvInferenceSettings.h"
 #include "RvSessionController.h"
 #include "RvTunerController.h"
 #include "../RuntimeDiscovery.h"

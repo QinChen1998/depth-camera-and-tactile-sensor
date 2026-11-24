@@ -23,6 +23,7 @@ inline const char *portraitRevision(const QString &mode,bool split=false) {
     if(mode=="G"&&split)return SplitCorrectionRevision;
     return mode=="B"?"global_scale_reuse_latest_rgb_portrait_v1":"global_scale_fresh_rgb_portrait_v2";
 }
+inline constexpr char DepthPro2PortraitRevision[]="global_scale_latest_native_depthpro2_portrait_v1";
 inline const char *vgaRevision(const QString &mode) {
     return mode=="B"?"global_scale_reuse_latest_rgb_vga_v1":"global_scale_fresh_rgb_vga_v1";
 }

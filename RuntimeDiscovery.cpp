@@ -35,7 +35,8 @@ QString configError() {
 QString nativeExecutable(const char *name,const QString &root,const QString &directory,const QString &file) {
     if(qEnvironmentVariableIsSet(name))return absolute(qEnvironmentVariable(name));
     if(runtimeOverrides().contains(QLatin1String(name)))return absolute(runtimeOverrides()[QLatin1String(name)].toString());
-#ifdef QT_DEBUG
+// Both application configurations link the SDK's release Qt runtime.
+#ifdef DCTS_DEBUG_BUILD
     const QString configuration="Debug";
 #else
     const QString configuration="Release";
@@ -48,23 +49,11 @@ QString applicationRoot() {
     for(int i=0;i<4;++i){if(directory.exists("Depth Camera and Tactile Sensor.vcxproj")||directory.exists("DCTS_APP.json"))return directory.absolutePath();directory.cdUp();}
     return QCoreApplication::applicationDirPath();
 }
-QString rvAssistRoot(){return rvAssistModelRoot(QLatin1String(RvCameraView::UniDepthVgaNative48));}
-QString rvCompatibleRoot(){
-    const auto path=overrideValue("RV_ASSIST_COMPAT_ROOT");
-    return path.isEmpty()?QDir(applicationRoot()).filePath("UniDepthRuntimeCompatible"):path;
-}
 QString rvAssistModelRoot(const QString &model){
-    if(const auto *runtime=RvCameraView::depthPro2Runtime(model)){
-        const auto path=overrideValue(QLatin1String(runtime->overrideKey));
-        return path.isEmpty()?QDir(applicationRoot()).filePath(QLatin1String(runtime->directory)):path;
-    }
-#if defined(DCTS_TENSORRT_RTX)
-    if(RvCameraView::isUniDepthVga(model)){
-        const auto path=overrideValue("RV_ASSIST_RGB672_VGA_FP16_ROOT");
-        return path.isEmpty()?QDir(applicationRoot()).filePath("UniDepthRuntimeRgb672VgaFP16RTX"):path;
-    }
-#endif
-    return {};
+    const auto *runtime = RvCameraView::depthPro2Runtime(model);
+    if (!runtime) return {};
+    const auto path = overrideValue(QLatin1String(runtime->overrideKey));
+    return path.isEmpty() ? QDir(applicationRoot()).filePath(QLatin1String(runtime->directory)) : path;
 }
 QStringList vlcDirectories() {
     const auto configured = overrideValue("RTSP_VLC_DIR");

@@ -3,9 +3,9 @@
 <TS version="2.1" language="zh_CN" sourcelanguage="en_US">
   <context>
     <name>DepthMapWidget</name>
-    <message><source>Depth Pro 2-S (ToF G)</source><translation>Depth Pro 2-S（ToF G）</translation></message>
-    <message><source>Depth Pro 2-S (ToF B, reuse)</source><translation>Depth Pro 2-S（ToF B，复用）</translation></message>
-    <message><source>Calibrated 640×480 RGB depth on NVIDIA TensorRT FP16.</source><translation>在 NVIDIA TensorRT FP16 上推理标定后的 640×480 RGB 深度。</translation></message>
+
+
+
     <message><source>Fixed color range</source><translation>固定色标</translation></message>
     <message><source>Dynamic + histogram equalization</source><translation>动态＋直方图均衡</translation></message>
     <message><source>Depth map color mode</source><translation>深度图上色方式</translation></message>
@@ -13,7 +13,7 @@
     <message><source>Show monocular depth only</source><translation>仅显示单目深度</translation></message>
     <message><source>Restore corrected depth</source><translation>恢复校正深度</translation></message>
     <message><source>Show the same frame before ToF correction in the depth map and point cloud.</source><translation>在深度图和点云中查看同一帧的校正前单目结果。</translation></message>
-    <message><source>Try split correction</source><translation>试用分区校正</translation></message>
+
     <message><source>Show ToF points</source><translation>显示 ToF 测点</translation></message>
     <message><source>Hide ToF points</source><translation>隐藏 ToF 测点</translation></message>
     <message><source>Point centers use the measured depth color. White outlines mark points used to correct this frame.</source><translation>点的颜色表示测量深度，白圈标记参与本帧校正的测点。</translation></message>
@@ -29,15 +29,15 @@
     <message><source>Recording %1 s</source><translation>还剩 %1 秒</translation></message>
     <message><source>Recording: %1 frames, %2 dropped</source><translation>录制中，已写入 %1 帧，丢弃 %2 帧</translation></message>
     <message><source>Saved %1 frames (%2 dropped) to %3</source><translation>已保存 %1 帧（丢弃 %2 帧）到 %3</translation></message>
-    <message><source>Restore original G</source><translation>恢复原 G</translation></message>
-    <message><source>Use verified distant ToF for the background and paired ToF for the near hand. Applies to the depth map and point cloud.</source><translation>背景使用已确认的远处 ToF，近手使用当前帧配对的 ToF，深度图和点云同步切换。</translation></message>
+
+
     <message><source>Input angle (%1°)</source><translation>输入角度（%1°）</translation></message>
     <message><source>Native ToF angle</source><translation>原生 ToF 角度</translation></message>
     <message><source>Clockwise angle (0–359°):</source><translation>顺时针角度（0–359°）：</translation></message>
     <message><source>Rotate both native ToF displays clockwise. UniDepth, raw measurements and saved images keep their orientation.</source><translation>顺时针旋转两档原生 ToF 显示。UniDepth、原始测量和保存图像的方向保持不变。</translation></message>
-    <message><source>Board inference (1200K)</source><translation>板端推理（1200K）</translation></message>
+
     <message><source>Ordinary 48×32 ToF with 1200K main integration.</source><translation>48×32 普通 ToF，主积分为 1200K。</translation></message>
-    <message><source>Board inference high accuracy (1200K)</source><translation>板端推理高精度（1200K）</translation></message>
+
     <message><source>High-accuracy 48×32 ToF with 1200K main integration.</source><translation>48×32 高精度 ToF，主积分为 1200K。</translation></message>
     <message><source>Native 48×32 ToF radial depth; no neural inference.</source><translation>原生 48×32 ToF 径向深度，不执行神经网络推理。</translation></message>
     <message>
@@ -48,22 +48,10 @@
       <source>48x32 depth and photon input; 384x256 output. Same sensor field of view. Experimental weight reuse; physical accuracy is unverified.</source>
       <translation>48×32 深度和光子计数输入，384×256 输出，保持传感器原视场。实验性权重复用，实物精度尚未验证。</translation>
     </message>
-    <message>
-      <source>Host-assisted inference (G)</source>
-      <translation>上位机辅助推理（G）</translation>
-    </message>
-    <message>
-      <source>Host-assisted inference (B, reuse ToF)</source>
-      <translation>上位机辅助推理（B，复用 ToF）</translation>
-    </message>
-    <message>
-      <source>RGB frames can reuse the latest eligible 48×32 ToF measurement within the 200 ms pairing budget.</source>
-      <translation>RGB 帧可在 200 ms 配对预算内复用最新的合格 48×32 ToF 测量。</translation>
-    </message>
-    <message>
-      <source>RGB frames trigger inference. Each fresh 48×32 ToF measurement can update the global scale once.</source>
-      <translation>RGB 帧触发推理。每份新的 48×32 ToF 测量只更新一次全局尺度。</translation>
-    </message>
+
+
+
+
     <message>
       <source>Cannot open the folder. Please copy the path and open it manually.</source>
       <translation>无法打开文件夹，请复制地址后手动打开。</translation>
@@ -729,7 +717,10 @@
       <translation>RV1103 连接进度</translation>
     </message>
     <message><source>Select how the depth map is generated.</source><translation>选择深度图的生成方式。</translation></message>
-</context>
+    <message><source>Board inference</source><translation>板端推理</translation></message>
+    <message><source>Board inference high accuracy</source><translation>板端推理高精度</translation></message>
+    <message><source>Depth Pro 2-S uses 480×640 RGB and the latest eligible ToF measurement.</source><translation>Depth Pro 2-S 使用 480×640 RGB 和最新的合格 ToF 测量。</translation></message>
+  </context>
   <context>
     <name>ImagePresentation</name>
     <message>
@@ -3312,10 +3303,7 @@ Range %6 mm (radial) | SNR %7 | slot %8 | Signal %9 | Noise encoded %10</source>
       <source>Depth percentile 0%</source>
       <translation>深度百分位 0%</translation>
     </message>
-    <message>
-      <source>%1 / %2 frames · %3 triangles</source>
-      <translation>%1 / %2 帧 · %3 个三角面</translation>
-    </message>
+
     <message>
       <source>%1×%2 %3 · %4 triangles</source>
       <translation>%1×%2 %3 · %4 个三角面</translation>
@@ -3324,18 +3312,9 @@ Range %6 mm (radial) | SNR %7 | slot %8 | Signal %9 | Noise encoded %10</source>
       <source>48×32 ToF · %1 triangles</source>
       <translation>48×32 ToF · %1 个三角面</translation>
     </message>
-    <message>
-      <source>Accumulate point cloud</source>
-      <translation>叠加点云</translation>
-    </message>
-    <message>
-      <source>Overlay the latest 100 native ToF frames in camera coordinates.</source>
-      <translation>在相机坐标系中叠加最近 100 帧原生 ToF 点云。</translation>
-    </message>
-    <message>
-      <source>%1 / %2 frames · %3 points</source>
-      <translation>%1 / %2 帧 · %3 点</translation>
-    </message>
+
+
+
     <message>
       <source>Reset view</source>
       <translation>重置视角</translation>

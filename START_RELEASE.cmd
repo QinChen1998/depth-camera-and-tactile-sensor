@@ -16,6 +16,5 @@ set "PATH=%~dp0x64\Release;%SystemRoot%\System32;%SystemRoot%"
 set "QT_PLUGIN_PATH=%~dp0x64\Release"
 :launch
 cd /d "%~dp0"
-rem The default Release build selects the workspace TensorRT-RTX runtime.
 start "" "%~dp0x64\Release\触想工作台.exe" %*
 endlocal

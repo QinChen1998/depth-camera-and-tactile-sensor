@@ -45,8 +45,9 @@ if ((Get-FileHash -LiteralPath $manifestPath -Algorithm SHA256).Hash -ne $manife
     throw 'The unpacked Windows depth SDK manifest does not match version 2.2.2.'
 }
 
-$manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
-$appFiles = @('CxwlDepthSdk.dll', 'avcodec-61.dll', 'avformat-61.dll', 'avutil-59.dll', 'swresample-5.dll', 'swscale-8.dll')
+$manifest = Get-Content -LiteralPath $manifestPath -Raw -Encoding UTF8 | ConvertFrom-Json
+$ffmpegFiles = @('avcodec-61.dll', 'avformat-61.dll', 'avutil-59.dll', 'swresample-5.dll', 'swscale-8.dll')
+$appFiles = @('CxwlDepthSdk.dll') + $ffmpegFiles
 $sdkFiles = @('SDK/include/DepthSdk.h', 'SDK/include/DepthSdkVersion.h', 'SDK/lib/CxwlDepthSdk.lib')
 $sdkFiles += $appFiles | ForEach-Object { "SDK/bin/$_" }
 if ($DeployDirectory) {
@@ -64,15 +65,21 @@ foreach ($relative in $sdkFiles) {
 }
 
 if ($DeployDirectory) {
+    New-Item -ItemType Directory -Force -Path $DeployDirectory | Out-Null
     foreach ($relative in $sdkFiles) {
-        $target = if ($appFiles -contains (Split-Path $relative -Leaf)) {
-            Join-Path $DeployDirectory (Split-Path $relative -Leaf)
-        } elseif ($relative.StartsWith('SDK/bin/')) {
+        $source = Join-Path $SdkRoot $relative
+        $name = Split-Path $relative -Leaf
+        if ($appFiles -contains $name) {
+            Copy-Item -LiteralPath $source -Destination (Join-Path $DeployDirectory $name) -Force
+            if ($ffmpegFiles -notcontains $name) { continue }
+        }
+        $target = if ($relative.StartsWith('SDK/bin/')) {
+            # The SDK loads FFmpeg by absolute path inside its runtime directory.
             Join-Path $DeployDirectory ('cxwl-depth-sdk/' + $relative.Substring('SDK/bin/'.Length))
         } elseif ($relative.StartsWith('Licenses/') -or $relative -eq 'LICENSE') {
             Join-Path $DeployDirectory ('cxwl-depth-sdk/' + $relative)
         } else { continue }
         New-Item -ItemType Directory -Force -Path (Split-Path $target -Parent) | Out-Null
-        Copy-Item -LiteralPath (Join-Path $SdkRoot $relative) -Destination $target -Force
+        Copy-Item -LiteralPath $source -Destination $target -Force
     }
 }

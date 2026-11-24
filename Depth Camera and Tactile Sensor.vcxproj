@@ -47,7 +47,7 @@
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
       <WarningLevel>Level3</WarningLevel>
       <AdditionalOptions>/utf-8 /Zc:__cplusplus %(AdditionalOptions)</AdditionalOptions>
-      <AdditionalIncludeDirectories>$(CxwlDepthSdkRoot)\SDK\include;$(ProjectDir)third_party\ffmpeg_7_1_3;$(ProjectDir)dependency_sources\openvino\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(CxwlDepthSdkRoot)\SDK\include;$(ProjectDir)third_party\ffmpeg_7_1_3;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
       <PreprocessorDefinitions>NOMINMAX;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
@@ -65,6 +65,7 @@
     <ClCompile>
       <Optimization>Disabled</Optimization>
       <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
+      <PreprocessorDefinitions>DCTS_DEBUG_BUILD;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)' == 'Release'">
@@ -77,7 +78,6 @@
     <ClCompile Include="main.cpp"/>
     <ClCompile Include="SensorMainWindow.cpp"/>
     <ClCompile Include="RuntimeDiscovery.cpp">
-      <PreprocessorDefinitions Condition="'$(DctsUseCudaEp)' != 'true' or '$(DctsInstallerBuild)' == 'true'">DCTS_TENSORRT_RTX;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
     <ClCompile Include="tests\PortSmokeTests.cpp"/>
     <ClCompile Include="UiStyle.cpp"/>
@@ -94,14 +94,10 @@
     <ClCompile Include="sensors\ImageDisplaySettings.cpp"/>
     <ClCompile Include="sensors\RtspCameraPage.cpp"/>
     <ClCompile Include="sensors\RvAssistDepth.cpp">
-      <PreprocessorDefinitions Condition="'$(DctsUseCudaEp)' != 'true' or '$(DctsInstallerBuild)' == 'true'">DCTS_TENSORRT_RTX;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
     <ClCompile Include="sensors\RvAssistFusion.cpp"/>
     <ClCompile Include="sensors\RvInferenceRuntime.cpp"/>
-    <ClCompile Include="sensors\RvInferenceSettings.cpp"/>
     <ClInclude Include="sensors\RvInferenceRuntime.h"/>
-    <QtMoc Include="sensors\RvInferenceSettings.h"/>
-    <ClInclude Include="tools\model_protection\OpenVinoApi.h"/>
     <ClCompile Include="sensors\RvDepthCoverage.cpp"/>
     <ClCompile Include="sensors\RvDepthDiagnostic.cpp"/>
     <ClCompile Include="sensors\RvDepthView.cpp"/>
@@ -132,7 +128,6 @@
     <QtMoc Include="LanguageManager.h"/>
     <QtMoc Include="RenderingSettings.h"/>
     <ClInclude Include="RuntimeDiscovery.h"/>
-    <ClInclude Include="tools\model_protection\ModelProtectionApi.h"/>
     <ClInclude Include="RvControlProtocol.h"/>
     <QtMoc Include="SensorMainWindow.h"/>
     <ClInclude Include="TactileDockWidget.h"/>
@@ -194,14 +189,11 @@
   <PropertyGroup>
     <NativeWorkersBuild Condition="'$(NativeWorkersBuild)' == ''">true</NativeWorkersBuild>
   </PropertyGroup>
-  <Target Name="CopyInferenceWorker" AfterTargets="Build" Condition="'$(DctsUseCudaEp)' != 'true' or '$(DctsInstallerBuild)' == 'true'">
-    <Copy SourceFiles="$(TargetPath)" DestinationFiles="$(TargetDir)DctsInferenceWorker.exe" SkipUnchangedFiles="true"/>
-  </Target>
   <Target Name="PrepareCxwlDepthSdk" BeforeTargets="PrepareForBuild" Condition="'$(DesignTimeBuild)' != 'true'">
-    <Exec Command="pwsh -NoProfile -File &quot;$(MSBuildProjectDirectory)\tools\prepare_depth_sdk.ps1&quot; -SdkRoot &quot;$(CxwlDepthSdkRoot)&quot;" />
+    <Exec Command="&quot;$(MSBuildProjectDirectory)\tools\prepare_depth_sdk.cmd&quot; -SdkRoot &quot;$(CxwlDepthSdkRoot)&quot;" />
   </Target>
   <Target Name="DeployCxwlDepthSdk" AfterTargets="Build" Condition="'$(DesignTimeBuild)' != 'true'">
-    <Exec Command="pwsh -NoProfile -File &quot;$(MSBuildProjectDirectory)\tools\prepare_depth_sdk.ps1&quot; -SdkRoot &quot;$(CxwlDepthSdkRoot)&quot; -DeployDirectory &quot;$(TargetDir).&quot;" />
+    <Exec Command="&quot;$(MSBuildProjectDirectory)\tools\prepare_depth_sdk.cmd&quot; -SdkRoot &quot;$(CxwlDepthSdkRoot)&quot; -DeployDirectory &quot;$(TargetDir).&quot;" />
   </Target>
   <Target Name="BuildSensorRvWorker" BeforeTargets="PrepareForBuild" Condition="'$(NativeWorkersBuild)' == 'true' and '$(DesignTimeBuild)' != 'true'">
     <Exec Command="&quot;$(MSBuildProjectDirectory)/tools/build_rv_worker.cmd&quot; &quot;$(Configuration)&quot; &quot;$(QtInstall)&quot; &quot;$(MSBuildBinPath)/MSBuild.exe&quot;"/>

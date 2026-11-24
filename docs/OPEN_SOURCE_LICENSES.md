@@ -4,11 +4,7 @@ This project retains the provenance and license material belonging to its sensor
 
 | Component | Local material |
 |---|---|
-| Provider-declared proprietary RGB672 VGA FP16 model and local ORT runtime | `UniDepthRuntimeRgb672VgaFP16RTX/model.json`, `runtime.json`, `licenses/` |
-| ONNX Runtime 1.31.1, TensorRT-RTX EP 0.5.0 and NVIDIA runtime | Development and installed `UniDepthRuntimeRgb672VgaFP16RTX/licenses/` contain ORT and EP licenses/notices, NVIDIA acknowledgements and the model notice |
-| ONNX Runtime 1.24.4 and DirectML 1.15.4 | `UniDepthRuntimeCompatible/licenses/onnxruntime/` and `licenses/DirectML/`; DirectML NuGet license, code license, third-party notices and signed-binary provenance are retained |
-| OpenVINO 2026.4.1, oneTBB and oneDNN | `UniDepthRuntimeCompatible/licenses/openvino-2026.4.1.dist-info/` retains the wheel's complete license materials; pinned C headers and Apache notice are in `dependency_sources/openvino/` |
-| Optional decoder INT8 derivative of the current UniDepth model | `UniDepthRuntimeCompatible/runtime.json` records the source and derivative hashes and NNCF conversion; the provider model notice is preserved in `licenses/model/`; this does not change or independently verify model ownership |
+| Depth Pro 2-S local research runtime | `DepthPro2Runtime/Apple-Model-LICENSE.txt` and `runtime.json`. The runtime contains the local TensorRT plan and NVIDIA runtime libraries. |
 | Native RV worker, libssh2 and OpenSSL | `tools/rv_control/upstream.lock.json`, `x64/rv_control/<Configuration>/runtime/licenses/`, `implementation.json` |
 | dToF tuner payload | `tools/dtof_tuner/payload/LICENSE-MIT.TXT`, `provenance.json`; the same files are hashed in the deployed worker manifest |
 | VideoLAN VLC 3 managed RTSP/H.265 runtime | Installed `licenses/VLC/` contains the license, authors and matching release source location |
@@ -18,7 +14,7 @@ This project retains the provenance and license material belonging to its sensor
 | Adapted CXWL SDK Qt Viewer examples | The MIT notice in `third_party/cxwl-depth-sdk-example/LICENSE` applies to the adapted capture client, device manager and point-cloud canvas. |
 | Android SDK Platform-Tools (USB enrollment) | External ADB runtime in `platform-tools/` alongside the executable, with the distribution's `NOTICE.txt` and `source.properties` |
 
-The deployed model is recorded as `LicenseRef-Proprietary`, following the model provider's declaration of architecture redesign and retraining. Its usage notice is `UniDepthRuntimeRgb672VgaFP16RTX/licenses/Proprietary-Model-NOTICE.txt`. Existing model names, source/conversion identifiers and hashes remain as technical traceability records; this notice update does not alter or independently verify the model's training provenance. Any incorporated third-party source code, pretrained weights or training data remain subject to their applicable terms.
+Retired UniDepth model, ONNX Runtime, DirectML and OpenVINO notices remain with their historical runtime copies. The desktop installer stages SDK capture components. The local Depth Pro 2-S engine is subject to the Apple research model license.
 
 USB enrollment also provisions the pinned dToF inspection/engineering runtime when it is absent and the verified board is idle, including its MIT license and provenance file. Existing matching runtime assets and their original provenance records are retained. The main window offers host-assisted inference and two native 48x32 ToF modes. Provisioning the inspection tools preserves saved sensor settings.
 

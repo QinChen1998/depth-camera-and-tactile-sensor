@@ -11,23 +11,15 @@ USB 启动与新板接入修复的证据目录为 `x64/validation/usb_startup_20
 
 ## 构建与离线专项
 
-推理设备新增专项见 [UniDepth 推理设备选择](MULTI_BACKEND_INFERENCE.md)。`tools/test_inference_backends.ps1` 负责实际模型检测、选项策略、完整深度输出、加密加载及设置界面；`tools/verify_port.py` 可对同后端的开发／安装运行包作同输入对照。该专项不扩展下述八组标志的白名单。本轮输出为 `x64/validation/multibackend_20261109/`。
+历史 UniDepth 后端验证见 [推理设备选择](MULTI_BACKEND_INFERENCE.md)。
 
-```powershell
-./tools/build_desktop.ps1 -Configuration Release -QtRoot E:/Qt/6.11.1/msvc2022_64
-./tools/build_desktop.ps1 -Configuration Debug -QtRoot E:/Qt/6.11.1/msvc2022_64
-python tools/run_offline_tests.py --configuration Release --qt-root E:/Qt/6.11.1/msvc2022_64 --output x64/validation/my_check/release
-python tools/run_offline_tests.py --configuration Debug --qt-root E:/Qt/6.11.1/msvc2022_64 --output x64/validation/my_check/debug
-python -m unittest discover -s tests -p 'test_*.py' -v
-```
-
-默认构建原生控制 worker，并同步部署 Qt Widgets、SDK 和视频插件。主工程在导入 Qt props 前设置 `IntDir`，qmake/MOC/RCC 中间文件进入 `x64/obj_<配置>/`。主推理进程使用同一构建复制的 `DctsInferenceWorker.exe`；不要用中文主程序文件名直接驱动 TensorRT 二进制 IPC。
+默认构建原生控制 worker，并同步部署 Qt Widgets、SDK 和视频插件。主工程在导入 Qt props 前设置 `IntDir`，qmake/MOC/RCC 中间文件进入 `x64/obj_<配置>/`。本地 Depth Pro 2-S 推理进程为 `DepthPro2Runtime/DctsDepthPro2Worker.exe`，由 `tools/depthpro2/build.ps1` 组装。
 
 离线脚本仅允许以下八组，按需用 `--flags <标志> ...` 选择子集：
 
 | 标志 | 覆盖范围 |
 |---|---|
-| `port-ui-smoke-test` | 四个模块、成像入口、G/B 配对选择、单目深度图与点云联动、米制快照、点云坐标、色标和清屏 |
+| `port-ui-smoke-test` | 四个模块、成像入口、B 策略、单目深度图与点云联动、单帧点云替换、米制快照、点云坐标、色标和清屏 |
 | `rv-tuner-test` | 调参协议、互斥、异步停止、板端模式、Native16 分片与同帧校验 |
 | `tactile-serial-test` | 串口协议、型号、零点、失败与恢复 |
 | `tactile-visualization-test` | 触觉显示、面板可见性、选择、曲线和断开 |
@@ -38,13 +30,11 @@ python -m unittest discover -s tests -p 'test_*.py' -v
 
 脚本清除继承的 RV/DCTS/Python/Qt 覆盖，强制 `RV_TEST_OFFLINE_ONLY=1`，TEMP/TMP 指向本轮输出的 `tmp/`。调参测试只使用本机 TCP 回环；需要允许本机回环连接，不会打开真实设备。连接失败/超时不能冒充协议拒绝通过负例。QtMsBuild 需要读取本机 Qt 注册表；访问被沙箱拒绝时应修正运行环境，不改模型或设备参数。
 
-`--point-cloud-live-validation <绝对报告.json>` 使用已登记的 RV1103 依次运行 480×640 上位机辅助推理 G、48×32 普通和高精度档，核对辅助深度帧的标定网格、原生同帧有效点数、Qt Quick 3D 绘制、点径、色标、滚轮和停采清屏。它使用与成像切换专项相同的设备身份及授权环境变量，保存计数、状态及点云视口截图。
+`--point-cloud-live-validation <绝对报告.json>` 使用已登记的 RV1103 依次运行 480×640 上位机辅助推理、48×32 普通和高精度档，核对辅助深度帧的标定网格、原生同帧有效点数、Qt Widgets 绘制、点径、色标、滚轮和停采清屏。它使用与成像切换专项相同的设备身份及授权环境变量，保存计数、状态及点云视口截图。
 
-给 `--host-assist-live-validation` 设置 `DCTS_HOST_DIAGNOSTIC_DIRECTORY` 后，专项依次测试 G 和 B 的测点叠加、配对 RGB 对照、10 秒录制和单帧回放，并在指定的本地目录保存 RGB 和测量数据。离线融合专项覆盖 B 复用、G/B 无配对时的历史尺度和旧版 G 诊断回放。当前 G/B 按快照保存的测量尺度和应用尺度重建结果。分区校正的状态依赖前序帧，单帧入口会提示使用序列。
+给 `--host-assist-live-validation` 设置 `DCTS_HOST_DIAGNOSTIC_DIRECTORY` 后，专项核对测点显示、配对 RGB 对照、10 秒录制和回放。指定的本地目录将包含 RGB 和测量数据。
 
-使用 `--rv-depth-diagnostic-replay <单帧诊断目录> <报告.json>` 可在离线环境重放 G/B 的已保存单帧。
-
-设置 `DCTS_LIVE_HOST_MODEL=depthpro2_s_vga_fp16` 可实测 Depth Pro 2-S 的 ToF G 和 ToF B。专项核对 TensorRT 引擎身份、640×480 深度和配对 RGB 网格、配对预算及校正帧数。离线融合专项使用模拟平面核对Depth Pro 2-S 的 F6 尺度、无效值处理、历史尺度和快照回放。
+使用 `--rv-depth-diagnostic-replay <单帧诊断目录> <报告.json>` 可以离线重放已保存的单帧诊断。融合专项用模拟平面核对 480×640 F6 投影、B 策略、无效值、历史尺度和诊断录制。
 
 `--measurement-live-validation <绝对报告.json>` 通过「文件 → 测量采集」依次录制 RV1103 普通档 30 秒和 Gemini 335 60 秒，核验帧时长、序号、二进制长度、字节索引和有效测点。需要已登记的 RV1103、已安装 Orbbec SDK v2 及已连接的 Gemini 335。板端身份和实机开关与成像切换专项相同。录制文件保存在报告旁的独立目录。
 
@@ -72,9 +62,9 @@ Release/Debug 构建均通过，两配置各八组离线专项、各 1320 个断
 
 已在当前 F1 实机通过普通主窗口的 USB 按钮验证首次登记与已有设备重复连接。首次在隔离的本地设备档案中登记，并暂时移开受管日志脚本以触发完整补装；板端安装保持生效。首次连接收到 30 份有效 384×256 径向米制深度并实际绘制 25 帧，重复点击后选中同一档案、跳过文件写入，再收到 30 份并绘制 25 帧。两次均正常停止并核对设备空闲，本地原配置、已保存传感器参数和本次启动身份保持，未保存实景图像或测量数组。报告为 `live-release-new-repair/summary.json`。源码审计仍为既有 24 个私有源码/归档/CAD 路径问题。
 
-## 主机模型同输入对照
+## 历史 UniDepth 同输入对照
 
-需要 NumPy、匹配的 Qt DLL 和兼容 NVIDIA GPU。同网格比较使用相同方案、后端及运行包的 worker。迁移测试使用 `--comparison monocular` 和旧 640×480 Native16 worker，核对同一模型、后端和输入下裁切前的预测。
+以下命令使用历史构建的程序和模型包。需要 NumPy、匹配的 Qt DLL 和兼容 NVIDIA GPU。同网格比较使用相同方案、后端及运行包的 worker。迁移测试使用 `--comparison monocular` 和旧 640×480 Native16 worker，核对同一模型、后端和输入下裁切前的预测。
 
 ```powershell
 python tools/verify_port.py --executable x64/Release/DctsInferenceWorker.exe --reference-executable x64/validation/reference/before-Release.exe --qt-root E:/Qt/6.11.1/msvc2022_64 --comparison monocular --scheme G --output x64/validation/my_check/parity-G
@@ -87,7 +77,7 @@ python tools/verify_port.py --executable x64/Release/DctsInferenceWorker.exe --r
 
 这类测试验证代码与数据合同，不证明实际物理精度、客户显卡性能或设备安装标定。连续尺度平滑使用单调时间；逐字节比较采用固定场景，不能把不同墙钟节奏下的长流输出直接当作同一帧比较。
 
-原生控制 worker 可单独运行 `x64/rv_control/<配置>/runtime/RvControlWorker.exe --self-test`。主机异步启动和结果回传入口为 `--rv-assist-path-test <绝对报告.json>`，须设置 `RV_TEST_OFFLINE_ONLY=1`。默认检查 G 的 RGB-only 出帧，设置 `DCTS_TEST_REUSE_TOF=1` 检查 B 复用同一份合成原生 ToF 测量。报告同时核对 480×640 网格和单目数据。
+原生控制 worker 可单独运行 `x64/rv_control/<配置>/runtime/RvControlWorker.exe --self-test`。主机异步启动和结果回传入口为 `--rv-assist-path-test <绝对报告.json>`，须设置 `RV_TEST_OFFLINE_ONLY=1`。默认检查 RGB-only 出帧，设置 `DCTS_TEST_REUSE_TOF=1` 检查复用同一份合成原生 ToF 测量。报告同时核对 480×640 网格和单目数据。
 
 首次板端部署脚本由 `tests/test_board_bootstrap.py` 在临时文件系统中实际执行，覆盖其他版本旧驱动、没有旧交付目录、备份、身份绑定、上传损坏拒绝、安装中断回退、固件依赖缺失、已有残留部署和采集占用。Windows 使用 Git Bash，Linux 使用 bash；测试中的系统路径映射到临时目录，不访问真实板卡。与上述 Python 测试入口一起运行。
 
@@ -95,7 +85,7 @@ python tools/verify_port.py --executable x64/Release/DctsInferenceWorker.exe --r
 
 仅验证上位机辅助推理的实机入口为主程序 `--host-assist-live-validation <绝对报告.json>`。先登记实际 USB 设备、核对公钥与标定并保存登录，在运行该进程的环境中显式设置 `DCTS_LIVE_ENABLE=1` 和与登记设备一致的 `DCTS_LIVE_SERIAL`，清除 `RV_TEST_OFFLINE_ONLY`。通过等待进程退出的方式启动，检查退出码与报告的 `passed=true`；PowerShell 直接调用 GUI EXE 时不能把命令立即返回当作测试完成。
 
-该专项选择 G，进行两轮各 30 秒的开始、停止及重启。按 `RV_INFERENCE_BACKEND`（默认 `tensorrt`）检查实际后端、模型摘要及精度身份。检查还包括 480×640 米制输出、48×32 原生测量、输入方向、配对边界、绘制、停采后的结果和板端长期文件摘要。`DCTS_LIVE_CONFIG_SOURCE` 可指定只读的已登记设备配置来源。批量入口为 `tools/test_live_inference_backends.ps1`，使用 `-AllowLiveDevice`。2026-11-09 的历史结果见 [推理设备选择](MULTI_BACKEND_INFERENCE.md)。
+专项在 Depth Pro 2-S 上核对 480×640 输入和输出、原生 48×32 测量、TensorRT 引擎身份、同帧配对、ToF 复用、渲染和停采。长期文件摘要用于核对板端设置保存情况。
 
 2026-11-07 本轮首次部署及主机实测证据位于 `x64/validation/fresh_board_setup_20261107/`。当前设备通过普通 USB 一键连接完成全量安装（`usb-live-REDACTED_DEVICE.json`），不再要求旧 V1.2.0 驱动哈希。原厂摄像头退出后遗留的 DHCP 进程仅在身份、参数、启动时间、RTSP 监听和摄像头 DMA 句柄均匹配时接管；原始摄像头配置及驱动已备份。
 
@@ -189,7 +179,7 @@ python tools/audit_source.py --root . --output x64/validation/my_check/source-in
 
 最终 Release 八组 1396 项、Debug 相关四组 632 项离线断言通过；两种构建均通过 22 用例／13 组有效深度、预测和诊断数组与基准逐字节对照，父子进程链路及输入张量校验通过。正常停止、重启、无晚到结果和板端长期文件不变均通过。已更新本地 Release／Debug 程序并保留旧二进制备份。
 
-## 当前 UniDepth 的 CPU／集显可行性实验
+## 历史 UniDepth 的 CPU／集显可行性实验
 
 [host_fallback_probe.py](../tools/host_fallback_probe.py) 直接测试当前 RGB672×504 → 640×480 UniDepth ONNX 的执行后端。只生成三组确定性 RGB、分别检查 0°／180°输入及输出逆恢复，不启动上位机普通主窗口、相机、串口或板端连接。它记录实际执行 provider、纯模型延迟、内存、输入变化及 A→B→A 重复一致性；应用层专项仍由本页的统一离线运行器执行。
 

@@ -48,7 +48,7 @@ private:
     QPointer<MeasurementCaptureDialog> m_measurement;
     QVector<QDockWidget *> m_docks;
     QMenu *m_file, *m_view, *m_settings, *m_languages, *m_rendering, *m_presets;
-    QAction *m_exit, *m_reset, *m_savePreset, *m_deletePreset, *m_deviceAction, *m_inferenceAction, *m_measurementAction;
+    QAction *m_exit, *m_reset, *m_savePreset, *m_deletePreset, *m_deviceAction, *m_measurementAction;
     QAction *m_english, *m_chinese, *m_standard, *m_smooth, *m_about;
     QPointer<QMessageBox> m_inferenceWarning;
     bool m_closing=false, m_tunerCloseReady=false;

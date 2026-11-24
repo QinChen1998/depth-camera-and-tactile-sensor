@@ -19,7 +19,7 @@
 
 - [ ] **定义公开接口和生命周期。** 建议采用带版本的 C ABI，交付头文件、Windows DLL 和导入库。使用不透明会话句柄、固定宽度数据类型及结构体大小字段。公开设备枚举与能力查询、按 ID 打开／关闭、选择成像方案、开始／停止／立即重连、查询状态及订阅帧和事件。定义启动、切换、恢复、断流、停止及错误的状态语义，明确停止请求、本地停止完成及板端所有权状态。约定回调线程、帧缓冲区的持有／释放方式、队列上限及关闭时的回调边界。
 
-- [ ] **从上位机入口抽出可独立运行的会话。** 复用 `RvSessionController`、视频与 ToF 接收、`RvControlWorker` 和主机推理链路。SDK 初始化显式接收运行资源和设备库位置。界面偏好、翻译和回调转发到 UI 线程由上位机适配层负责。内部可继续使用 Qt，公开接口使用普通 C/C++ 数据类型，明确内部事件循环的初始化和退出方式。当前 `DctsInferenceWorker.exe` 由主程序复制生成，候选探测也会重新启动上位机 EXE。将探测、测速和推理迁到 SDK 可定位的独立 worker。[共享会话](../sensors/RvSessionController.h) · [构建定义](../Depth%20Camera%20and%20Tactile%20Sensor.vcxproj) · [推理候选探测](../sensors/RvInferenceSettings.cpp) · [运行资源定位](../RuntimeDiscovery.cpp)
+- [ ] **从上位机入口抽出可独立运行的会话。** 复用 `RvSessionController`、视频与 ToF 接收、`RvControlWorker` 和主机推理链路。SDK 初始化显式接收运行资源和设备库位置。界面偏好、翻译和回调转发到 UI 线程由上位机适配层负责。内部可继续使用 Qt，公开接口使用普通 C/C++ 数据类型，明确内部事件循环的初始化和退出方式。首版基线曾由主程序复制生成 `DctsInferenceWorker.exe`，候选探测也会重新启动上位机 EXE。[共享会话](../sensors/RvSessionController.h) · [构建定义](../Depth%20Camera%20and%20Tactile%20Sensor.vcxproj) · [当前推理入口](../sensors/RvAssistDepth.cpp) · [运行资源定位](../RuntimeDiscovery.cpp)
 
 - [ ] **接入设备管理和 USB 登记。** 沿用现有档案、SSH 身份校验和 Windows 凭据引用，兼容已有档案的编辑、默认设备和导入导出。提供 USB 发现与只读检查、确认后执行登记或修复所需的操作和进度。上位机处理确认提示和自动启动策略。SDK 复核同一 USB transport、序列号、公钥和 boot ID，保留 F6 标定、整套板端载荷校验、长期参数和失败回滚。切换设备或用户停止后，使过期的检查、导入后自动启动和帧事件失效。[设备管理](../sensors/RvDeviceManagerDialog.cpp) · [USB 登记](../sensors/RvUsbEnrollment.cpp) · [默认标定](DEFAULT_CALIBRATION_NATIVE_TOF.md)
 

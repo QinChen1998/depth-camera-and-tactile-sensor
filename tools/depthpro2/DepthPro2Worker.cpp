@@ -23,8 +23,8 @@
 #include <type_traits>
 
 namespace {
-constexpr int Width = RvCameraView::VgaInputRoi.width();
-constexpr int Height = RvCameraView::VgaInputRoi.height();
+constexpr int Width = RvCameraView::DepthPro2Portrait.inputWidth;
+constexpr int Height = RvCameraView::DepthPro2Portrait.inputHeight;
 constexpr int Pixels = Width * Height;
 constexpr int RgbBytes = Pixels * 3;
 constexpr int DepthBytes = Pixels * sizeof(float);
@@ -106,7 +106,7 @@ public:
     QByteArray infer(const QByteArray &planar, int rotation)
     {
         require(planar.size() == RgbBytes && (rotation == 0 || rotation == 180),
-                "Invalid VGA RGB input");
+                "Invalid 480x640 RGB input");
         auto *rgb = static_cast<float *>(hostInput.get());
         const auto *source = reinterpret_cast<const unsigned char *>(planar.constData());
         for (int c = 0; c < 3; ++c) {

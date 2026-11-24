@@ -6,7 +6,6 @@
 #include "RvDepthDiagnostic.h"
 #include "ImagePresentation.h"
 #include "RvSessionController.h"
-#include "RvAssistDepth.h"
 
 #include <QtCore/QSettings>
 #include <QtCore/QDir>
@@ -90,14 +89,7 @@ DepthMapWidget::DepthMapWidget(QWidget *parent)
     m_rvModelCaption->setObjectName("rvDepthModelLabel");
     m_rvModel = new QComboBox(m_rvControls);
     m_rvModel->setObjectName("rvDepthModel");
-    if(RvAssistDepth::supportsHostModel(QLatin1String(RvCameraView::UniDepthVgaNative48))){
-        m_rvModel->addItem(QString(),QLatin1String(RvSessionController::GlobalRgbImagingScheme));
-        m_rvModel->addItem(QString(),QLatin1String(RvSessionController::ReuseLatestTofImagingScheme));
-    }
-    if(RvAssistDepth::supportsHostModel(QLatin1String(RvCameraView::DepthPro2VgaModel))){
-        m_rvModel->addItem(QString(),QLatin1String(RvSessionController::DepthPro2ImagingScheme));
-        m_rvModel->addItem(QString(),QLatin1String(RvSessionController::DepthPro2ReuseImagingScheme));
-    }
+    m_rvModel->addItem(QString(),QLatin1String(RvSessionController::HostAssistImagingScheme));
     m_rvModel->addItem(QString(),QLatin1String(RvSessionController::Native48ExtendedIntegrationScheme));
     m_rvModel->addItem(QString(),QLatin1String(RvSessionController::Native48HighAccuracy1200KScheme));
     m_rvModel->setMinimumWidth(0);
@@ -188,15 +180,6 @@ DepthMapWidget::DepthMapWidget(QWidget *parent)
     saveControls->addWidget(m_monocularButton);
     connect(m_monocularButton,&QPushButton::toggled,this,[this](bool enabled){
         if(m_session)m_session->setMonocularDisplay(enabled);
-    });
-    m_splitCorrectionButton=new QPushButton(this);
-    m_splitCorrectionButton->setObjectName("depthSplitCorrection");
-    m_splitCorrectionButton->setCheckable(true);
-    m_splitCorrectionButton->hide();
-    saveControls->addWidget(m_splitCorrectionButton);
-    connect(m_splitCorrectionButton,&QPushButton::toggled,this,[this](bool enabled){
-        if(m_session)m_session->setSplitCorrectionEnabled(enabled);
-        syncSessionControls();
     });
     m_colorMode = new QComboBox(statusRow);
     m_colorMode->setObjectName("rvDepthColorMode");
@@ -403,8 +386,6 @@ void DepthMapWidget::retranslateUi()
     m_saveButton->setText(tr("Save depth map"));
     m_monocularButton->setToolTip(tr("Show the same frame before ToF correction in the depth map and point cloud."));
     m_monocularButton->setText(m_monocularButton->isChecked()?tr("Restore corrected depth"):tr("Show monocular depth only"));
-    m_splitCorrectionButton->setToolTip(tr("Use verified distant ToF for the background and paired ToF for the near hand. Applies to the depth map and point cloud."));
-    m_splitCorrectionButton->setText(m_splitCorrectionButton->isChecked()?tr("Restore original G"):tr("Try split correction"));
     m_tofPointsButton->setText(m_tofPointsButton->isChecked()?tr("Hide ToF points"):tr("Show ToF points"));
     m_tofPointsButton->setToolTip(tr("Point centers use the measured depth color. White outlines mark points used to correct this frame."));
     m_pairedRgbButton->setText(m_pairedRgbButton->isChecked()?tr("Return to depth"):tr("ToF / RGB alignment"));
@@ -420,12 +401,9 @@ void DepthMapWidget::retranslateUi()
     for (auto *button : {m_rvStart, m_rvStop, m_rvReconnect})
         button->setToolTip(tr("Start, Stop and Reconnect apply to the shared camera + depth stream."));
     auto label=[this](const char* id,const QString& text){m_rvModel->setItemText(m_rvModel->findData(id),text);};
-    label(RvSessionController::GlobalRgbImagingScheme,tr("Host-assisted inference (G)"));
-    label(RvSessionController::ReuseLatestTofImagingScheme,tr("Host-assisted inference (B, reuse ToF)"));
-    label(RvSessionController::DepthPro2ImagingScheme,tr("Depth Pro 2-S (ToF G)"));
-    label(RvSessionController::DepthPro2ReuseImagingScheme,tr("Depth Pro 2-S (ToF B, reuse)"));
-    label(RvSessionController::Native48ExtendedIntegrationScheme,tr("Board inference (1200K)"));
-    label(RvSessionController::Native48HighAccuracy1200KScheme,tr("Board inference high accuracy (1200K)"));
+    label(RvSessionController::HostAssistImagingScheme,tr("Host-assisted inference"));
+    label(RvSessionController::Native48ExtendedIntegrationScheme,tr("Board inference"));
+    label(RvSessionController::Native48HighAccuracy1200KScheme,tr("Board inference high accuracy"));
     m_depthTabs->setTabText(0,tr("Board depth"));m_depthTabs->setTabText(1,tr("Host assisted depth"));
     m_rvModel->setAccessibleName(tr("Imaging scheme:"));
     m_rvModel->setToolTip(tr("Select the imaging scheme for the shared depth and camera session."));
@@ -615,7 +593,7 @@ void DepthMapWidget::syncSessionControls()
     m_rvStop->setEnabled(available && (!stopped || connecting));
     m_rvReconnect->setEnabled(available && !busy);
     if(m_switchUiActive&&(!m_session||m_session->userStopped()))cancelImagingSwitchUi();
-    const bool assisting=m_session&&(m_session->cameraWidth()==576||m_session->hostHdAssist())&&m_session->assistDepthEnabled();
+    const bool assisting=m_session&&m_session->hostHdAssist()&&m_session->assistDepthEnabled();
     const bool monocular=m_session&&m_session->monocularDisplay();
     m_monocularButton->setVisible(assisting);
     if(monocular!=m_monocularButton->isChecked()){
@@ -623,15 +601,6 @@ void DepthMapWidget::syncSessionControls()
         m_monocularButton->setChecked(monocular);
         m_monocularButton->setText(monocular?tr("Restore corrected depth"):tr("Show monocular depth only"));
     }
-    const bool splitAvailable=m_session&&m_session->splitCorrectionAvailable();
-    const bool split=m_session&&m_session->splitCorrectionEnabled();
-    m_splitCorrectionButton->setVisible(splitAvailable);
-    if(split!=m_splitCorrectionButton->isChecked()){
-        const QSignalBlocker block(m_splitCorrectionButton);
-        m_splitCorrectionButton->setChecked(split);
-    }
-    const auto splitText=split?tr("Restore original G"):tr("Try split correction");
-    if(m_splitCorrectionButton->text()!=splitText)m_splitCorrectionButton->setText(splitText);
     const QStringList key{QString::number(available), QString::number(assisting),
         QString::number(m_session?m_session->dtofCandidateMode():-1), QString::number(busy), QString::number(m_switchUiActive), QString::number(connecting),
         QString::number(m_session&&m_session->controlledSource()),
@@ -664,19 +633,10 @@ void DepthMapWidget::syncSessionControls()
                 items->item(i)->setToolTip(tooltip);
             }
             else{
-                const auto depthPro2Model=RvSessionController::depthPro2ModelForScheme(id);
-                const bool depthPro2=!depthPro2Model.isEmpty();
-                const QString model=depthPro2?depthPro2Model:QString::fromLatin1(RvCameraView::UniDepthVgaNative48);
-                const bool available=RvAssistDepth::hostModelAvailable(model);
-                items->item(i)->setEnabled(offerAssist&&available);
-                QString tooltip=RvAssistDepth::tr("Selected host model runtime is missing; prepare the optional runtime first");
-                if(available){
-                    if(depthPro2)
-                        tooltip=tr("Calibrated 640×480 RGB depth on NVIDIA TensorRT FP16.");
-                    else if(id==QLatin1String(RvSessionController::ReuseLatestTofImagingScheme))
-                        tooltip=tr("RGB frames can reuse the latest eligible 48×32 ToF measurement within the 200 ms pairing budget.");
-                    else tooltip=tr("RGB frames trigger inference. Each fresh 48×32 ToF measurement can update the global scale once.");
-                }
+                const auto error=m_session?m_session->hostInferencePreflightError():QString();
+                items->item(i)->setEnabled(offerAssist&&error.isEmpty());
+                const auto tooltip=error.isEmpty()?tr("Depth Pro 2-S uses 480×640 RGB and the latest eligible ToF measurement.")
+                    :error;
                 items->item(i)->setToolTip(tooltip);
             }
         }
@@ -745,8 +705,6 @@ void DepthMapWidget::updateRvPresentation()
     m_recordButton->setEnabled(hasFreshRgb&&!m_recorder&&!m_session->retainingRecoveryDisplay());
     m_monocularButton->setEnabled(m_depthTabs->currentIndex()==1&&!m_switchUiActive&&!viewingRgb
         &&(m_monocularButton->isChecked()||!m_assistSnapshot.metresFloat32LE.isEmpty()));
-    m_splitCorrectionButton->setEnabled(m_session&&m_session->splitCorrectionAvailable()&&!m_session->busy()
-        &&!m_switchUiActive&&!m_session->monocularDisplay());
     m_saveCamera->setEnabled(!m_session||m_session->hostHdAssist()
         ||!RvDtofCandidates::isNativeDepth(m_session->dtofCandidateMode()));
     const auto &snapshot = m_depthTabs->currentIndex()==1 ? m_assistSnapshot : m_snapshot;
