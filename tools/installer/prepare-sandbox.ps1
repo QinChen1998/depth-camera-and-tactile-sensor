@@ -11,7 +11,9 @@ $results=Join-Path $work "sandbox-results$suffix"
 if((Test-Path -LiteralPath $inputFolder) -or (Test-Path -LiteralPath $results)){
     throw 'Sandbox evidence directories already exist. Preserve them before generating a new run.'
 }
-$installer=@(Get-ChildItem -LiteralPath (Join-Path $work 'delivery') -Filter '触想工作台-内测版-v*-x64.exe' -File)
+$installer=@(Get-ChildItem -LiteralPath (Join-Path $work 'delivery') -File | Where-Object {
+    $_.Name -match '^触想工作台(-内测版)?-v\d+\.\d+\.\d+(\.\d+)?-x64\.exe$'
+})
 if($installer.Count -ne 1){throw 'Expected a single setup EXE.'}
 New-Item -ItemType Directory -Path $inputFolder,$results | Out-Null
 Copy-Item -LiteralPath $installer[0].FullName -Destination $inputFolder
@@ -22,6 +24,7 @@ Copy-Item -LiteralPath $installer[0].FullName -Destination $inputFolder
 $inputFolder=[Security.SecurityElement]::Escape($inputFolder)
 $results=[Security.SecurityElement]::Escape($results)
 $testArguments=if($SmokeOnly){' -SmokeOnly'}else{''}
+if($installer[0].Name -like '触想工作台-v*'){$testArguments+=' -Research'}
 @"
 <Configuration>
   <MemoryInMB>8192</MemoryInMB>

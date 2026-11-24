@@ -1,0 +1,8 @@
+触想工作台
+
+本版本适用于 Apple 模型许可规定的非商业科学研究和学术开发。
+本包将 Depth Pro 2-S 转换为 480×640 FP16 TensorRT 引擎，以固定的相机标定焦距生成米制相机 Z 深度。转换引擎经 AES-256-GCM 封装，由本机程序在内存中加载。
+
+Apple Machine Learning Research Model is licensed under the Apple Machine Learning Research Model License Agreement.
+The included engine is a model derivative of Depth Pro 2-S. It is exported to a fixed 480×640 FP16 TensorRT engine with a calibrated focal-length input and wrapped in an AES-256-GCM envelope.
+See Apple-Model-LICENSE.txt for the complete model agreement.

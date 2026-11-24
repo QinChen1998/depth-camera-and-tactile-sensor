@@ -15,7 +15,9 @@
   <PropertyGroup>
     <OutDir>$(DctsPrivateBuildDir)\bin\$(Configuration)\</OutDir>
     <IntDir>$(DctsPrivateBuildDir)\obj_$(Configuration)_$(PackModelCopy)\</IntDir>
+    <IntDir Condition="'$(DctsTensorRtSdk)' != ''">$(DctsPrivateBuildDir)\obj_$(Configuration)_TensorRt\</IntDir>
     <TargetName Condition="'$(PackModelCopy)' != 'true'">DctsModelRuntime</TargetName>
+    <TargetName Condition="'$(DctsTensorRtSdk)' != ''">DctsDepthPro2Runtime</TargetName>
     <TargetName Condition="'$(PackModelCopy)' == 'true'">PackModelCopy</TargetName>
   </PropertyGroup>
   <ItemDefinitionGroup>
@@ -24,9 +26,18 @@
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)' == 'Release'"><ClCompile><Optimization>MaxSpeed</Optimization><PreprocessorDefinitions>NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions></ClCompile><Link><OptimizeReferences>true</OptimizeReferences><EnableCOMDATFolding>true</EnableCOMDATFolding></Link></ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)' == 'Debug'"><ClCompile><Optimization>Disabled</Optimization><DebugInformationFormat>ProgramDatabase</DebugInformationFormat></ClCompile></ItemDefinitionGroup>
-  <ItemGroup><ClCompile Include="ProtectedModel.cpp" Condition="'$(PackModelCopy)' != 'true'"/><ClCompile Include="PackModelCopy.cpp" Condition="'$(PackModelCopy)' == 'true'"/><ClInclude Include="ProtectionCommon.h"/><ClInclude Include="ModelProtectionApi.h"/><ClInclude Include="OpenVinoApi.h"/></ItemGroup>
+  <ItemDefinitionGroup Condition="'$(DctsTensorRtSdk)' != ''">
+    <ClCompile><AdditionalIncludeDirectories>$(DctsTensorRtSdk)\include;$(DepthPro2CudaRoot)\include;$(DepthPro2CudaCrtInclude);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories></ClCompile>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <ClCompile Include="ProtectedModel.cpp" Condition="'$(PackModelCopy)' != 'true' and '$(DctsTensorRtSdk)' == ''"/>
+    <ClCompile Include="ProtectedTensorRt.cpp" Condition="'$(DctsTensorRtSdk)' != ''"/>
+    <ClCompile Include="PackModelCopy.cpp" Condition="'$(PackModelCopy)' == 'true'"/>
+    <ClInclude Include="ProtectedTensorRt.h"/><ClInclude Include="ProtectionCommon.h"/><ClInclude Include="ModelProtectionApi.h"/><ClInclude Include="OpenVinoApi.h"/>
+  </ItemGroup>
   <Target Name="RequirePrivateBuildDirectory" BeforeTargets="PrepareForBuild">
     <Error Condition="'$(DctsPrivateBuildDir)' == ''" Text="Set DctsPrivateBuildDir to an isolated private build directory."/>
+    <Error Condition="'$(PackModelCopy)' == 'true' and '$(DctsTensorRtSdk)' != ''" Text="Build the packer and TensorRT loader separately."/>
   </Target>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
 </Project>

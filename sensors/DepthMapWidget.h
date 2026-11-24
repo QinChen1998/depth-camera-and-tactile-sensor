@@ -64,7 +64,6 @@ private:
     int m_nativeTofRotation = 90;
     QPushButton *m_saveButton = nullptr;
     QPushButton *m_monocularButton = nullptr;
-    QWidget *m_diagnosticsRow = nullptr;
     QPushButton *m_tofPointsButton = nullptr, *m_pairedRgbButton = nullptr;
     QPushButton *m_recordButton = nullptr, *m_openRecording = nullptr;
     QLabel *m_recordStatus = nullptr;

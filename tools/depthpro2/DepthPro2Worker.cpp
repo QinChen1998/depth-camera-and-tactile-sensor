@@ -1,4 +1,7 @@
 #include "../../sensors/RvCameraView.h"
+#ifdef DCTS_PROTECTED_DEPTHPRO2
+#include "../model_protection/ProtectedTensorRt.h"
+#endif
 
 #include <NvInferPlugin.h>
 #include <NvInferRuntime.h>
@@ -55,21 +58,31 @@ public:
 
 class DepthEngine final {
 public:
-    DepthEngine(const QString &path, const RvCameraView::DepthPro2Runtime &asset)
+    DepthEngine(const QDir &root, const RvCameraView::DepthPro2Runtime &asset)
     {
-        QFile file(path);
+#ifndef DCTS_PROTECTED_DEPTHPRO2
+        QFile file(root.filePath(QLatin1String(asset.view.graphFile)));
         require(file.open(QIODevice::ReadOnly) && file.size() > 0 && file.size() <= 512 * 1024 * 1024,
                 "Cannot read the Depth Pro 2 engine");
         const auto plan = file.readAll();
         require(QCryptographicHash::hash(plan, QCryptographicHash::Sha256).toHex() == asset.engineSha,
                 "Depth Pro 2 engine fingerprint mismatch");
+#endif
         require(getInferLibVersion() == NV_TENSORRT_VERSION, "TensorRT runtime version mismatch");
         checkCuda(cudaSetDevice(0), "Select NVIDIA device");
         require(initLibNvInferPlugins(&logger, ""), "TensorRT plugin initialization failed");
         runtime.reset(nvinfer1::createInferRuntime(logger));
         require(bool(runtime), "Cannot create the TensorRT runtime");
+#ifdef DCTS_PROTECTED_DEPTHPRO2
+        const auto path = root.filePath(QLatin1String(RvCameraView::DepthPro2ProtectedEngine)).toStdWString();
+        std::array<char, 256> error{};
+        engine.reset(DctsLoadProtectedTensorRtEngine(runtime.get(), path.c_str(), asset.engineSha,
+                                                      error.data(), error.size()));
+        require(bool(engine), error[0] ? error.data() : "Cannot deserialize the protected Depth Pro 2 engine");
+#else
         engine.reset(runtime->deserializeCudaEngine(plan.constData(), size_t(plan.size())));
         require(bool(engine), "Cannot deserialize the Depth Pro 2 engine for this GPU");
+#endif
         require(engine->getNbIOTensors() == 3
                 && matches(PixelTensor, nvinfer1::TensorIOMode::kINPUT, {1, 3, Height, Width})
                 && matches(FocalTensor, nvinfer1::TensorIOMode::kINPUT, {1})
@@ -203,7 +216,7 @@ int run(const QString &root, const QString &token, const QString &model,
 {
     try {
         const auto &view = asset.view;
-        DepthEngine engine(QDir(root).filePath(QLatin1String(view.graphFile)), asset);
+        DepthEngine engine(QDir(root), asset);
         const auto identity = RvCameraView::depthPro2Identity(model, asset);
         QJsonObject ready = identity;
         ready["protocol"] = 1;

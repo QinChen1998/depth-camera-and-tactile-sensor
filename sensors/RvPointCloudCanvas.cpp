@@ -17,26 +17,15 @@ QRgb rgb(const QVector4D &c) {
                 qBound(0, qRound(c.z() * 255), 255));
 }
 }
-RvPointCloudCanvas::RvPointCloudCanvas(SceneInstanceBuffer *native, SceneInstanceBuffer *assisted, QWidget *parent)
-    : QWidget(parent), m_native(native), m_assisted(assisted) {
+RvPointCloudCanvas::RvPointCloudCanvas(SceneInstanceBuffer *points, QWidget *parent)
+    : QWidget(parent), m_points(points) {
     setAttribute(Qt::WA_OpaquePaintEvent);
     setMinimumSize(300, 190);
-    for (auto *source : {m_native, m_assisted})
-        connect(source, &SceneInstanceBuffer::instanceTableChanged, this, qOverload<>(&QWidget::update));
+    connect(m_points, &SceneInstanceBuffer::instanceTableChanged, this, qOverload<>(&QWidget::update));
 }
 void RvPointCloudCanvas::setMesh(const QByteArray &vertices, const QByteArray &indices) {
     m_vertices = vertices;
     m_indices = indices;
-    update();
-}
-void RvPointCloudCanvas::setAssisted(bool enabled) {
-    if (m_showAssisted == enabled) return;
-    m_showAssisted = enabled;
-    update();
-}
-void RvPointCloudCanvas::setDepthPointDiameter(double diameter) {
-    if (m_depthPointDiameter == diameter) return;
-    m_depthPointDiameter = diameter;
     update();
 }
 void RvPointCloudCanvas::resetView() {
@@ -68,12 +57,11 @@ QImage RvPointCloudCanvas::renderFrame() const {
         if (z < old) { old = float(z); reinterpret_cast<QRgb *>(image.scanLine(y))[x] = color; }
     };
     if (!meshVisible()) {
-        const auto *points = m_showAssisted ? m_assisted : m_native;
-        for (int i = 0; i < points->count(); ++i) {
-            const auto point = points->instance(i);
+        for (int i = 0; i < m_points->count(); ++i) {
+            const auto point = m_points->instance(i);
             const auto p = project(point.position);
             if (p.z <= nearPlane) continue;
-            const double diameter = m_showAssisted ? m_depthPointDiameter * dpr : point.diameter * focal / p.z;
+            const double diameter = point.diameter * focal / p.z;
             const double half = std::max(.5, diameter * .5);
             // Reject off-screen primitives before conversion to bounded integer pixel coordinates.
             if (p.x + half < 0 || p.y + half < 0 || p.x - half >= w || p.y - half >= h) continue;

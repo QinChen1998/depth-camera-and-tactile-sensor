@@ -63,6 +63,13 @@ void settle(int milliseconds){QElapsedTimer timer;timer.start();while(timer.elap
 
 int runPortSmokeTests(SensorMainWindow &window,LanguageManager &language,const QString &path)
 {
+#ifdef DCTS_RESEARCH_INSTALLER_BUILD
+    const auto expectedTitle = QStringLiteral("触想工作台");
+    const auto expectedVersion = QStringLiteral("v1.0");
+#else
+    const auto expectedTitle = QStringLiteral("触想工作台（内测版）");
+    const auto expectedVersion = QStringLiteral("v1.0 · 内测版");
+#endif
     QFile file(path);if(!file.open(QIODevice::WriteOnly|QIODevice::Text))return 3;
     QTextStream out(&file);bool pass=true;
     const auto check=[&](const QString &name,bool ok){out<<name<<' '<<(ok?"PASS":"FAIL")<<Qt::endl;pass&=ok;};
@@ -195,6 +202,7 @@ int runPortSmokeTests(SensorMainWindow &window,LanguageManager &language,const Q
     check("NO_HOST_DIRECTION_OR_CORRECTION_SELECTORS",
           !window.depth()->findChild<QComboBox *>("rvAssistInputRotation")
           &&!window.depth()->findChild<QComboBox *>("rvUniDepthExperiment"));
+    check("NO_RETIRED_SPLIT_CORRECTION_CONTROL", !window.depth()->findChild<QPushButton *>("depthSplitCorrection"));
     auto *session=window.session();
     check("HOST_RGB_PREPARATION_KEEPS_NEW_PAIR_AFTER_CANCELLATION",session->testHostHdPreparation());
     check("DEPTHPRO2_NATIVE48_DEFAULT_B",session->assistHostModel()==visibleHostModel&&session->assistExperiment()=="B");
@@ -336,12 +344,12 @@ int runPortSmokeTests(SensorMainWindow &window,LanguageManager &language,const Q
         auto *depthDock = window.findChild<QDockWidget *>("depthMapDock");
         check("POINT_CLOUD_TAB_WITH_DEPTH", dock && window.tabifiedDockWidgets(depthDock).contains(dock));
         if (dock) {
+            session->selectImagingScheme(ordinaryScheme, {});
             dock->show();
             dock->raise();
             settle(80);
             auto *view = dock->findChild<RvPointCloudCanvas *>("rvPointCloudView");
             auto *instances = dock->findChild<SceneInstanceBuffer *>("rvPointCloudInstances");
-            auto *depthInstances = dock->findChild<SceneInstanceBuffer *>("rvPointCloudDepthInstances");
             auto *mesh = view;
             auto *displayMode = dock->findChild<QComboBox *>("rvPointCloudDisplayMode");
             auto *colorMode = dock->findChild<QComboBox *>("rvPointCloudColorMode");
@@ -349,7 +357,6 @@ int runPortSmokeTests(SensorMainWindow &window,LanguageManager &language,const Q
             auto *legend = dock->findChild<QLabel *>("rvPointCloudColorLegend");
             auto *pause = dock->findChild<QPushButton *>("rvPointCloudPause");
             auto *reset = dock->findChild<QPushButton *>("rvPointCloudReset");
-            auto *diameter = dock->findChild<QDoubleSpinBox *>("rvPointCloudPointDiameter");
             auto *colorMinimum = dock->findChild<QDoubleSpinBox *>("rvPointCloudColorMinimum");
             auto *colorMaximum = dock->findChild<QDoubleSpinBox *>("rvPointCloudColorMaximum");
             auto *applyRange = dock->findChild<QPushButton *>("rvPointCloudColorApply");
@@ -360,13 +367,13 @@ int runPortSmokeTests(SensorMainWindow &window,LanguageManager &language,const Q
                 && status->text() == pointCloudText("Start capture in Depth Map or Camera raw video."));
             check("POINT_CLOUD_STOP_CONTROL", pause && pause->isEnabled() && !pause->isChecked()
                 && pause->text() == pointCloudText("Stop point cloud"));
-            check("POINT_CLOUD_WIDGET_READY", depthInstances && view && view->isVisible());
+            check("POINT_CLOUD_WIDGET_READY", instances && view && view->isVisible());
             check("POINT_CLOUD_DISPLAY_MODE_DEFAULTS_TO_POINTS", mesh && displayMode && displayMode->isEnabled()
                 && displayMode->currentText() == pointCloudText("Points")
                 && displayMode->count() == 2 && mesh->indexData().isEmpty());
             check("POINT_CLOUD_HAS_NO_ACCUMULATION_CONTROL", !dock->findChild<QPushButton *>("rvPointCloudAccumulate"));
-            check("POINT_CLOUD_ASSISTED_DISPLAY_DEFAULTS", diameter && colorMinimum && colorMaximum && applyRange
-                && diameter->isVisible() && diameter->value() == 2.4 && colorMinimum->value() == .01
+            check("POINT_CLOUD_NATIVE_COLOR_RANGE_DEFAULTS", colorMinimum && colorMaximum && applyRange
+                && colorMinimum->isVisible() && colorMaximum->isVisible() && colorMinimum->value() == .01
                 && colorMaximum->value() == 3.0 && !applyRange->isEnabled());
             check("POINT_CLOUD_COLOR_MODE_DEFAULTS_TO_FIXED_Z", colorMode && colorMode->count() == 2
                 && colorMode->currentText() == pointCloudText("Fixed Z color range"));
@@ -374,12 +381,8 @@ int runPortSmokeTests(SensorMainWindow &window,LanguageManager &language,const Q
             check("POINT_CLOUD_LEGEND_USES_JET", ramp.size() == QSize(256, 1)
                 && ramp.pixel(0, 0) == qRgb(0, 0, 127) && ramp.pixel(64, 0) == qRgb(0, 128, 255)
                 && ramp.pixel(255, 0) == qRgb(127, 0, 0));
-            if (instances && depthInstances && view && view->isVisible()
-                && mesh && displayMode && colorMode && pause
-                && diameter && colorMinimum && colorMaximum && applyRange) {
-                session->selectImagingScheme("board_native_tof48", {});
-                check("POINT_CLOUD_NATIVE_SHOWS_SHARED_RANGE_AND_HIDES_ASSISTED_DIAMETER", !diameter->isVisible()
-                    && colorMinimum->isVisible() && colorMaximum->isVisible());
+            if (depthDock && instances && view && status && displayMode && colorMode && pause && reset
+                && colorMinimum && colorMaximum && applyRange) {
                 const QString generation(32, 'a');
                 RvTofFrame frame;
                 frame.samples = QByteArray(48 * 32 * 4, 0);
@@ -457,13 +460,6 @@ int runPortSmokeTests(SensorMainWindow &window,LanguageManager &language,const Q
                     if (offset + qsizetype(sizeof(rgba)) <= vertices.size())
                         std::memcpy(rgba, vertices.constData() + offset, sizeof(rgba));
                     return qRgb(qRound(rgba[0] * 255), qRound(rgba[1] * 255), qRound(rgba[2] * 255));
-                };
-                const auto waitForTriangles = [&](qsizetype expectedCount) {
-                    QElapsedTimer timer;
-                    timer.start();
-                    while (triangleCount() != expectedCount && timer.elapsed() < 2000)
-                        settle(10);
-                    return triangleCount() == expectedCount;
                 };
                 sample(32 * 48 - 1, 22000, 1);
                 frame.metadata["tof_sequence"] = 2;
@@ -549,7 +545,9 @@ int runPortSmokeTests(SensorMainWindow &window,LanguageManager &language,const Q
                 emit session->tofFrameReady(frame);
                 check("POINT_CLOUD_RESUME_PRESERVES_MANUAL_ZOOM", instances->count() == 2
                     && cameraDistance() == manualDistance);
-                session->selectImagingScheme("board_native_tof48_high_accuracy", {});
+                session->selectImagingScheme(highAccuracyScheme, {});
+                emit session->tofFrameReady(frame);
+                check("POINT_CLOUD_HIGH_ACCURACY_REJECTS_PREVIOUS_MODE", instances->count() == 0);
                 frame.metadata["candidate_mode"] = 25;
                 emit session->tofFrameReady(frame);
                 check("POINT_CLOUD_SCHEME_CHANGE_PRESERVES_MANUAL_ZOOM", instances->count() == 2
@@ -597,7 +595,7 @@ int runPortSmokeTests(SensorMainWindow &window,LanguageManager &language,const Q
                 displayMode->setCurrentIndex(1);
                 colorMode->setCurrentIndex(0);
                 sceneRoot->setProperty("cameraTarget", formerTarget);
-                session->selectImagingScheme("board_native_tof48", {});
+                session->selectImagingScheme(ordinaryScheme, {});
                 frame.metadata["candidate_mode"] = 24;
                 sample(meshCell, 0, 0);
                 emit session->tofFrameReady(frame);
@@ -629,72 +627,12 @@ int runPortSmokeTests(SensorMainWindow &window,LanguageManager &language,const Q
                 settle(130);
                 check("POINT_CLOUD_RESUME_NATIVE_USES_FRESH_FRAMES", waitingForTof && !pause->isChecked()
                     && view->isVisible() && instances->count() == 6 && cameraDistance() == manualDistance);
-                session->selectImagingScheme(visibleHostScheme, {});
-                emit session->tofFrameReady(frame);
-                check("POINT_CLOUD_IGNORES_PREVIOUS_GRID", instances->count() == 0);
-
-                const auto &profile = RvCameraView::outputProfile(visibleHostModel);
-                const int pixels = profile.outputWidth * profile.outputHeight;
-                QByteArray depth(profile.depthBytes(), 0);
-                const auto setDepth = [&](int x, int y, float z) {
-                    quint32 bits;
-                    std::memcpy(&bits, &z, sizeof(bits));
-                    qToLittleEndian(bits, depth.data() + (y * profile.outputWidth + x) * sizeof(bits));
-                };
-                const QJsonObject metadata{{"assist_host_model", visibleHostModel}, {"depth_unit", "camera-Z_m_float32"},
-                    {"width", 480}, {"height", 640}, {"assist_output_grid", RvCameraView::DepthPro2Grid}, {"depth_stride", profile.outputWidth*4}, {"depth_K", RvCameraView::intrinsics(profile)},
-                    {"rectify_map_sha256", profile.mapSha}, {"assist_output_restored_to_calibrated_grid", true}};
-                const auto count = [&] { return depthInstances->count(); };
-                const auto waitForCount = [&](int expectedCount) {
-                    QElapsedTimer timer;
-                    timer.start();
-                    while (count() != expectedCount && timer.elapsed() < 2000)
-                        settle(10);
-                    return count() == expectedCount;
-                };
-                setDepth(4, 2, .75f);
-                setDepth(5, 2, std::numeric_limits<float>::quiet_NaN());
-                setDepth(6, 2, -1.f);
-                setDepth(7, 2, std::numeric_limits<float>::infinity());
-                setDepth(476, 638, 1.75f);
-                auto invalidDepth = metadata;
-                invalidDepth["assist_output_restored_to_calibrated_grid"] = false;
-                emit session->assistDepthSnapshotReady(depth, invalidDepth, {});
-                invalidDepth = metadata;
-                invalidDepth["width"] = 640;
-                invalidDepth["height"] = 480;
-                emit session->assistDepthSnapshotReady(depth, invalidDepth, {});
-                invalidDepth = metadata;
-                invalidDepth["depth_K"] = QJsonArray{100, 100, 100, 100};
-                emit session->assistDepthSnapshotReady(depth, invalidDepth, {});
-                emit session->assistDepthSnapshotReady(depth.chopped(4), metadata, {});
-                settle(45);
-                check("POINT_CLOUD_REJECTS_WRONG_DEPTH_GEOMETRY", count() == 0);
-                emit session->assistDepthSnapshotReady(depth, metadata, {});
-                const bool hasSparseDepth = waitForCount(2);
-                const auto matchesDepth = [&](const QVector3D &point, int x, int y, float metres) {
-                    const float z = metres * 1000.f;
-                    return std::abs(point.x() - (x - profile.cx()) * z / profile.focal) < .001
-                        && std::abs(point.y() - (profile.cy() - y) * z / profile.focal) < .001
-                        && point.z() == -z;
-                };
-                check("POINT_CLOUD_ASSISTED_CAMERA_Z_XYZ_SKIPS_INVALID", hasSparseDepth
-                    && matchesDepth(depthInstances->instancePosition(0), 4, 2, .75f)
-                    && matchesDepth(depthInstances->instancePosition(1), 476, 638, 1.75f));
-                const QRgb originalColor = qRgb(0, 124, 255);
-                check("POINT_CLOUD_ASSISTED_COLORS_BY_CAMERA_Z", hasSparseDepth
-                    && depthInstances->instanceColor(0).rgb() == originalColor);
-
-                initialPresentation->setColorRange(.1, 5.0);
-                settle(45);
-                check("POINT_CLOUD_ASSISTED_IGNORES_DEPTH_MAP_COLOR_RANGE", colorMinimum->value() == .01
-                    && colorMaximum->value() == 3.0 && depthInstances->instanceColor(0).rgb() == originalColor);
                 colorMinimum->setValue(4.0);
                 check("POINT_CLOUD_REJECTS_INVERTED_COLOR_RANGE", !applyRange->isEnabled());
                 colorMinimum->setValue(.2);
                 auto *rangeInput = colorMaximum->findChild<QLineEdit *>();
+                colorMaximum->setFocus();
                 if (rangeInput) {
-                    colorMaximum->setFocus();
                     rangeInput->selectAll();
                     QKeyEvent erase(QEvent::KeyPress, Qt::Key_Backspace, Qt::NoModifier);
                     QApplication::sendEvent(rangeInput, &erase);
@@ -703,272 +641,96 @@ int runPortSmokeTests(SensorMainWindow &window,LanguageManager &language,const Q
                 }
                 check("POINT_CLOUD_APPLY_AVAILABLE_AFTER_TYPING_COLOR_LIMIT", rangeInput
                     && applyRange->isEnabled() && colorMaximum->value() == 2.0);
-                const QVector3D nearPosition = depthInstances->instancePosition(0);
                 applyRange->click();
-                const QRgb recolored = qRgb(0, 184, 255);
-                QElapsedTimer colorWait;
-                colorWait.start();
-                while (depthInstances->instanceColor(0).rgb() != recolored && colorWait.elapsed() < 2000)
-                    settle(10);
-                check("POINT_CLOUD_ASSISTED_RECOLORS_WITHOUT_CHANGING_POINTS", count() == 2 && recolored != originalColor
-                    && depthInstances->instanceColor(0).rgb() == recolored && depthInstances->instancePosition(0) == nearPosition
-                    && initialPresentation->colorMinimum() == .1 && initialPresentation->colorMaximum() == 5.0);
-                const double viewDistance = cameraDistance();
-                diameter->setValue(4.2);
-                const QSettings pointPreferences;
-                check("POINT_CLOUD_ASSISTED_DISPLAY_PREFERENCES", view->property("depthPointDiameter").toDouble() == 4.2
-                    && cameraDistance() == viewDistance && depthInstances->instancePosition(0) == nearPosition
-                    && pointPreferences.value("pointCloud/assistedPointDiameterPx").toDouble() == 4.2
-                    && pointPreferences.value("pointCloud/assistedColorMinimumM").toDouble() == .2
-                    && pointPreferences.value("pointCloud/assistedColorMaximumM").toDouble() == 2.0);
-                initialPresentation->setColorRange(.01, 3.0);
-
-                const auto waitForPointColor = [&](QRgb expected) {
-                    QElapsedTimer timer;
-                    timer.start();
-                    while ((count() != 2 || depthInstances->instanceColor(0).rgb() != expected) && timer.elapsed() < 2000)
-                        settle(10);
-                    return count() == 2 && depthInstances->instanceColor(0).rgb() == expected;
-                };
                 colorMode->setCurrentIndex(1);
-                const QRgb equalized = PointCloudColorScale::jet(std::pow(.5, .65));
-                check("POINT_CLOUD_DYNAMIC_ASSISTED_RECOLORS_LATEST_AND_PERSISTS",
-                    waitForPointColor(equalized) && depthInstances->instancePosition(0) == nearPosition
-                    && !colorMinimum->isVisible() && !applyRange->isVisible()
-                    && QSettings().value("pointCloud/colorMode").toString() == "dynamic");
                 {
                     RvPointCloudWidget restored(session);
                     const auto *restoredMode = restored.findChild<QComboBox *>("rvPointCloudColorMode");
-                    check("POINT_CLOUD_DYNAMIC_RESTORES_SAVED_MODE", restoredMode && restoredMode->currentIndex() == 1);
+                    const auto *restoredMinimum = restored.findChild<QDoubleSpinBox *>("rvPointCloudColorMinimum");
+                    const auto *restoredMaximum = restored.findChild<QDoubleSpinBox *>("rvPointCloudColorMaximum");
+                    check("POINT_CLOUD_RESTORES_COLOR_MODE_AND_FIXED_RANGE",
+                        restoredMode && restoredMode->currentIndex() == 1
+                        && restoredMinimum && restoredMinimum->value() == .2
+                        && restoredMaximum && restoredMaximum->value() == 2.0);
                 }
-                setDepth(476, 638, .6f);
-                emit session->assistDepthSnapshotReady(depth, metadata, {});
-                check("POINT_CLOUD_DYNAMIC_COLOR_FOLLOWS_FRAME_HISTOGRAM",
-                    waitForPointColor(qRgb(127, 0, 0)) && depthInstances->instancePosition(0) == nearPosition);
-                emit session->assistDepthSnapshotReady(depth, metadata, {});
                 colorMode->setCurrentIndex(0);
                 check("POINT_CLOUD_DYNAMIC_SWITCH_BACK_KEEPS_FIXED_Z_RANGE",
-                    waitForPointColor(recolored) && colorMinimum->isVisible() && colorMinimum->value() == .2
+                    colorMinimum->isVisible() && colorMinimum->value() == .2
                     && colorMaximum->value() == 2.0 && !applyRange->isEnabled());
 
-                depth.fill(0);
-                for (int y = 150; y < 330; y += 6)
-                    for (int x = 220; x < 420; x += 6)
-                        setDepth(x, y, .8f);
-                emit session->assistDepthSnapshotReady(depth, metadata, {});
-                const bool hasDiscFrame = waitForCount(30 * 34);
-                const auto coloredPixels = [&] {
-                    settle(25);
-                    const auto image = view->grabFramebuffer().convertToFormat(QImage::Format_RGB32);
-                    int colored = 0;
-                    for (int y = 0; y < image.height(); ++y) {
-                        const auto *line = reinterpret_cast<const QRgb *>(image.constScanLine(y));
-                        for (int x = 0; x < image.width(); ++x) {
-                            const QRgb rgb = line[x];
-                            colored += std::max({qRed(rgb), qGreen(rgb), qBlue(rgb)})
-                                - std::min({qRed(rgb), qGreen(rgb), qBlue(rgb)}) > 125;
-                        }
-                    }
-                    return colored;
-                };
-                diameter->setValue(2.4);
-                const int defaultCoverage = coloredPixels();
-                diameter->setValue(4.2);
-                check("POINT_CLOUD_ASSISTED_DIAMETER_CHANGES_SCREEN_COVERAGE", hasDiscFrame
-                    && defaultCoverage > 100 && coloredPixels() > defaultCoverage);
-
-                depth.fill(0);
-                for (int y : {150, 151}) {
-                    setDepth(220, y, .8f);
-                    setDepth(221, y, .8f);
-                    setDepth(222, y, 1.6f);
-                }
-                setDepth(220, 150, std::numeric_limits<float>::quiet_NaN());
-                displayMode->setCurrentIndex(1);
-                emit session->assistDepthSnapshotReady(depth, metadata, {});
-                check("POINT_CLOUD_ASSISTED_MESH_PRESERVES_CAMERA_Z_AND_LEAVES_GAPS", waitForTriangles(1)
-                    && meshVisible() && count() == 0 && !diameter->isEnabled()
-                    && matchesDepth(meshPosition(0), 221, 150, .8f)
-                    && meshColor(0) == PointCloudColorScale::color(.8f, .2, 2.0));
-
-                // Use a wide enough transition that each local Z step used to pass the mesh limit.
-                constexpr int surfaceWidth = 20, transitionWidth = 11, surfaceHeight = 28;
-                constexpr int surfaceStartX = 220, surfaceStartY = 150;
-                const auto putSurface = [&](int column, int row, float z, bool transpose) {
-                    setDepth(surfaceStartX + (transpose ? row : column),
-                             surfaceStartY + (transpose ? column : row), z);
-                };
-                const qsizetype surfaceTriangles = 4 * (surfaceWidth - 1) * (surfaceHeight - 1);
-                const int surfacePoints = 2 * surfaceWidth * surfaceHeight;
-                for (const bool transpose : {false, true}) {
-                    depth.fill(0);
-                    for (int row = 0; row < surfaceHeight; ++row) {
-                        for (int x = 0; x < surfaceWidth; ++x) {
-                            putSurface(x, row, .8f, transpose);
-                            putSurface(x + surfaceWidth + transitionWidth, row, 1.22f, transpose);
-                        }
-                        for (int x = 0; x < transitionWidth; ++x)
-                            putSurface(surfaceWidth + x, row, .8f + .035f * (x + 1), transpose);
-                    }
+                if (hostAvailable) {
+                    emit session->tofFrameReady(frame);
                     displayMode->setCurrentIndex(1);
+                    const bool meshBeforeSwitch = meshVisible();
+                    session->selectImagingScheme(visibleHostScheme, {});
+                    const auto unsupported = pointCloudText("Point cloud display is currently unavailable for host-assisted inference.");
+                    check("POINT_CLOUD_HOST_SELECTION_CLEARS_BOARD_MESH_AND_SHOWS_NOTICE",
+                        meshBeforeSwitch && session->currentImagingScheme() == visibleHostScheme
+                        && status->isVisible() && status->text() == unsupported && view->isHidden()
+                        && instances->count() == 0 && !meshVisible() && !displayMode->isEnabled()
+                        && !pause->isEnabled() && !colorMode->isEnabled() && !reset->isEnabled());
+                    emit session->tofFrameReady(frame);
+                    check("POINT_CLOUD_HOST_MODE_IGNORES_NATIVE_TOF", instances->count() == 0 && !meshVisible());
+
+                    const auto &profile = RvCameraView::outputProfile(visibleHostModel);
+                    const QJsonObject metadata{{"assist_host_model", visibleHostModel}, {"depth_unit", "camera-Z_m_float32"},
+                        {"width", profile.outputWidth}, {"height", profile.outputHeight}, {"assist_output_grid", RvCameraView::DepthPro2Grid},
+                        {"depth_stride", profile.outputWidth * 4}, {"depth_K", RvCameraView::intrinsics(profile)},
+                        {"rectify_map_sha256", profile.mapSha}, {"assist_output_restored_to_calibrated_grid", true},
+                        {"frame_id", 123}, {"assist_diagnostic_payload", "mono_reasons_v1"}};
+                    QByteArray depth(profile.depthBytes(), Qt::Uninitialized);
+                    QByteArray monocular(profile.depthBytes() + 2 * RvDepthDiagnostic::ReasonBytes, 0);
+                    for (int i = 0; i < profile.outputWidth * profile.outputHeight; ++i) {
+                        qToLittleEndian<quint32>(0x3f800000, depth.data() + i * 4);
+                        qToLittleEndian<quint32>(0x3f000000, monocular.data() + i * 4);
+                    }
+                    emit session->assistDepthSnapshotReady(depth, metadata, {}, {}, monocular);
+                    QImage video(64, 36, QImage::Format_RGB32);
+                    video.fill(Qt::yellow);
+                    emit session->cameraFrameReady(video);
+                    settle(80);
+                    const auto *cameraPage = window.findChild<RtspCameraPage *>();
+                    check("POINT_CLOUD_HOST_FRAMES_KEEP_NOTICE_AND_SHARED_DEPTH_VIDEO",
+                        status->text() == unsupported && view->isHidden() && instances->count() == 0 && !meshVisible()
+                        && window.depth()->snapshot().metresFloat32LE == depth && cameraPage
+                        && cameraPage->currentFrameImage() == video);
+
+                    depthDock->raise();
+                    settle(50);
+                    bool allHidden = true;
+                    for (const char *name : {"depthPairedTofPoints", "depthPairedRgb", "depthDiagnosticRecord",
+                                             "depthOpenRecordingFolder", "depthMonocularOnly"}) {
+                        const auto *button = window.depth()->findChild<QPushButton *>(name);
+                        allHidden &= button && !button->isVisibleTo(window.depth());
+                    }
+                    auto *assistCanvas = static_cast<RvDepthView *>(window.depth()->findChild<QWidget *>("rvAssistDepthCanvas"));
+                    check("DEPTH_DIAGNOSTIC_AND_MONOCULAR_CONTROLS_HIDDEN_IN_HOST_MODE",
+                        allHidden && assistCanvas && assistCanvas->isVisible());
+                    const auto corrected = window.depth()->snapshot();
+                    session->setMonocularDisplay(true);
+                    settle(80);
+                    const auto *monoButton = window.depth()->findChild<QPushButton *>("depthMonocularOnly");
+                    check("HIDDEN_MONOCULAR_PREVIEW_PRESERVES_CORRECTED_SAVE", monoButton && monoButton->isHidden()
+                        && monoButton->isChecked() && assistCanvas && assistCanvas->property("frameId").toInt() == 123
+                        && !corrected.depthImage.isNull() && assistCanvas->colorAt(0, 0) != corrected.depthImage.pixel(0, 0)
+                        && window.depth()->snapshot().metresFloat32LE == depth
+                        && window.depth()->snapshot().depthImage == corrected.depthImage);
+                    session->setMonocularDisplay(false);
+
+                    dock->raise();
+                    settle(50);
+                    session->selectImagingScheme(highAccuracyScheme, {});
                     emit session->assistDepthSnapshotReady(depth, metadata, {});
-                    check(transpose ? "POINT_CLOUD_MESH_CUTS_VERTICAL_DEPTH_TRANSITION"
-                                    : "POINT_CLOUD_MESH_CUTS_HORIZONTAL_DEPTH_TRANSITION",
-                        waitForTriangles(surfaceTriangles) && mesh->vertexData().size() == surfacePoints * mesh->stride());
-                    displayMode->setCurrentIndex(0);
-                    check(transpose ? "POINT_CLOUD_POINTS_SKIP_VERTICAL_DEPTH_TRANSITION"
-                                    : "POINT_CLOUD_POINTS_SKIP_HORIZONTAL_DEPTH_TRANSITION",
-                        waitForCount(surfacePoints) && depthInstances->instancePosition(0).z() == -800.f
-                        && depthInstances->instancePosition(surfacePoints - 1).z() == -1220.f);
+                    check("POINT_CLOUD_BOARD_MODE_WAITS_FOR_FRESH_NATIVE_FRAME", view->isVisible()
+                        && status->text() != unsupported && !meshVisible() && instances->count() == 0);
+                    frame.metadata["candidate_mode"] = RvCaptureContract::Native48HighAccuracy;
+                    emit session->tofFrameReady(frame);
+                    check("POINT_CLOUD_BOARD_MODE_RESUMES_AFTER_HOST", meshVisible() && triangleCount() == 2
+                        && displayMode->isEnabled() && pause->isEnabled() && colorMode->isEnabled()
+                        && cameraDistance() == manualDistance && colorMinimum->value() == .2 && colorMaximum->value() == 2.0);
                 }
-
-                depth.fill(0);
-                for (int row = 0; row < 36; ++row)
-                    for (int x = 0; x < 48; ++x)
-                        putSurface(x, row, 1.f / (1.34f - .012f * x), false);
-                emit session->assistDepthSnapshotReady(depth, metadata, {});
-                check("POINT_CLOUD_POINTS_KEEP_SLANTED_PLANE", waitForCount(48 * 36));
-
-                depth.fill(0);
-                for (int row = 0; row < 36; ++row)
-                    for (int x = 0; x < 41; ++x)
-                        putSurface(x, row, x == 20 ? .55f : 1.4f, false);
-                emit session->assistDepthSnapshotReady(depth, metadata, {});
-                check("POINT_CLOUD_POINTS_KEEP_THIN_FOREGROUND", waitForCount(41 * 36)
-                    && depthInstances->instancePosition(20).z() == -550.f);
-
-                for (int y = 0; y < profile.outputHeight; ++y)
-                    for (int x = 0; x < profile.outputWidth; ++x)
-                        setDepth(x, y, 1.f);
-                displayMode->setCurrentIndex(1);
-                emit session->assistDepthSnapshotReady(depth, metadata, {});
-                const qsizetype fullMeshTriangles = 2 * (profile.outputWidth - 1) * (profile.outputHeight - 1);
-                const bool hasFullMesh = waitForTriangles(fullMeshTriangles);
-                check("POINT_CLOUD_ASSISTED_MESH_RENDERS_ALL_GRID_CELLS", hasFullMesh && meshVisible()
-                    && mesh->vertexData().size() == pixels * mesh->stride() && coloredPixels() > 1000);
-                const QRgb meshJet = meshColor(0);
-                check("POINT_CLOUD_ASSISTED_MESH_RENDERS_JET", meshJet == qRgb(70, 255, 184)
-                    && framebufferHasColor(meshJet));
-
-                displayMode->setCurrentIndex(0);
-                displayMode->setCurrentIndex(1);
-                displayMode->setCurrentIndex(0);
-                const auto fullResolutionStatus = pointCloudText("%1×%2 %3 · %4 / %5 points")
-                    .arg(profile.outputWidth).arg(profile.outputHeight).arg(pointCloudText("assisted depth"))
-                    .arg(pixels).arg(pixels);
-                check("POINT_CLOUD_ASSISTED_FULL_RESOLUTION", waitForCount(pixels) && instances->count() == 0
-                    && triangleCount() == 0 && !meshVisible() && diameter->isEnabled()
-                    && status && status->text() == fullResolutionStatus);
-                check("POINT_CLOUD_ASSISTED_POINTS_MATCH_MESH_JET", depthInstances->instanceColor(0).rgb() == meshJet
-                    && framebufferHasColor(meshJet));
-                colorMode->setCurrentIndex(1);
-                displayMode->setCurrentIndex(1);
-                check("POINT_CLOUD_DYNAMIC_ASSISTED_MESH_RECOLORS_WITHOUT_CHANGING_TRIANGLES",
-                    waitForTriangles(fullMeshTriangles) && meshVisible() && meshColor(0) == qRgb(127, 0, 0)
-                    && meshPosition(0).z() == -1000.f);
-                colorMode->setCurrentIndex(0);
-                displayMode->setCurrentIndex(0);
-                waitForCount(pixels);
-
-                auto pairedMetadata=metadata;
-                pairedMetadata["frame_id"]=123;
-                pairedMetadata["assist_diagnostic_payload"]="mono_reasons_v1";
-                QByteArray mono(profile.depthBytes()+2*RvDepthDiagnostic::ReasonBytes,0);
-                for(int i=0;i<pixels;++i)qToLittleEndian<quint32>(0x3f000000,mono.data()+i*4);
-                auto *monoButton=window.depth()->findChild<QPushButton *>("depthMonocularOnly");
-                auto *assistCanvas=static_cast<RvDepthView *>(window.depth()->findChild<QWidget *>("rvAssistDepthCanvas"));
-                emit session->assistDepthSnapshotReady(depth,pairedMetadata,{},RvTofFrame{},mono);
-                settle(45);
-                const auto correctedImage=window.depth()->snapshot().depthImage;
-                if(monoButton)monoButton->click();
-                const auto waitForZ=[&](float z) {
-                    QElapsedTimer timer;timer.start();
-                    while((count()!=pixels||depthInstances->instancePosition(0).z()!=z)&&timer.elapsed()<2500)
-                        settle(10);
-                    return count()==pixels&&depthInstances->instancePosition(0).z()==z;
-                };
-                check("MONOCULAR_SWITCH_AFFECTS_DEPTH_VIEW_AND_CLOUD_SAME_FRAME",monoButton&&monoButton->isChecked()
-                    &&waitForZ(-500)&&assistCanvas&&assistCanvas->property("frameId").toInt()==123
-                    &&!correctedImage.isNull()&&assistCanvas->colorAt(0,0)!=correctedImage.pixel(0,0)
-                    &&status&&status->text().contains(pointCloudText("monocular depth")));
-                check("MONOCULAR_PREVIEW_SAVES_CORRECTED_METRES_AND_IMAGE",
-                    window.depth()->snapshot().metresFloat32LE==depth&&window.depth()->snapshot().depthImage==correctedImage);
-                displayMode->setCurrentIndex(1);
-                check("MONOCULAR_MESH_USES_SAME_UNADJUSTED_Z",waitForTriangles(fullMeshTriangles)&&meshPosition(0).z()==-500.f);
-                if(monoButton)monoButton->click();
-                displayMode->setCurrentIndex(0);
-                check("MONOCULAR_SWITCH_RESTORES_SAME_CORRECTED_FRAME",monoButton&&!monoButton->isChecked()
-                    &&waitForZ(-1000)&&assistCanvas&&assistCanvas->colorAt(0,0)==correctedImage.pixel(0,0));
-
-                check("NO_RETIRED_SPLIT_CORRECTION_CONTROL", !window.depth()->findChild<QPushButton *>("depthSplitCorrection"));
-
-                dock->setFloating(true);
-                settle(100);
-                check("POINT_CLOUD_ASSISTED_FLOAT_PRESERVES_GEOMETRY_AND_ZOOM", waitForCount(pixels)
-                    && cameraDistance() == manualDistance && view->property("orbitYaw").toInt() == 42
-                    && view->property("depthPointDiameter").toDouble() == 4.2);
-                dock->setFloating(false);
-                dock->raise();
-                settle(60);
-                if (reset)
-                    reset->click();
-                check("POINT_CLOUD_RESET_VIEW", view
-                    && view->property("orbitYaw").toInt() == -25 && checkFixedView()
-                    && diameter->value() == 4.2 && colorMaximum->value() == 2.0);
-
-                displayMode->setCurrentIndex(1);
-                const bool meshBeforeClear = waitForTriangles(fullMeshTriangles);
-                emit session->assistDepthSnapshotReady(depth, metadata, {});
-                emit session->assistDepthStreamCleared("Expired");
-                settle(75);
-                check("POINT_CLOUD_ASSISTED_CLEAR_INVALIDATES_CONVERSION", meshBeforeClear && count() == 0
-                    && triangleCount() == 0 && !meshVisible());
-
-                emit session->assistDepthSnapshotReady(depth, metadata, {});
-                const bool runningMesh = waitForTriangles(fullMeshTriangles);
-                QByteArray newerDepth(profile.depthBytes(), Qt::Uninitialized);
-                for (int i = 0; i < pixels; ++i)
-                    qToLittleEndian<quint32>(0x3f400000, newerDepth.data() + i * 4);
-                emit session->assistDepthSnapshotReady(depth, metadata, {});
-                emit session->assistDepthSnapshotReady(newerDepth, metadata, {});
-                const bool captureWasStopped = session->userStopped();
-                const double resumeDistance = cameraDistance();
-                pause->click();
-                const bool stoppedCloud = pause->isChecked() && view->isHidden() && status
-                    && status->text() == pointCloudText("Point cloud stopped")
-                    && pause->text() == pointCloudText("Resume point cloud");
-                auto pausedMetadata = metadata;
-                pausedMetadata["frame_id"] = 126;
-                emit session->assistDepthSnapshotReady(newerDepth, pausedMetadata, {});
-                QImage video(64, 36, QImage::Format_RGB32);
-                video.fill(Qt::yellow);
-                emit session->cameraFrameReady(video);
-                dock->hide();
-                dock->show();
-                dock->raise();
-                settle(150);
-                const auto *cameraPage = window.findChild<RtspCameraPage *>();
-                check("POINT_CLOUD_STOP_DISCARDS_ASSISTED_WORK", runningMesh && stoppedCloud
-                    && pause->isChecked() && view->isHidden() && count() == 0 && triangleCount() == 0 && !meshVisible());
-                check("POINT_CLOUD_STOP_KEEPS_SHARED_DEPTH_AND_VIDEO", assistCanvas && cameraPage
-                    && assistCanvas->property("frameId").toInt() == 126 && window.depth()->snapshot().metresFloat32LE == newerDepth
-                    && cameraPage->currentFrameImage() == video && session->currentImagingScheme() == visibleHostScheme
-                    && session->userStopped() == captureWasStopped);
-                pause->click();
-                settle(150);
-                check("POINT_CLOUD_RESUME_ASSISTED_WAITS_FOR_FRESH_FRAME", !pause->isChecked() && view->isVisible()
-                    && triangleCount() == 0 && count() == 0 && cameraDistance() == resumeDistance);
-                displayMode->setCurrentIndex(0);
-                emit session->assistDepthSnapshotReady(depth, metadata, {});
-                const bool converted = waitForCount(pixels);
-                check("POINT_CLOUD_RESUME_ASSISTED_PROJECTS_NEW_FRAME", converted
-                    && depthInstances->instancePosition(0).z() == -1000.f);
-                session->selectImagingScheme("board_native_tof48", {});
-                emit session->assistDepthSnapshotReady(depth, metadata, {});
-                settle(75);
-                check("POINT_CLOUD_NATIVE_MODE_CLEARS_AND_IGNORES_ASSISTED_DEPTH", converted && waitForCount(0));
-                check("POINT_CLOUD_SCHEME_SWITCH_KEEPS_SHARED_JET_RANGE", colorMinimum->isVisible()
-                    && colorMinimum->value() == .2 && colorMaximum->value() == 2.0 && !applyRange->isEnabled());
+                reset->click();
+                check("POINT_CLOUD_RESET_VIEW", view->property("orbitYaw").toInt() == -25 && checkFixedView());
                 session->selectImagingScheme(visibleHostScheme, {});
                 emit session->streamCleared();
             }
@@ -1198,9 +960,17 @@ int runPortSmokeTests(SensorMainWindow &window,LanguageManager &language,const Q
     window.findChild<QAction *>("actionRenderStandard")->trigger();
     check("STANDARD_RENDERING_WORKS",!rendering->lowCostRendering());rendering->setLowCostRendering(prior);
     language.setLanguage(LanguageManager::Language::SimplifiedChinese);settle(100);
-    check("CHINESE_WINDOW",window.windowTitle()==QStringLiteral("触想工作台（内测版）"));
+    check("CHINESE_WINDOW",window.windowTitle()==expectedTitle);
     auto *pointCloudDock = window.findChild<QDockWidget *>("pointCloudDock");
     check("CHINESE_POINT_CLOUD_MENU", pointCloudDock && pointCloudDock->toggleViewAction()->text() == QStringLiteral("点云"));
+    if (hostAvailable) {
+        const auto selected = session->currentImagingScheme();
+        session->selectImagingScheme(visibleHostScheme, {});
+        const auto *status = pointCloudDock ? pointCloudDock->findChild<QLabel *>("rvPointCloudStatus") : nullptr;
+        check("CHINESE_POINT_CLOUD_HOST_UNSUPPORTED_NOTICE", status
+            && status->text() == QStringLiteral("暂不支持上位机辅助推理点云显示"));
+        session->selectImagingScheme(selected, {});
+    }
     auto *colorMode = pointCloudDock ? pointCloudDock->findChild<QComboBox *>("rvPointCloudColorMode") : nullptr;
     check("CHINESE_POINT_CLOUD_COLOR_MODES", colorMode && colorMode->itemText(0) == QStringLiteral("固定 Z 色标")
         && colorMode->itemText(1) == QStringLiteral("动态＋直方图均衡"));
@@ -1217,7 +987,7 @@ int runPortSmokeTests(SensorMainWindow &window,LanguageManager &language,const Q
     if(aboutDialog){
         for(auto *label:aboutDialog->findChildren<QLabel *>()){
             aboutName |= label->text()==QStringLiteral("触想工作台");
-            aboutVersion |= label->text()==QStringLiteral("v1.0 · 内测版");
+            aboutVersion |= label->text()==expectedVersion;
             aboutLogo |= !label->pixmap().isNull();
         }
     }
@@ -1609,7 +1379,7 @@ int runPortSmokeTests(SensorMainWindow &window,LanguageManager &language,const Q
             &&status->text()==QCoreApplication::translate("RvDeviceManagerDialog","USB connection is unavailable in offline mode."));
     }
     language.setLanguage(LanguageManager::Language::English);settle(100);
-    check("ENGLISH_WINDOW",window.windowTitle()==QStringLiteral("触想工作台（内测版）"));
+    check("ENGLISH_WINDOW",window.windowTitle()==expectedTitle);
     check("ENGLISH_ABOUT_MENU",about && about->text()=="About");
     check("ENGLISH_IMAGING_SCHEMES",models&&models->count()==3&&models->itemText(0)=="Host-assisted inference"
         &&models->itemText(1)=="Board inference"&&models->itemText(2)=="Board inference high accuracy");

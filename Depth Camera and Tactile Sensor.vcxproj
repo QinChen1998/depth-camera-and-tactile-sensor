@@ -61,6 +61,9 @@
   <ItemDefinitionGroup Condition="'$(DctsInstallerBuild)' == 'true'">
     <ClCompile><PreprocessorDefinitions>DCTS_INSTALLER_BUILD;%(PreprocessorDefinitions)</PreprocessorDefinitions></ClCompile>
   </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(DctsInstallerBuild)' == 'true' and '$(DctsResearchInstaller)' == 'true'">
+    <ClCompile><PreprocessorDefinitions>DCTS_RESEARCH_INSTALLER_BUILD;%(PreprocessorDefinitions)</PreprocessorDefinitions></ClCompile>
+  </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)' == 'Debug'">
     <ClCompile>
       <Optimization>Disabled</Optimization>

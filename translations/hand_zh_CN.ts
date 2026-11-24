@@ -12,7 +12,7 @@
     <message><source>Equalize depths from 0.10 to 10.00 m in each frame. Colors can vary across frames.</source><translation>逐帧均衡 0.10–10.00 m 的有效深度。同一深度的颜色可能随帧变化。</translation></message>
     <message><source>Show monocular depth only</source><translation>仅显示单目深度</translation></message>
     <message><source>Restore corrected depth</source><translation>恢复校正深度</translation></message>
-    <message><source>Show the same frame before ToF correction in the depth map and point cloud.</source><translation>在深度图和点云中查看同一帧的校正前单目结果。</translation></message>
+    <message><source>Show the same depth frame before ToF correction.</source><translation>查看同一帧经 ToF 校正前的深度。</translation></message>
 
     <message><source>Show ToF points</source><translation>显示 ToF 测点</translation></message>
     <message><source>Hide ToF points</source><translation>隐藏 ToF 测点</translation></message>
@@ -3269,8 +3269,10 @@ Range %6 mm (radial) | SNR %7 | slot %8 | Signal %9 | Noise encoded %10</source>
     <message><source>Stop point cloud</source><translation>停止点云</translation></message>
     <message><source>Resume point cloud</source><translation>恢复点云</translation></message>
     <message><source>Point cloud stopped</source><translation>点云已停止</translation></message>
-    <message><source>monocular depth</source><translation>单目深度</translation></message>
-    <message><source>assisted depth</source><translation>辅助深度</translation></message>
+    <message>
+      <source>Point cloud display is currently unavailable for host-assisted inference.</source>
+      <translation>暂不支持上位机辅助推理点云显示</translation>
+    </message>
     <message>
       <source>Points</source>
       <translation>点状</translation>
@@ -3305,10 +3307,6 @@ Range %6 mm (radial) | SNR %7 | slot %8 | Signal %9 | Noise encoded %10</source>
     </message>
 
     <message>
-      <source>%1×%2 %3 · %4 triangles</source>
-      <translation>%1×%2 %3 · %4 个三角面</translation>
-    </message>
-    <message>
       <source>48×32 ToF · %1 triangles</source>
       <translation>48×32 ToF · %1 个三角面</translation>
     </message>
@@ -3318,10 +3316,6 @@ Range %6 mm (radial) | SNR %7 | slot %8 | Signal %9 | Noise encoded %10</source>
     <message>
       <source>Reset view</source>
       <translation>重置视角</translation>
-    </message>
-    <message>
-      <source>Point diameter</source>
-      <translation>点径</translation>
     </message>
     <message>
       <source>Z color range</source>
@@ -3360,10 +3354,6 @@ Range %6 mm (radial) | SNR %7 | slot %8 | Signal %9 | Noise encoded %10</source>
       <translation>48×32 ToF · %1 / %2 点</translation>
     </message>
     <message>
-      <source>%1×%2 %3 · %4 / %5 points</source>
-      <translation>%1×%2 %3 · %4 / %5 点</translation>
-    </message>
-    <message>
       <source>Select an imaging scheme in Depth Map.</source>
       <translation>请在「深度图」中选择成像方案。</translation>
     </message>
@@ -3372,16 +3362,8 @@ Range %6 mm (radial) | SNR %7 | slot %8 | Signal %9 | Noise encoded %10</source>
       <translation>请在「深度图」或「摄像头原视频」中开始采集。</translation>
     </message>
     <message>
-      <source>Waiting for a fresh assisted depth frame...</source>
-      <translation>等待新的辅助深度帧…</translation>
-    </message>
-    <message>
       <source>Waiting for a fresh 48×32 ToF frame...</source>
       <translation>等待新的 48×32 ToF 帧…</translation>
-    </message>
-      <message>
-      <source>%1×%2 assisted depth · %3 / %4 points</source>
-      <translation>%1×%2 辅助深度 · %3 / %4 点</translation>
     </message>
 </context>
   <context>

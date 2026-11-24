@@ -41,7 +41,7 @@ private:
     void sendLatest();
     void readOutput();
     bool acceptResponse(const QJsonObject &response,const QByteArray &depth,QElapsedTimer &responseClock);
-    RvAssistFusion::Result correctDepthPro2(const QByteArray &depth,const Input &current,QJsonObject &metadata,QByteArray &diagnostic);
+    RvAssistFusion::Result makeMonocularResult(const QByteArray &depth,const Input &current,QJsonObject &metadata,QByteArray &diagnostic);
     void handleTimeout();
     void fail(const QString &reason);
     QString m_token;
@@ -54,7 +54,6 @@ private:
     qint64 m_lastHdTofTimestampNs=0;
     QByteArray m_lastHdTofSamples;
     QJsonObject m_lastHdTofContext;
-    RvAssistFusion::ScaleContinuity m_depthPro2Scale;
     QJsonObject m_dropReasons;
     double m_lastGuiPublishMs=0;
     bool m_enabled=false,m_ready=false,m_busy=false,m_stopping=false,m_failed=false,m_destroying=false,m_cancelling=false;

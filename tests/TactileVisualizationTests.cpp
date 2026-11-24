@@ -1465,7 +1465,7 @@ int runTactileVisualizationTests(const QString &path)
         check(!widget.frame().valid&&!widget.m_adapter->valid()&&widget.history().samples().empty()
             &&widget.m_pointTable->rowCount()==(type==2?16:20)&&widget.m_pointTable->item(0,1)->text()=="--"
             &&unavailable&&unavailable->property("visible").toBool()
-            &&unavailable->property("text").toString()==QCoreApplication::translate("TactileView","Device disconnected / data unavailable"),
+            &&unavailable->property("text").toString()==TactileCanvas::tr("Device disconnected / data unavailable"),
             "every disconnected model keeps geometry with the unavailable message and no manufactured readings");
     }
     check(widget.refreshCount()==idleRefreshes,"idle view does not produce frames or curve samples");

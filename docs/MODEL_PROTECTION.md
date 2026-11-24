@@ -1,6 +1,6 @@
 # 模型保护与安装包约定
 
-当前本地上位机运行 Depth Pro 2-S 的研究引擎，许可随本机 `DepthPro2Runtime/` 保存。当前安装构建收集 SDK 和板端采集支持。本文其余内容记录退役的 UniDepth 模型保护与历史交付。
+当前本地上位机运行 Depth Pro 2-S 的研究引擎，许可随本机 `DepthPro2Runtime/` 保存。普通安装包收集 SDK 和板端采集支持。科研安装包可单独启用受保护的 Depth Pro 2-S 运行包。下文的 ORT 路径记录退役的 UniDepth 模型保护与历史交付。
 
 用户已于 2026 年 11 月 2 日确认：未来制作客户安装包时采用原生 DLL、AES-256-GCM 加密模型和 ORT 内存加载。目标是防止客户从安装目录直接复制得到可用的明文模型，模型随上位机提供使用。防蒸馏和强对抗内存提取不属于本次目标，设备授权、TPM 或云端服务也不是当前既定前提。
 
@@ -127,19 +127,26 @@ Release/Debug 各通过 28 个合成场景，其中 19 份有效深度、单目�
 
 ## 安装包构建
 
-在 PowerShell 7 中执行，使用 VS 2022 v143、Qt 6.11.1 MSVC x64、匹配的 Qt 源码/许可材料及 Inno Setup 6.7.3。默认读取已部署到 `x64/Release/platform-tools` 的 ADB，也可通过 `-PlatformTools` 指定来源。通过 `-VlcRoot` 指定已校验的 VideoLAN VLC 3 x64 解压目录，托管 H.265 使用其中的 libVLC 和插件。构建目录使用 `x64/validation/` 下的新子目录。
+在 PowerShell 7 中执行，使用 VS 2022 v143、Qt 6.11.1 MSVC x64、匹配的 Qt 许可材料、Inno Setup 6.7.3 和简体中文 `.isl`。构建脚本使用项目固定的 CXWL Depth SDK 2.2.2 Windows x64 ZIP。默认从 `x64/Release/platform-tools` 收集 ADB，也可通过 `-PlatformTools` 指定 SDK 解包后的 `SDK/bin/platform-tools`。`-VlcRoot` 指向经校验的 VideoLAN VLC 3 x64 解压目录。每次从当前源码打包时在 `x64/validation/` 下使用一个新目录。
 
 ```powershell
-./tools/installer/build.ps1 -BuildDirectory (Join-Path $PWD 'x64/validation/installer_release') -QtRoot E:/Qt/6.11.1/msvc2022_64 -VlcRoot C:/path/to/vlc-3.0.24 -TensorRtRuntime ./UniDepthRuntimeRgb672VgaFP16RTX -CompatibleRuntime ./UniDepthRuntimeCompatible -Version 1.1.8 -Iscc 'C:/path/to/ISCC.exe' -ChineseMessages 'C:/path/to/Languages/ChineseSimplified.isl'
-./tools/installer/prepare-sandbox.ps1 -BuildDirectory (Join-Path $PWD 'x64/validation/installer_release')
+$work = Join-Path $PWD 'x64/validation/installer_release'
+./tools/installer/build.ps1 -BuildDirectory $work -QtRoot E:/Qt/6.11.1/msvc2022_64 -VlcRoot C:/path/to/vlc-3.0.24 -Version 1.1.8 -Iscc 'C:/path/to/ISCC.exe' -ChineseMessages 'C:/path/to/Languages/ChineseSimplified.isl'
+./tools/installer/prepare-sandbox.ps1 -BuildDirectory $work -RunName clean -SmokeOnly
 ```
 
-复用已暂存载荷时，构建脚本校验成像菜单及两个桌面程序的 SHA256。旧载荷需从当前源码重新暂存。
+已用 `-StageOnly` 暂存同一版源码时，可以用 `-UseStagedPayload` 编译安装器。脚本会复核成像菜单、主程序 SHA256 和板端采集清单。源码更新后使用新目录重新打包。
 
-安装程序命名为 `触想工作台-内测版-v<版本>-x64.exe`，并与 SHA256 校验文件一同保存在构建目录的 `delivery/`。只从该目录选取交付文件。`private_build/` 是内部构建目录，包含明文副本、当次生成的密钥材料和中间产物。安装版固定要求保护清单，安装后的用户配置位于 `%LOCALAPPDATA%/DepthCameraAndTactileSensor/config`。普通开发版继续读本项目独立配置和明文模型包。
+安装程序和 SHA256 文件保存在构建目录的 `delivery/`，安装器名为 `触想工作台-内测版-v<版本>-x64.exe`。当前载荷包含桌面程序、SDK 和板端采集支持。Depth Pro 2-S 使用独立的本机研究运行包。缺少该运行包时，首次启动使用「板端推理」。用户配置保存在 `%LOCALAPPDATA%/DepthCameraAndTactileSensor/config`。
 
-安装目录和主程序名可包含中文。上位机推理通过随包的 `DctsInferenceWorker.exe` 启动，优先使用可读的 ASCII 路径或目录别名。别名不可用时，将所需 DLL、程序和加密模型运行文件复制到当前用户的私有 ASCII 临时目录。推理进程退出后清理临时文件和别名。
+打开生成的 `DctsCleanInstall-clean.wsb`，在 Windows 沙盒中验证静默安装、启动中文主窗口、正常退出和卸载。结果、截图和安装卸载日志保存在 `sandbox-results-clean/`。沙盒关闭网络、vGPU 和剪贴板，只映射安装输入和证据输出目录。
 
-安装版和默认开发版均使用 ORT 1.31.1 和 TensorRT-RTX EP。安装版自带用户态推理 DLL，主机需要受支持的 Ampere 或更新的 NVIDIA RTX 显卡和兼容 CUDA 12.9 的驱动。显卡、驱动或模型不可用时，上位机显示原因，提示修复上位机运行文件及显卡环境。
+## 非商业科研安装包
 
-打开生成的 `DctsCleanInstall.wsb` 执行离线 Windows Sandbox 验证，结果写入 `sandbox-results/`。TensorRT-RTX 加密加载及上位机深度输出需另在配备兼容 NVIDIA 驱动的主机验证。串口驱动、NVIDIA 驱动和板端服务按实际设备配置。对外分发前核对 Qt Quick 3D、TensorRT-RTX、CUDA 等第三方依赖的授权覆盖。
+Apple Depth Pro 2-S 的模型和转换引擎仅用于其许可规定的非商业科学研究与学术开发。科研版的安装界面附带 Apple 模型许可，安装目录同时包含模型归属及转换说明和 NVIDIA 运行库的许可。科研版使用独立安装项和 `%LOCALAPPDATA%/DepthCameraAndTactileSensorResearch/config`。
+
+以 `tools/depthpro2/build.ps1` 组装现有 480×640 引擎时，增加 `-ProtectForResearch`，并通过 `-TensorRtLicense` 和 `-CudaLicense` 指定对应运行库的许可原件。将 `-OutputDirectory` 指向新构建目录中的 `protected-runtime`。打包器读取引擎副本，逐字节回验后保留密文，并将每次生成的密钥头与编译产物放在同级 `private_build/`。
+
+在 `tools/installer/build.ps1` 中用 `-ResearchRuntime` 指定 `protected-runtime`，即可生成 `触想工作台-v<版本>-x64.exe`。全新安装默认使用 `Program Files/DCTS/触想工作台`，与普通安装包分开。覆盖升级沿用已有安装目录。安装版校验运行包及清单，启动 TensorRT worker 后由原生 DLL 认证解密、核对引擎指纹并从内存反序列化。会话创建后清零临时明文。密文缺失或认证失败时拒绝加载。通过 `-StageOnly` 暂存后，可用相同的 `-ResearchRuntime` 参数和 `-UseStagedPayload` 编译安装器。
+
+用 `prepare-sandbox.ps1 -SmokeOnly` 验证许可确认页、安装和卸载。TensorRT 推理需在兼容 NVIDIA 显卡上另测。AES-GCM 保护安装目录中的引擎文件，运行时客户端仍须持有解密后的引擎数据。

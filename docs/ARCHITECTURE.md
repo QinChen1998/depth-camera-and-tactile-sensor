@@ -1,6 +1,6 @@
 # 项目架构
 
-上位机由 `RvAssistDepth` 管理独立的 Depth Pro 2-S TensorRT worker。应用负责同帧配对、全局尺度校正、诊断和加载错误反馈。
+上位机由 `RvAssistDepth` 管理独立的 Depth Pro 2-S TensorRT worker。应用负责发布原始单目深度、同帧配对、诊断和加载错误反馈。
 
 本项目是独立的 Windows x64 传感器上位机，主窗口提供磁触觉、深度图、点云和摄像头原视频。dToF 运行预设由成像方案选择。本文描述当前日常版本的架构。当前保护实现及安装包约定见 [模型保护](MODEL_PROTECTION.md)，维护约束见工作区的 AGENTS.md（仅本地保存）。
 
@@ -27,7 +27,7 @@ flowchart TD
     Window --> Session[RvSessionController 共享成像会话]
     Session --> Camera[原视频页面]
     Session --> Depth[深度页面]
-    Session --> PointCloud[辅助深度和原生 ToF 点云]
+    Session --> PointCloud[板端 48×32 原生 ToF 点云]
     Session --> Tuner[dToF 调参控制器]
     Session --> Sdk[DepthSdkClient 与 SDK DLL]
     Sdk --> Board[设备端服务与传感器]
@@ -52,13 +52,13 @@ flowchart TD
 | `sensors/RvAssistDepth.*` | 原生模型会话、worker IPC、模型输入方向、预测逆恢复和融合调用 |
 | `sensors/RvAssistFusion.*`、`RvDepthDiagnostic.*`、`RvDepthCoverage.*` | 米制融合、尺度连续性、校正点和同帧诊断 |
 | `sensors/RvDepthView.*`、`DepthMapWidget.*`、`RtspCameraPage.*` | 深度与视频显示、悬停数值、显示设置和快照 |
-| `sensors/RvPointCloudWidget.*`、`RvPointCloudCanvas.*` | 辅助深度和原生 ToF 反投影、点云显示和视角操作 |
+| `sensors/RvPointCloudWidget.*`、`RvPointCloudCanvas.*` | 原生 ToF 投影、点云显示和视角操作 |
 | `sensors/RvDeviceStore.*`、`RvDeviceManagerDialog.*` | 受信任设备档案、固定默认标定和输入方向 |
 | `sensors/RvTunerController.*`、`RvTunerWidget.*`、`RvTunerProtocol.*` | 独占调参、异步操作、停止、长期参数保存 |
 | `RvControlWorker.cpp`、`RvControlProtocol.*` | 原生 libssh2/OpenSSL 控制、身份校验与板端服务操作 |
 | `RuntimeDiscovery.*` | 应用根目录、运行时覆盖路径、worker 清单和依赖校验 |
 
-点云与深度图共享成像会话。板端档订阅 `tofFrameReady`，通过 F6 GEO2 射线和相机平移得到原生测点的 XYZ。上位机辅助推理档订阅 `assistDepthSnapshotReady`，用 480×640 相机 Z 和对应内参逐像素反投影。后台一次转换一帧，转换期间保留最新待处理帧。Qt Widgets 视口用深度缓冲绘制彩色点与三角网格，上位机点径按屏幕像素设置，Z 色标使用点云自己的设置。两种数据源都使用 X 向右、Y 向上、前方为负 Z 的场景坐标。停采、切档或过期时清空数据并保留视角。
+点云与深度图共享成像会话。两个板端档的点云都从 `tofFrameReady` 取得 48×32 原生帧，通过 F6 GEO2 射线和相机平移得到原生测点的 XYZ。Qt Widgets 视口用深度缓冲绘制彩色点与三角网格，场景使用 X 向右、Y 向上、前方为负 Z 的坐标。选择上位机辅助推理时，点云页清屏并显示支持范围提示。停采、切档或过期时清空数据并保留视角。
 
 `DctsDepthPro2Worker.exe` 通过二进制 IPC 接收 RGB，检查引擎指纹及张量布局。 `RuntimeDiscovery::NativeWorkerResult` 返回原生 `RvControlWorker.exe` 的路径和校验错误。各子进程单独配置 DLL 搜索路径。
 
@@ -82,15 +82,15 @@ flowchart TD
 
 `RvCameraStream` 从原始 2304×1296 视频应用 F6 校正表，取校正网格中 `(156,12,360,480)` 的 ToF 重叠区域，等比采样到 480×640。RGB 输入张量为 `[1,3,640,480]`，米制相机 Z 输出为 `[1,640,480]`。虚拟相机内参为 `fx=fy=513.580247`、`cx=239.5`、`cy=319.5`。
 
-输入朝向由设备管理的设置决定。0°／180° 输入处理和模型输出逆恢复成对运行，独立于界面的画面旋转。F6 射线和相机平移投影到同一竖幅网格，主机使用最新合格 ToF 测量计算全局尺度。深度图、配对 RGB、ToF 测点、点云和快照跟随同一帧及同一代次。
+输入朝向由设备管理的设置决定。0°／180° 输入处理和模型输出逆恢复成对运行，独立于界面的画面旋转。F6 射线和相机平移投影到同一竖幅网格供诊断对照。深度图、配对 RGB、ToF 测点和快照跟随同一帧及同一代次。
 
-RGB 与 ToF 的软件配对总预算为 200 ms。复用还核对原始测量的时间戳、样本与身份。没有合格测量时沿用同代次最近可靠尺度或单目预测。使用历史尺度时测点及参与校正的列表为空。
+RGB 与 ToF 的软件配对总预算为 200 ms。复用还核对原始测量的时间戳、样本与身份。上位机按原始相机 Z 发布深度，尺度固定为 1，参与校正的测点列表为空。
 
 ## SDK 采集与板端准入
 
 设备枚举、USB 登记、选定设备、连接、停采、修复和双绿网格调用 SDK 2.2.2 的公开 C ABI。自动发现将 SDK 的 USB 检查 ID 传给连接请求，停止会撤销待执行的确认。成像共用一个 SDK 会话。
 
-普通和高精度板端档请求 mode24 和 mode25。两档沿用 SDK 的 1200K 出厂默认值和原有的工程调参保留策略。原生深度通过扩展回调取得径向米制数据、SNR 和有效图，重建测量采集和点云需要的同帧距离码。SDK 将缺测径向距离置零。使用本项目已有的 F6 射线和 RGB 校正表进行点云投影与模型校正。
+普通和高精度板端档请求 mode24 和 mode25。两档沿用 SDK 的 1200K 出厂默认值和原有的工程调参保留策略。原生深度通过扩展回调取得径向米制数据、SNR 和有效图，重建测量采集和点云需要的同帧距离码。SDK 将缺测径向距离置零。F6 射线和 RGB 校正表用于点云投影及配对测点对照。
 
 SDK 回调的 RGB 解码时间属于主机单调时钟。ToF 采集时间属于板端单调时钟。主机从 ToF 请求往返和板端帧龄估计 ToF 在主机时钟的区间，再选择同代次的合格测量。诊断保留 SDK 配对来源。这个时间窗口用于软件融合，RGB 曝光同步需要单独的实测依据。
 
@@ -98,9 +98,9 @@ SDK 回调的 RGB 解码时间属于主机单调时钟。ToF 采集时间属于�
 
 原视频底栏的画面旋转联动原视频与深度图。两个原生 ToF 档位另有独立的“输入角度”按钮，默认额外顺时针 90°，允许 0–359°并保存；该角度只改变画布呈现，模型输入、标定、原生数组与保存均使用原网格。`RvDepthView` 仅对启用原生角度的画布做任意角度适配与悬停逆变换。
 
-深度图底栏默认使用「固定色标」，范围为 0.01–11 m，最小值须小于最大值，点击「应用」生效。「动态＋直方图均衡」复用点云的逐帧 Jet 着色算法，用于深度图预览。深度图和点云各自保存上色方式。保存的深度图使用固定色标和校正后的米制数据。
+深度图底栏默认使用「固定色标」，范围为 0.01–11 m，最小值须小于最大值，点击「应用」生效。「动态＋直方图均衡」复用点云的逐帧 Jet 着色算法，用于深度图预览。深度图和点云各自保存上色方式。保存的深度图使用固定色标和当前模式输出的米制数据。
 
-`RvDepthView::presentationImage()` 可以使用经过同帧验证的预测补充 dToF 几何视场外的显示。深度图的「仅显示单目深度」让深度图和点云同时选用同帧 `mono_reasons_v1` 中的未校正预测。`snapshotImage()`、`depthAt()`、浮点数组和普通保存使用校正后的米制数组和掩码。
+`RvDepthView::presentationImage()` 可以使用经过同帧验证的预测补充 dToF 几何视场外的显示。`snapshotImage()`、`depthAt()`、浮点数组和普通保存使用输出帧的米制数组和掩码。
 
 原视频和深度的启停与重连调用同一个设备会话。自动启动要求受信任设备、原生采集程序和所选会话预设通过校验。USB 首次部署及修复校验同次启动身份、标定、驱动摘要、采集占用和原生采集能力，并保留原厂启动配置与回滚。工程调参控制器继续负责独占、异步停止和退出等待。
 

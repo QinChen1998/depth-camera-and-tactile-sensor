@@ -19,7 +19,7 @@ USB 启动与新板接入修复的证据目录为 `x64/validation/usb_startup_20
 
 | 标志 | 覆盖范围 |
 |---|---|
-| `port-ui-smoke-test` | 四个模块、成像入口、B 策略、单目深度图与点云联动、单帧点云替换、米制快照、点云坐标、色标和清屏 |
+| `port-ui-smoke-test` | 四个模块、成像入口、B 策略、深度按钮显隐、上位机点云提示、两档板端点云、米制快照、点云坐标、色标和清屏 |
 | `rv-tuner-test` | 调参协议、互斥、异步停止、板端模式、Native16 分片与同帧校验 |
 | `tactile-serial-test` | 串口协议、型号、零点、失败与恢复 |
 | `tactile-visualization-test` | 触觉显示、面板可见性、选择、曲线和断开 |
@@ -30,7 +30,7 @@ USB 启动与新板接入修复的证据目录为 `x64/validation/usb_startup_20
 
 脚本清除继承的 RV/DCTS/Python/Qt 覆盖，强制 `RV_TEST_OFFLINE_ONLY=1`，TEMP/TMP 指向本轮输出的 `tmp/`。调参测试只使用本机 TCP 回环；需要允许本机回环连接，不会打开真实设备。连接失败/超时不能冒充协议拒绝通过负例。QtMsBuild 需要读取本机 Qt 注册表；访问被沙箱拒绝时应修正运行环境，不改模型或设备参数。
 
-`--point-cloud-live-validation <绝对报告.json>` 使用已登记的 RV1103 依次运行 480×640 上位机辅助推理、48×32 普通和高精度档，核对辅助深度帧的标定网格、原生同帧有效点数、Qt Widgets 绘制、点径、色标、滚轮和停采清屏。它使用与成像切换专项相同的设备身份及授权环境变量，保存计数、状态及点云视口截图。
+`--point-cloud-live-validation <绝对报告.json>` 使用已登记的 RV1103 依次运行上位机辅助推理、48×32 普通和高精度档，核对上位机档的点云提示与深度帧，以及板端档的同帧有效点数、Qt Widgets 绘制、滚轮和停采清屏。它使用与成像切换专项相同的设备身份及授权环境变量，保存计数和状态。
 
 给 `--host-assist-live-validation` 设置 `DCTS_HOST_DIAGNOSTIC_DIRECTORY` 后，专项核对测点显示、配对 RGB 对照、10 秒录制和回放。指定的本地目录将包含 RGB 和测量数据。
 
@@ -77,7 +77,7 @@ python tools/verify_port.py --executable x64/Release/DctsInferenceWorker.exe --r
 
 这类测试验证代码与数据合同，不证明实际物理精度、客户显卡性能或设备安装标定。连续尺度平滑使用单调时间；逐字节比较采用固定场景，不能把不同墙钟节奏下的长流输出直接当作同一帧比较。
 
-原生控制 worker 可单独运行 `x64/rv_control/<配置>/runtime/RvControlWorker.exe --self-test`。主机异步启动和结果回传入口为 `--rv-assist-path-test <绝对报告.json>`，须设置 `RV_TEST_OFFLINE_ONLY=1`。默认检查 RGB-only 出帧，设置 `DCTS_TEST_REUSE_TOF=1` 检查复用同一份合成原生 ToF 测量。报告同时核对 480×640 网格和单目数据。
+原生控制 worker 可单独运行 `x64/rv_control/<配置>/runtime/RvControlWorker.exe --self-test`。主机异步启动和结果回传入口为 `--rv-assist-path-test <绝对报告.json>`，须设置 `RV_TEST_OFFLINE_ONLY=1`。默认检查纯 RGB 出帧，设置 `DCTS_TEST_REUSE_TOF=1` 检查复用同一份合成原生 ToF 测量。两种情况都要求 480×640 输出与原始单目数据逐字节一致，该帧的 ToF 校正标志为关闭。
 
 首次板端部署脚本由 `tests/test_board_bootstrap.py` 在临时文件系统中实际执行，覆盖其他版本旧驱动、没有旧交付目录、备份、身份绑定、上传损坏拒绝、安装中断回退、固件依赖缺失、已有残留部署和采集占用。Windows 使用 Git Bash，Linux 使用 bash；测试中的系统路径映射到临时目录，不访问真实板卡。与上述 Python 测试入口一起运行。
 
@@ -85,7 +85,7 @@ python tools/verify_port.py --executable x64/Release/DctsInferenceWorker.exe --r
 
 仅验证上位机辅助推理的实机入口为主程序 `--host-assist-live-validation <绝对报告.json>`。先登记实际 USB 设备、核对公钥与标定并保存登录，在运行该进程的环境中显式设置 `DCTS_LIVE_ENABLE=1` 和与登记设备一致的 `DCTS_LIVE_SERIAL`，清除 `RV_TEST_OFFLINE_ONLY`。通过等待进程退出的方式启动，检查退出码与报告的 `passed=true`；PowerShell 直接调用 GUI EXE 时不能把命令立即返回当作测试完成。
 
-专项在 Depth Pro 2-S 上核对 480×640 输入和输出、原生 48×32 测量、TensorRT 引擎身份、同帧配对、ToF 复用、渲染和停采。长期文件摘要用于核对板端设置保存情况。
+专项在 Depth Pro 2-S 上核对 480×640 输入和输出、原生 48×32 测量、TensorRT 引擎身份、同帧配对、ToF 复用、渲染和停采。上位机发布的深度必须与同帧原始单目结果逐字节一致。长期文件摘要用于核对板端设置保存情况。
 
 2026-11-07 本轮首次部署及主机实测证据位于 `x64/validation/fresh_board_setup_20261107/`。当前设备通过普通 USB 一键连接完成全量安装（`usb-live-REDACTED_DEVICE.json`），不再要求旧 V1.2.0 驱动哈希。原厂摄像头退出后遗留的 DHCP 进程仅在身份、参数、启动时间、RTSP 监听和摄像头 DMA 句柄均匹配时接管；原始摄像头配置及驱动已备份。
 

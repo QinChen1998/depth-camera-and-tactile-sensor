@@ -38,7 +38,10 @@ int runUsbEnrollmentLiveValidation(SensorMainWindow &,const QString &);
 namespace {
 QString configurationDirectory()
 {
-#ifdef DCTS_INSTALLER_BUILD
+#if defined(DCTS_RESEARCH_INSTALLER_BUILD)
+    return QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation)
+        + "/DepthCameraAndTactileSensorResearch/config";
+#elif defined(DCTS_INSTALLER_BUILD)
     return QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation)
         + "/DepthCameraAndTactileSensor/config";
 #else

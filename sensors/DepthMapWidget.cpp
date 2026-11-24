@@ -270,9 +270,9 @@ DepthMapWidget::DepthMapWidget(QWidget *parent)
     connect(m_rvStop, &QPushButton::clicked, this, [this]{if (m_session) m_session->stop();});
     connect(m_rvReconnect, &QPushButton::clicked, this, [this]{if (m_session) m_session->reconnectNow();});
     layout->addWidget(statusRow);
-    m_diagnosticsRow = new QWidget(this);
-    auto *diagnostics = UiStyle::wrappingRow(m_diagnosticsRow,ImagePresentation::Spacing);
-    m_tofPointsButton = new QPushButton(m_diagnosticsRow);
+    auto *diagnosticsRow = new QWidget(this);
+    auto *diagnostics = UiStyle::wrappingRow(diagnosticsRow,ImagePresentation::Spacing);
+    m_tofPointsButton = new QPushButton(diagnosticsRow);
     m_tofPointsButton->setObjectName("depthPairedTofPoints");
     m_tofPointsButton->setCheckable(true);
     diagnostics->addWidget(m_tofPointsButton);
@@ -280,7 +280,7 @@ DepthMapWidget::DepthMapWidget(QWidget *parent)
         m_assistCanvas->setTofPointsVisible(visible);
         m_tofPointsButton->setText(visible?tr("Hide ToF points"):tr("Show ToF points"));
     });
-    m_pairedRgbButton = new QPushButton(m_diagnosticsRow);
+    m_pairedRgbButton = new QPushButton(diagnosticsRow);
     m_pairedRgbButton->setObjectName("depthPairedRgb");
     m_pairedRgbButton->setCheckable(true);
     diagnostics->addWidget(m_pairedRgbButton);
@@ -289,18 +289,19 @@ DepthMapWidget::DepthMapWidget(QWidget *parent)
         m_pairedRgbButton->setText(visible?tr("Return to depth"):tr("ToF / RGB alignment"));
         updateRvPresentation();
     });
-    m_recordButton = new QPushButton(m_diagnosticsRow);
+    m_recordButton = new QPushButton(diagnosticsRow);
     m_recordButton->setObjectName("depthDiagnosticRecord");
     diagnostics->addWidget(m_recordButton);
     connect(m_recordButton,&QPushButton::clicked,this,&DepthMapWidget::chooseDiagnosticRecordingFolder);
-    m_openRecording = new QPushButton(m_diagnosticsRow);
+    m_openRecording = new QPushButton(diagnosticsRow);
+    m_openRecording->setObjectName("depthOpenRecordingFolder");
     m_openRecording->setEnabled(false);
     diagnostics->addWidget(m_openRecording);
     connect(m_openRecording,&QPushButton::clicked,this,[this] {
         QDesktopServices::openUrl(QUrl::fromLocalFile(m_recordingFolder));
     });
-    m_diagnosticsRow->hide();
-    layout->addWidget(m_diagnosticsRow);
+    diagnosticsRow->hide();
+    layout->addWidget(diagnosticsRow);
     m_recordStatus = new QLabel(this);
     m_recordStatus->setObjectName("depthDiagnosticStatus");
     m_recordStatus->setWordWrap(true);
@@ -384,7 +385,7 @@ void DepthMapWidget::retranslateUi()
     m_colorMaximumLabel->setText(tr("Maximum (m)"));
     m_applyColorRange->setText(tr("Apply"));
     m_saveButton->setText(tr("Save depth map"));
-    m_monocularButton->setToolTip(tr("Show the same frame before ToF correction in the depth map and point cloud."));
+    m_monocularButton->setToolTip(tr("Show the same depth frame before ToF correction."));
     m_monocularButton->setText(m_monocularButton->isChecked()?tr("Restore corrected depth"):tr("Show monocular depth only"));
     m_tofPointsButton->setText(m_tofPointsButton->isChecked()?tr("Hide ToF points"):tr("Show ToF points"));
     m_tofPointsButton->setToolTip(tr("Point centers use the measured depth color. White outlines mark points used to correct this frame."));
@@ -595,7 +596,6 @@ void DepthMapWidget::syncSessionControls()
     if(m_switchUiActive&&(!m_session||m_session->userStopped()))cancelImagingSwitchUi();
     const bool assisting=m_session&&m_session->hostHdAssist()&&m_session->assistDepthEnabled();
     const bool monocular=m_session&&m_session->monocularDisplay();
-    m_monocularButton->setVisible(assisting);
     if(monocular!=m_monocularButton->isChecked()){
         const QSignalBlocker block(m_monocularButton);
         m_monocularButton->setChecked(monocular);
@@ -698,7 +698,6 @@ void DepthMapWidget::updateRvPresentation()
     const bool diagnosticsReady=assisting&&m_depthTabs->currentIndex()==1&&!m_switchUiActive;
     const bool hasFreshRgb=diagnosticsReady&&m_assistCanvas->hasPairedRgb();
     const bool viewingRgb=m_pairedRgbButton->isChecked();
-    m_diagnosticsRow->setVisible(assisting);
     m_recordStatus->setVisible(assisting&&!m_recordStatus->text().isEmpty());
     m_pairedRgbButton->setEnabled(hasFreshRgb||(assisting&&viewingRgb));
     m_tofPointsButton->setEnabled(hasFreshRgb&&!viewingRgb);

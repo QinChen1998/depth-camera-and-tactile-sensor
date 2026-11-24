@@ -31,6 +31,14 @@
 #include <cstddef>
 #endif
 
+namespace {
+#ifdef DCTS_RESEARCH_INSTALLER_BUILD
+const QString WorkbenchEdition;
+#else
+const auto WorkbenchEdition = QStringLiteral("内测版");
+#endif
+}
+
 bool SensorMainWindow::nativeEvent(const QByteArray &eventType,void *message,qintptr *result)
 {
 #ifdef Q_OS_WIN
@@ -195,7 +203,9 @@ void SensorMainWindow::showAbout()
     auto *logo = new QLabel(dialog);
     logo->setPixmap(windowIcon().pixmap(QSize(112, 112), dialog->devicePixelRatioF()));
     auto *name = new QLabel(QApplication::applicationDisplayName(), dialog);
-    auto *version = new QLabel(QStringLiteral("v%1 · 内测版").arg(QApplication::applicationVersion()), dialog);
+    const auto versionText = QStringLiteral("v%1").arg(QApplication::applicationVersion());
+    auto *version = new QLabel(WorkbenchEdition.isEmpty() ? versionText
+        : QStringLiteral("%1 · %2").arg(versionText, WorkbenchEdition), dialog);
 
     auto *layout = new QVBoxLayout(dialog);
     layout->setContentsMargins(32, 24, 32, 24);
@@ -336,7 +346,8 @@ void SensorMainWindow::changeEvent(QEvent *event)
 
 void SensorMainWindow::retranslate()
 {
-    setWindowTitle(QApplication::applicationDisplayName() + QStringLiteral("（内测版）"));
+    const auto name = QApplication::applicationDisplayName();
+    setWindowTitle(WorkbenchEdition.isEmpty() ? name : QStringLiteral("%1（%2）").arg(name, WorkbenchEdition));
     m_tactile->setWindowTitle(tr("Magnetic tactile sensors"));m_depthDock->setWindowTitle(tr("Depth Map"));
     m_pointCloudDock->setWindowTitle(tr("Point Cloud"));
     m_cameraDock->setWindowTitle(tr("Camera raw video"));

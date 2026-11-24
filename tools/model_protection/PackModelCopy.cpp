@@ -4,7 +4,7 @@
 
 int wmain(int argc, wchar_t **argv) {
     try {
-        dcts::require(argc == 4, "Usage: PackModelCopy copied-model.onnx NEW-model.dctsm NEW-private-key-header.h");
+        dcts::require(argc == 4, "Usage: PackModelCopy copied-model-file NEW-model.dctsm NEW-private-key-header.h");
         dcts::SecureBytes original;
         original.bytes = dcts::readFile(argv[1], dcts::MaxModelBytes);
         const auto digest = dcts::sha256(original.bytes.data(), original.bytes.size());

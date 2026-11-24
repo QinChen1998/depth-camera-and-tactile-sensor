@@ -8,7 +8,8 @@ param(
     [switch]$StageOnly,
     [string]$Iscc='',
     [string]$ChineseMessages='',
-    [switch]$UseStagedPayload
+    [switch]$UseStagedPayload,
+    [string]$ResearchRuntime=''
 )
 $ErrorActionPreference='Stop'
 $project=(Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
@@ -20,6 +21,8 @@ if(-not $work.StartsWith($validation+'\',[StringComparison]::OrdinalIgnoreCase))
 }
 if($Version -notmatch '^\d+\.\d+\.\d+(\.\d+)?$'){throw 'Invalid installer version.'}
 $payload=Join-Path $work 'payload'
+$research=[bool]$ResearchRuntime
+$stagedResearchRuntime=Join-Path $payload 'DepthPro2Runtime'
 $exe='触想工作台.exe'
 $desktopFiles=@($exe)
 $imagingSchemes=(Get-Content -LiteralPath (Join-Path $project 'DCTS_APP.json') -Raw | ConvertFrom-Json).imaging_schemes
@@ -44,6 +47,38 @@ function Copy-Relative([string]$Source,[string]$Destination,[string]$Name){
 }
 function Write-Json([string]$Path,$Value){
     $Value | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $Path -Encoding utf8NoBOM
+}
+
+function Read-ProtectedResearchRuntime([string]$RuntimePath){
+    $manifest=Get-Content -LiteralPath (Join-Path $RuntimePath 'runtime.json') -Raw | ConvertFrom-Json -AsHashtable
+    $profile=Get-Content -LiteralPath (Join-Path $project 'sensors/RvCameraView.h') -Raw
+    if($profile -notmatch 'DepthPro2EngineSha="([a-f0-9]{64})"' -or $manifest.engine_sha256 -cne $Matches[1] -or
+       $manifest.schema -ne 1 -or $manifest.backend -cne 'native-tensorrt-fp16' -or
+       $manifest.tensorrt_version -cne '10.16.1.11' -or $manifest.model_protection -cne 'aes-256-gcm'){
+        throw 'The research installer requires the matching AES-GCM protected Depth Pro 2 runtime.'
+    }
+    $files=@('depthpro2-s-480x640-fp16.dctsm','DctsDepthPro2Runtime.dll','DctsDepthPro2Worker.exe',
+        'Qt6Core.dll','cudart64_12.dll','nvinfer_10.dll','nvinfer_plugin_10.dll',
+        'Apple-Model-LICENSE.txt','NVIDIA-TensorRT-LICENSE.txt','NVIDIA-CUDA-LICENSE.txt','Research-Model-NOTICE.txt')
+    if($manifest.files.Count -ne $files.Count -or
+       @(Get-ChildItem -LiteralPath $RuntimePath -Force).Count -ne ($files.Count + 1)){
+        throw 'Unexpected research runtime contents.'
+    }
+    foreach($name in $files){
+        $file=Join-Path $RuntimePath $name
+        if(!(Test-Path -LiteralPath $file -PathType Leaf) -or (Digest $file) -cne $manifest.files[$name]){
+            throw "Research runtime fingerprint mismatch: $name"
+        }
+    }
+    $reader=[IO.BinaryReader]::new([IO.File]::OpenRead((Join-Path $RuntimePath $files[0])))
+    try {
+        $length=$reader.BaseStream.Length
+        if($length -le 96 -or [Text.Encoding]::ASCII.GetString($reader.ReadBytes(8)) -cne "DCTSM01`0" -or
+           $reader.ReadUInt32() -ne 1 -or $reader.ReadUInt32() -ne 96 -or $reader.ReadUInt64() -ne ($length - 96)){
+            throw 'Invalid encrypted engine envelope in the research payload.'
+        }
+    } finally {$reader.Dispose()}
+    return ($files + 'runtime.json')
 }
 
 function Assert-BoardCapturePayload([string]$Worker,$WorkerManifest,[switch]$Staged){
@@ -81,6 +116,10 @@ if($UseStagedPayload){
     if(($receipt.imaging_schemes -join ',') -cne ($imagingSchemes -join ',')){
         throw 'The staged desktop has a different imaging menu. Stage it again from current source.'
     }
+    if([bool]$receipt.research -ne $research){throw 'The staged desktop has a different installer edition.'}
+    if($research -and (Digest (Join-Path $stagedResearchRuntime 'runtime.json')) -cne $receipt.research_manifest_sha256){
+        throw 'The staged research runtime manifest changed.'
+    }
     foreach($name in $desktopFiles){
         $file=Join-Path $payload $name
         if(-not (Test-Path -LiteralPath $file -PathType Leaf) -or (Digest $file) -ne $receipt.files[$name]){
@@ -98,6 +137,10 @@ if(-not $UseStagedPayload){
     $toolchain=Resolve-Vs2022Toolchain -MSBuild $MSBuild -RequireMSBuild -RequireRedist
     $qt=Resolve-Qt611Root -QtRoot $QtRoot -MSBuild $toolchain.MSBuild
     if(-not $PlatformTools){$PlatformTools=Join-Path $project 'x64/Release/platform-tools'}
+    if($research){
+        $ResearchRuntime=(Resolve-Path -LiteralPath $ResearchRuntime).Path
+        $researchFiles=Read-ProtectedResearchRuntime $ResearchRuntime
+    }
     $desktop=Join-Path $work 'desktop'
     New-Item -ItemType Directory -Force -Path $desktop | Out-Null
 
@@ -105,7 +148,8 @@ if(-not $UseStagedPayload){
         (Join-Path $project 'translations/hand_zh_CN.ts'),'-qm',(Join-Path $project 'translations/hand_zh_CN.qm'))
     Invoke-Native $toolchain.MSBuild @(
         (Join-Path $project 'Depth Camera and Tactile Sensor.sln'),'/t:Build','/p:Configuration=Release','/p:Platform=x64',
-        "/p:QtInstall=$qt",'/p:DctsInstallerBuild=true','/p:NativeWorkersBuild=true',"/p:OutDir=$desktop/","/p:IntDir=$work/obj/",
+        "/p:QtInstall=$qt",'/p:DctsInstallerBuild=true',"/p:DctsResearchInstaller=$($research.ToString().ToLowerInvariant())",
+        '/p:NativeWorkersBuild=true',"/p:OutDir=$desktop/","/p:IntDir=$work/obj/",
         '/m:2','/nologo','/v:minimal',"/flp:logfile=$work/build.log;verbosity=normal")
 
     New-Item -ItemType Directory -Path $payload | Out-Null
@@ -139,6 +183,9 @@ if(-not $UseStagedPayload){
 
     Write-Json (Join-Path $payload 'runtime-paths.json') @{
         RV_CONTROL_CPP='rv_control/RvControlWorker.exe'
+    }
+    if($research){
+        foreach($name in $researchFiles){Copy-Relative $ResearchRuntime $stagedResearchRuntime $name}
     }
 
     $notices=Join-Path $payload 'licenses'
@@ -193,28 +240,37 @@ foreach($name in $desktopFiles){
     }
 }
 
-# The research model is prepared locally with tools/depthpro2/build.ps1.
-$legacyInference = Get-ChildItem -LiteralPath $payload -Directory | Where-Object { $_.Name -match '^(UniDepthRuntime.*|DepthPro2Runtime)$' }
-if ($legacyInference) { throw 'Build the installer from a fresh payload without local inference assets.' }
+if($research){$null=Read-ProtectedResearchRuntime $stagedResearchRuntime}
+$legacyInference = Get-ChildItem -LiteralPath $payload -Directory | Where-Object {
+    $_.Name -match '^UniDepthRuntime' -or (!$research -and $_.Name -eq 'DepthPro2Runtime')
+}
+if($legacyInference){throw 'Unexpected local inference assets in the installer payload.'}
 $unexpected=Get-ChildItem -LiteralPath $payload -File -Recurse | Where-Object {
-    $_.Name -match '^(README|AGENTS)(\..*)?$|^(PackModelCopy|DctsInferenceWorker|DctsDepthPro2Worker)\.exe$|model_key_material' -or
+    $_.Name -match '^(README|AGENTS)(\..*)?$|^(PackModelCopy|DctsInferenceWorker)\.exe$|model_key_material' -or
     $_.Name -match '^(onnxruntime_providers_cuda|cudnn.*|cublas.*|cufft.*|nvrtc.*|zlibwapi|RvAssistTensorRtRtx)\.(dll|exe)$' -or
-    $_.Extension -match '^\.(onnx|ovm|rknn|pt|pth|engine|safetensors|dctsm|pdb|ilk|lib|exp|vcxproj|py)$'
+    $_.Extension -match '^\.(onnx|ovm|rknn|pt|pth|engine|safetensors|pdb|ilk|lib|exp|vcxproj|py)$' -or
+    (($_.Extension -eq '.dctsm' -or $_.Name -in 'DctsDepthPro2Worker.exe','DctsDepthPro2Runtime.dll') -and
+        (!$research -or $_.DirectoryName -ne $stagedResearchRuntime))
 }
 if($unexpected){throw "Unexpected payload content: $($unexpected.FullName -join ', ')"}
 if(-not $UseStagedPayload){
     $desktopHashes=@{}
     foreach($name in $desktopFiles){$desktopHashes[$name]=Digest (Join-Path $payload $name)}
-    Write-Json $desktopReceipt @{imaging_schemes=$imagingSchemes;files=$desktopHashes}
+    $desktopSnapshot=@{imaging_schemes=$imagingSchemes;files=$desktopHashes;research=$research}
+    if($research){$desktopSnapshot.research_manifest_sha256=Digest (Join-Path $stagedResearchRuntime 'runtime.json')}
+    Write-Json $desktopReceipt $desktopSnapshot
 }
 if($StageOnly){return}
 if(-not $Iscc -or -not $ChineseMessages){throw 'Provide -Iscc and -ChineseMessages for installer compilation.'}
 $out=Join-Path $work 'delivery'
 New-Item -ItemType Directory -Force $out | Out-Null
 $icon=(Resolve-Path -LiteralPath (Join-Path $project 'assets/cx.ico')).Path
-Invoke-Native (Resolve-Path -LiteralPath $Iscc).Path @(
+$defines=@(
     "/DVersion=$Version","/DOutput=$out","/DPayload=$payload","/DIconPath=$icon",
-    "/DChineseMessages=$((Resolve-Path -LiteralPath $ChineseMessages).Path)",(Join-Path $PSScriptRoot 'Dcts.iss'))
-$installer=Join-Path $out "触想工作台-内测版-v$Version-x64.exe"
+    "/DChineseMessages=$((Resolve-Path -LiteralPath $ChineseMessages).Path)")
+if($research){$defines+='/DResearch'}
+Invoke-Native (Resolve-Path -LiteralPath $Iscc).Path ($defines + (Join-Path $PSScriptRoot 'Dcts.iss'))
+$product=if($research){'触想工作台'}else{'触想工作台-内测版'}
+$installer=Join-Path $out "$product-v$Version-x64.exe"
 "$(Digest $installer) *$(Split-Path $installer -Leaf)" | Set-Content -LiteralPath "$installer.sha256" -Encoding utf8NoBOM
 Get-Item -LiteralPath $installer

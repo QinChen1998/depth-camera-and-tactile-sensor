@@ -39,6 +39,13 @@
       <AdditionalDependencies>Qt6Core.lib;nvinfer_10.lib;nvinfer_plugin_10.lib;cudart.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(DepthPro2ProtectionDir)' != ''">
+    <ClCompile><PreprocessorDefinitions>DCTS_PROTECTED_DEPTHPRO2;%(PreprocessorDefinitions)</PreprocessorDefinitions></ClCompile>
+    <Link>
+      <AdditionalLibraryDirectories>$(DepthPro2ProtectionDir);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>DctsDepthPro2Runtime.lib;%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
+  </ItemDefinitionGroup>
   <ItemGroup><ClCompile Include="DepthPro2Worker.cpp"/></ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets"/>
 </Project>

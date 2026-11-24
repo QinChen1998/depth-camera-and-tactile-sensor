@@ -194,10 +194,21 @@ bool RvAssistDepth::hostModelAvailable(const QString &model)
     if (manifest["schema"] != 1 || manifest["backend"] != QLatin1String(RvCameraView::DepthPro2Backend)
         || manifest["engine_sha256"] != QLatin1String(runtime->engineSha)
         || manifest["tensorrt_version"] != QLatin1String(RvCameraView::DepthPro2TensorRt)) return false;
-    for (const auto *name : {RvCameraView::DepthPro2Worker, runtime->view.graphFile, "Qt6Core.dll",
+    const auto protection = manifest.value("model_protection");
+    const bool protectedEngine = protection == QLatin1String(RvCameraView::DepthPro2Protection);
+    if (!protection.isUndefined() && !protectedEngine) return false;
+#ifdef DCTS_RESEARCH_INSTALLER_BUILD
+    if (!protectedEngine) return false;
+#endif
+    const auto *engineFile = protectedEngine ? RvCameraView::DepthPro2ProtectedEngine : runtime->view.graphFile;
+    for (const auto *name : {RvCameraView::DepthPro2Worker, engineFile, "Qt6Core.dll",
                              "nvinfer_10.dll", "nvinfer_plugin_10.dll", "cudart64_12.dll"}) {
         const QFileInfo dependency(root.filePath(QLatin1String(name)));
         if (!dependency.isFile() || !dependency.isReadable() || !dependency.size()) return false;
+    }
+    if (protectedEngine) {
+        const QFileInfo loader(root.filePath(QLatin1String(RvCameraView::DepthPro2ProtectionLibrary)));
+        if (!loader.isFile() || !loader.isReadable() || !loader.size()) return false;
     }
     return true;
 }
@@ -227,7 +238,6 @@ void RvAssistDepth::cancel(const QString &reason) {
     emit loadingStateChanged(0);
     m_pending={};m_current={};m_busy=false;m_ready=false;m_buffer.clear();m_timeout.stop();m_lastHdTofSequence=0;m_lastGuiPublishMs=0;
     m_lastHdTofTimestampNs=0;m_lastHdTofSamples.clear();m_lastHdTofContext={};
-    m_depthPro2Scale.reset();
 
     if(m_process.state()!=QProcess::NotRunning) {
         m_stopping=true;
@@ -386,7 +396,7 @@ void RvAssistDepth::readOutput()
     }
 }
 
-RvAssistFusion::Result RvAssistDepth::correctDepthPro2(const QByteArray &depth,const Input &current,QJsonObject &metadata,QByteArray &diagnostic)
+RvAssistFusion::Result RvAssistDepth::makeMonocularResult(const QByteArray &depth,const Input &current,QJsonObject &metadata,QByteArray &diagnostic)
 {
     QElapsedTimer clock;clock.start();
     const auto &view=View;
@@ -401,20 +411,18 @@ RvAssistFusion::Result RvAssistDepth::correctDepthPro2(const QByteArray &depth,c
     tof.metadata.insert(QLatin1String(RvAssistFusion::NativeProjectionField),projection);
     std::vector<float> mono(depth.size()/int(sizeof(float)));
     qFromLittleEndian<quint32>(depth.constData(),qsizetype(mono.size()),mono.data());
-    const auto &cal=RvAssistFusion::calibrationForFov(tof.metadata["dtof_fov_correction"].toInt());
-    auto result=m_depthPro2Scale.apply(paired?RvAssistFusion::fuseGlobalScale(mono,tof,cal,view)
-        :RvAssistFusion::monocular(mono,"H.265 input has no verified time-paired dToF",view.outputSize(),true),
-        monotonicMs(),current.epoch,metadata["generation"].toInteger(),metadata["frame_id"].toInteger(),true);
+    auto result=RvAssistFusion::monocular(mono,"",view.outputSize(),true);
     if(!result.ok())return result;
+    // Replay the identity scale even when a paired ToF measurement was saved.
+    result.diagnostics["measured_scale"]=1.;
+    result.diagnostics["scale_source"]="unadjusted";
     if(paired){
         for(const auto *key:HdTofFields)metadata.insert(QLatin1String(key),tof.metadata.value(key));
         for(const auto *key:{"dtof_present","work_mode","pairing_policy","measurement_age_at_pair_ms","dtof_absent_reason"})
             metadata.insert(QLatin1String(key),tof.metadata.value(key));
     }
-    const auto mode=result.diagnostics["fusion_mode"].toString();
-    const bool unadjusted=mode=="monocular",held=mode=="held_scale";
-    metadata["model"]=QString::fromLatin1(view.modelName)+(unadjusted?" (monocular)":held?" (held dToF scale)":" + dToF");
-    metadata["depth_method"]=unadjusted?"monocular_unadjusted":held?"monocular_held_dtof_scale":"oriented_global_scale_latest_native_v2";
+    metadata["model"]=QString::fromLatin1(view.modelName)+" (monocular)";
+    metadata["depth_method"]="monocular_unadjusted";
     metadata["depth_present"]=true;
     metadata["depth_bytes"]=view.depthBytes();
     metadata["assist_native_columns"]=RvCaptureContract::Native48Columns;
@@ -509,9 +517,9 @@ bool RvAssistDepth::acceptResponse(const QJsonObject &response, const QByteArray
     sendLatest();
     if (!alive || !m_enabled || m_stopping || m_failed || token != m_token) return false;
     QByteArray diagnostic;
-    auto fused = correctDepthPro2(depth, current, metadata, diagnostic);
-    if (!fused.ok()) {
-        const auto reason = QCoreApplication::translate("RvAssistFusion", fused.error.toUtf8().constData());
+    auto result = makeMonocularResult(depth, current, metadata, diagnostic);
+    if (!result.ok()) {
+        const auto reason = QCoreApplication::translate("RvAssistFusion", result.error.toUtf8().constData());
         emit frameRejected(metadata, reason);
         if (!alive) return false;
         emit cleared(reason);
@@ -522,7 +530,7 @@ bool RvAssistDepth::acceptResponse(const QJsonObject &response, const QByteArray
     auto pairedTof = current.tof;
     pairedTof.metadata.insert(QLatin1String(RvAssistFusion::NativeProjectionField),
                               metadata.value(RvAssistFusion::NativeProjectionField));
-    emit resultReady(fused.depth, metadata, current.camera, current.epoch, pairedTof, diagnostic, current.camera);
+    emit resultReady(result.depth, metadata, current.camera, current.epoch, pairedTof, diagnostic, current.camera);
     if (!alive) return false;
     m_lastGuiPublishMs = publishClock.nsecsElapsed() / 1e6;
     return m_enabled && !m_stopping;
@@ -569,7 +577,15 @@ int runRvAssistDepthTests(const QString &reportPath) {
         report["width"]=metadata.value("width");report["height"]=metadata.value("height");
         report["experiment"]=metadata["assist_experiment"];report["tof_reused"]=metadata["tof_reused"];
         report["native_bytes"]=tof.samples.size();
-        report["monocular_bytes"]=RvDepthDiagnostic::monocularDepth(diagnostic,metadata).size();
+        report["dtof_paired"]=metadata["dtof_present"];
+        report["pair_identity_preserved"]=!testReuse||RvDepthDiagnostic::matchesPairedNative(metadata,tof);
+        const auto monocular=RvDepthDiagnostic::monocularDepth(diagnostic,metadata);
+        const auto fusion=metadata["assist_fusion"].toObject();
+        report["monocular_bytes"]=monocular.size();
+        report["output_matches_monocular"]=depth==monocular;
+        report["depth_method"]=metadata["depth_method"];
+        report["dtof_corrected"]=fusion["dtof_corrected"];
+        report["scale"]=fusion["scale"];
         loop.quit();
     });
     QTimer::singleShot(HostWorkerLoadTimeoutMs+10000,&loop,&QEventLoop::quit);
@@ -632,6 +648,9 @@ int runRvAssistDepthTests(const QString &reportPath) {
         &&report["width"]==profile.outputWidth&&report["height"]==profile.outputHeight
         &&report["experiment"]==experiment&&report["native_bytes"].toInt(-1)==samples.size()
         &&report["monocular_bytes"].toInt()==profile.depthBytes()&&(!testReuse||report["tof_reused"]==true)
+        &&report["dtof_paired"]==testReuse&&report["pair_identity_preserved"]==true
+        &&report["output_matches_monocular"]==true&&report["depth_method"]=="monocular_unadjusted"
+        &&report["dtof_corrected"]==false&&report["scale"]==1.
         &&report["backend"]==QLatin1String(RvCameraView::DepthPro2Backend);
     report["pass"]=passed;
     QFile file(reportPath);
