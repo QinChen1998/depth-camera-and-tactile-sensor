@@ -1,6 +1,7 @@
 #pragma once
 #include "DepthSnapshot.h"
 #include "RvAssistFusion.h"
+#include <memory>
 
 // One bounded current-frame payload. Nothing is written until an explicit save.
 namespace RvDepthDiagnostic {
@@ -11,6 +12,7 @@ inline constexpr int PayloadBytes=DepthBytes+2*ReasonBytes;
 QByteArray encode(const std::vector<float> &mono,const RvAssistFusion::Result &result,int nativeCount=ReasonBytes);
 bool validPayload(const QByteArray &payload,int depthBytes=DepthBytes);
 QByteArray monocularDepth(const QByteArray &payload,const QJsonObject &metadata);
+bool matchesPairedNative(const QJsonObject &metadata,const RvTofFrame &native);
 struct Snapshot {
     DepthSnapshot output;
     RvTofFrame native;
@@ -23,4 +25,20 @@ struct Snapshot {
 // Optional explicit comparison directory exports derived depths/images only;
 // existing directories and the original snapshot are never overwritten.
 int replay(const QString &folder,const QString &reportPath,const QString &comparisonDirectory=QString());
+
+class SequenceRecorder {
+public:
+    SequenceRecorder();
+    ~SequenceRecorder();
+    bool start(const QString &parent,QString *error);
+    void append(const QByteArray &depth,const QJsonObject &metadata,const QImage &input,
+                const RvTofFrame &native,const QByteArray &diagnostic);
+    void stop();
+    QJsonObject status() const;
+    static constexpr int DurationMs = 10000;
+
+private:
+    struct State;
+    std::unique_ptr<State> state;
+};
 }

@@ -3,6 +3,7 @@
 #include "../sensors/RvCameraView.h"
 #include "../sensors/RvDepthDiagnostic.h"
 #include "../sensors/RvInferenceRuntime.h"
+#include <QtCore/QDir>
 #include <QtCore/QFile>
 #include <QtCore/QFileInfo>
 #include <QtCore/QJsonDocument>
@@ -102,6 +103,92 @@ int runRvAssistRecoveryTests(const QString &path){
         const auto resized=RvCameraView::portraitDepth(std::vector<float>(640*480,1.25f));
         check("PORTRAIT_MONOCULAR_RESAMPLE_PRESERVES_METRIC_SCALE",resized.size()==480*640
             &&std::all_of(resized.begin(),resized.end(),[](float z){return z==1.25f;}));
+
+        QTemporaryDir diagnostics(QFileInfo(path).absolutePath()+"/gb-diagnostic-SIMULATED-XXXXXX");
+        diagnostics.setAutoRemove(false);
+        QImage pairedRgb(view.outputSize(),QImage::Format_RGB888);
+        pairedRgb.fill(QColor(90,100,110));
+        QImage recordingInput(RvCameraView::Rgb672VgaFp16.inputSize(),QImage::Format_RGB888);
+        recordingInput.fill(QColor(70,90,100));
+        for(const auto &mode : {QStringLiteral("G"),QStringLiteral("B")}){
+            auto paired=tof;
+            paired.metadata["assist_experiment"]=mode;
+            paired.metadata["tof_reused"]=mode=="B";
+            auto metadata=paired.metadata;
+            metadata["width"]=view.outputWidth;
+            metadata["height"]=view.outputHeight;
+            metadata["depth_unit"]="camera-Z_m_float32";
+            metadata["depth_K"]=RvCameraView::intrinsics(view);
+            metadata["assist_output_grid"]=RvCameraView::PortraitGrid;
+            metadata["assist_model_depth_size"]=QJsonArray{640,480};
+            metadata["assist_model_crop_xywh"]=QJsonArray{140,0,360,480};
+            metadata["assist_graph_sha256"]=view.graphSha;
+            metadata["assist_provisional_model"]=true;
+            metadata["assist_candidate_parity_mean_limit"]=view.parityMeanLimit;
+            metadata["assist_input_rotation_degrees"]=0;
+            metadata["assist_output_restored_to_calibrated_grid"]=true;
+            metadata["assist_diagnostic_payload"]="mono_reasons_v1";
+            metadata["assist_diagnostic_native_count"]=RvDepthDiagnostic::ReasonBytes;
+            metadata["assist_fusion_revision"]=portraitRevision(mode);
+            metadata["assist_output_policy"]=FieldOfViewPolicy;
+            metadata["assist_tof_fov_correction"]=6;
+            ScaleContinuity continuity;
+            auto fit=continuity.apply(fuseGlobalScale(mono,paired,cal,view),1000,1,3,1);
+            const auto corrected=limitTofFieldOfView(std::move(fit),cal,view);
+            metadata["assist_fusion"]=corrected.diagnostics;
+            const auto payload=RvDepthDiagnostic::encode(mono,corrected);
+            RvDepthDiagnostic::Snapshot snapshot{{corrected.depth,{},pairedRgb,metadata,QDateTime::currentDateTimeUtc()},paired,payload,{}};
+            QString folder;
+            check(mode+"_PAIRED_DIAGNOSTIC_REPLAYS",snapshot.save(diagnostics.path(),&folder)
+                &&RvDepthDiagnostic::replay(folder,diagnostics.filePath(mode+"-paired.json"))==0);
+            auto wrongPair=paired;
+            wrongPair.metadata["tof_sequence"]=2;
+            check(mode+"_OVERLAY_REJECTS_OTHER_MEASUREMENT",!RvDepthDiagnostic::matchesPairedNative(metadata,wrongPair));
+
+            auto rgbOnly=snapshot;
+            const auto held=limitTofFieldOfView(continuity.apply(monocular(mono,"RGB only",view.outputSize()),1033,1,3,2),cal,view);
+            rgbOnly.native={};
+            rgbOnly.output.metresFloat32LE=held.depth;
+            rgbOnly.output.metadata["assist_fusion"]=held.diagnostics;
+            rgbOnly.output.metadata["dtof_present"]=false;
+            for(const auto *key : {NativeProjectionField,"tof_sequence","tof_timestamp_ns","tof_reused","dtof_bytes","pair_delta_ms"})
+                rgbOnly.output.metadata.remove(key);
+            rgbOnly.payload=RvDepthDiagnostic::encode(mono,held);
+            check(mode+"_RGB_ONLY_HELD_SCALE_REPLAYS",held.diagnostics["fusion_mode"]=="held_scale"
+                &&rgbOnly.save(diagnostics.path(),&folder)
+                &&RvDepthDiagnostic::replay(folder,diagnostics.filePath(mode+"-held.json"))==0);
+
+            QString sequenceFolder,recordError;
+            bool started=false;
+            {
+                RvDepthDiagnostic::SequenceRecorder recorder;
+                started=recorder.start(diagnostics.path(),&recordError);
+                sequenceFolder=recorder.status()["folder"].toString();
+                recorder.append(corrected.depth,metadata,recordingInput,paired,payload);
+                recorder.append(corrected.depth,metadata,recordingInput,wrongPair,payload);
+            }
+            QFile receipt(QDir(sequenceFolder).filePath("recording.json"));
+            const auto recorded=receipt.open(QIODevice::ReadOnly)?QJsonDocument::fromJson(receipt.readAll()).object():QJsonObject{};
+            QFile stream(QDir(sequenceFolder).filePath("frames.bin"));
+            QByteArray frame;
+            if(stream.open(QIODevice::ReadOnly))frame=stream.readAll();
+            const int headerBytes=frame.size()>=4?int(qFromLittleEndian<quint32>(frame.constData())):0;
+            const auto header=QJsonDocument::fromJson(frame.mid(4,headerBytes)).object();
+            const int rgbBytes=header["rgb_bytes"].toInt();
+            check(mode+"_SEQUENCE_PRESERVES_MATCHED_TOF_AND_DEPTH",started&&recorded["complete"]==true
+                &&recorded["error"]==""&&recorded["frames"]==1&&recorded["dropped_frames"]==1
+                &&header["metadata"].toObject()==metadata&&header["native_metadata"].toObject()==paired.metadata
+                &&rgbBytes==672*504*3&&frame.mid(4+headerBytes+rgbBytes)==payload+paired.samples+corrected.depth);
+
+            if(mode=="G"){
+                snapshot.output.metadata["assist_fusion_revision"]="global_scale_fresh_rgb_portrait_v1";
+                snapshot.output.metadata["tof_warning_flags"]=8;
+                snapshot.native.metadata["tof_warning_flags"]=8;
+                check("ARCHIVED_G_REPLAYS_RECORDED_SCALE_WITH_INFORMATIONAL_WARNING",
+                    snapshot.save(diagnostics.path(),&folder)
+                    &&RvDepthDiagnostic::replay(folder,diagnostics.filePath("G-archived.json"))==0);
+            }
+        }
 
         // A far wall on the left and a coherently measured close surface on the right.
         for(int i=0;i<cal.nativeCount();++i){

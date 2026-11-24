@@ -3,6 +3,7 @@
 #include "../UiStyle.h"
 #include "RvDtofCandidates.h"
 #include "RvDepthView.h"
+#include "RvDepthDiagnostic.h"
 #include "ImagePresentation.h"
 #include "RvSessionController.h"
 #include "RvAssistDepth.h"
@@ -26,6 +27,8 @@
 #include <QtCore/QEvent>
 #include <QtCore/QSignalBlocker>
 #include <QtCore/QTimer>
+#include <QtCore/QUrl>
+#include <QtGui/QDesktopServices>
 #include <QtGui/QStandardItemModel>
 #include <QtWidgets/QCheckBox>
 #include <QtWidgets/QTabWidget>
@@ -277,6 +280,45 @@ DepthMapWidget::DepthMapWidget(QWidget *parent)
     connect(m_rvStop, &QPushButton::clicked, this, [this]{if (m_session) m_session->stop();});
     connect(m_rvReconnect, &QPushButton::clicked, this, [this]{if (m_session) m_session->reconnectNow();});
     layout->addWidget(statusRow);
+    m_diagnosticsRow = new QWidget(this);
+    auto *diagnostics = UiStyle::wrappingRow(m_diagnosticsRow,ImagePresentation::Spacing);
+    m_tofPointsButton = new QPushButton(m_diagnosticsRow);
+    m_tofPointsButton->setObjectName("depthPairedTofPoints");
+    m_tofPointsButton->setCheckable(true);
+    diagnostics->addWidget(m_tofPointsButton);
+    connect(m_tofPointsButton,&QPushButton::toggled,this,[this](bool visible) {
+        m_assistCanvas->setTofPointsVisible(visible);
+        m_tofPointsButton->setText(visible?tr("Hide ToF points"):tr("Show ToF points"));
+    });
+    m_pairedRgbButton = new QPushButton(m_diagnosticsRow);
+    m_pairedRgbButton->setObjectName("depthPairedRgb");
+    m_pairedRgbButton->setCheckable(true);
+    diagnostics->addWidget(m_pairedRgbButton);
+    connect(m_pairedRgbButton,&QPushButton::toggled,this,[this](bool visible) {
+        m_assistCanvas->setPairedRgbVisible(visible);
+        m_pairedRgbButton->setText(visible?tr("Return to depth"):tr("ToF / RGB alignment"));
+        updateRvPresentation();
+    });
+    m_recordButton = new QPushButton(m_diagnosticsRow);
+    m_recordButton->setObjectName("depthDiagnosticRecord");
+    diagnostics->addWidget(m_recordButton);
+    connect(m_recordButton,&QPushButton::clicked,this,&DepthMapWidget::chooseDiagnosticRecordingFolder);
+    m_openRecording = new QPushButton(m_diagnosticsRow);
+    m_openRecording->setEnabled(false);
+    diagnostics->addWidget(m_openRecording);
+    connect(m_openRecording,&QPushButton::clicked,this,[this] {
+        QDesktopServices::openUrl(QUrl::fromLocalFile(m_recordingFolder));
+    });
+    m_diagnosticsRow->hide();
+    layout->addWidget(m_diagnosticsRow);
+    m_recordStatus = new QLabel(this);
+    m_recordStatus->setObjectName("depthDiagnosticStatus");
+    m_recordStatus->setWordWrap(true);
+    m_recordStatus->hide();
+    layout->addWidget(m_recordStatus);
+    m_recordTimer = new QTimer(this);
+    m_recordTimer->setInterval(100);
+    connect(m_recordTimer,&QTimer::timeout,this,&DepthMapWidget::updateDiagnosticRecording);
     connect(m_saveButton,&QPushButton::clicked,this,&DepthMapWidget::saveCurrentFrame);
 
     syncDisplayColors();
@@ -356,6 +398,13 @@ void DepthMapWidget::retranslateUi()
     m_monocularButton->setText(m_monocularButton->isChecked()?tr("Restore corrected depth"):tr("Show monocular depth only"));
     m_splitCorrectionButton->setToolTip(tr("Use verified distant ToF for the background and paired ToF for the near hand. Applies to the depth map and point cloud."));
     m_splitCorrectionButton->setText(m_splitCorrectionButton->isChecked()?tr("Restore original G"):tr("Try split correction"));
+    m_tofPointsButton->setText(m_tofPointsButton->isChecked()?tr("Hide ToF points"):tr("Show ToF points"));
+    m_tofPointsButton->setToolTip(tr("Point centers use the measured depth color. White outlines mark points used to correct this frame."));
+    m_pairedRgbButton->setText(m_pairedRgbButton->isChecked()?tr("Return to depth"):tr("ToF / RGB alignment"));
+    m_pairedRgbButton->setToolTip(tr("Show projected ToF points on the RGB image paired with this depth frame."));
+    if(!m_recorder)m_recordButton->setText(tr("Record diagnostic (10 s)"));
+    m_recordButton->setToolTip(tr("Record paired RGB, native ToF, monocular and corrected depth for 10 seconds (about 1 GB)."));
+    m_openRecording->setText(tr("Open recording folder"));
     m_saveCamera->setText(tr("Save camera image too"));
     m_rvModelCaption->setText(tr("Imaging scheme:"));
     m_rvStart->setText(tr("Start"));
@@ -593,15 +642,18 @@ void DepthMapWidget::clearRvDepth(const QString& reason)
     updateRvPresentation();
 }
 
-void DepthMapWidget::acceptAssistSnapshot(const QByteArray &depth,const QJsonObject &metadata,const QImage &camera,const RvTofFrame &,const QByteArray &diagnostic)
+void DepthMapWidget::acceptAssistSnapshot(const QByteArray &depth,const QJsonObject &metadata,const QImage &camera,
+                                         const RvTofFrame &tof,const QByteArray &diagnostic,const QImage &inferenceInput)
 {
     if(!m_session||!m_session->assistDepthEnabled())return;
-    if(!m_assistCanvas->setDepth(depth,metadata,diagnostic)){clearAssistDepth(tr("Invalid host assisted depth result"));return;}
+    if(!m_assistCanvas->setDepth(depth,metadata,diagnostic,camera,tof)){clearAssistDepth(tr("Invalid host assisted depth result"));return;}
     m_assistSnapshot={depth,{},camera,metadata,QDateTime::currentDateTimeUtc()};
+    if(m_recorder)m_recorder->append(depth,metadata,inferenceInput,tof,diagnostic);
     updateRvPresentation();
 }
 void DepthMapWidget::clearAssistDepth(const QString &reason)
 {
+    if(m_recorder)m_recorder->stop();
     m_assistSnapshot={};
     if(m_session&&m_session->retainingRecoveryDisplay())m_assistCanvas->holdFrame();else m_assistCanvas->clear(UiStyle::depthErrorText(reason));
     updateRvPresentation();
@@ -609,9 +661,18 @@ void DepthMapWidget::clearAssistDepth(const QString &reason)
 
 void DepthMapWidget::updateRvPresentation()
 {
-    if(!m_saveButton)return;
+    if(!m_recordButton)return;
 
-    m_monocularButton->setEnabled(m_depthTabs->currentIndex()==1&&!m_switchUiActive
+    const bool assisting=m_session&&m_session->hostHdAssist()&&m_session->assistDepthEnabled();
+    const bool diagnosticsReady=assisting&&m_depthTabs->currentIndex()==1&&!m_switchUiActive;
+    const bool hasFreshRgb=diagnosticsReady&&m_assistCanvas->hasPairedRgb();
+    const bool viewingRgb=m_pairedRgbButton->isChecked();
+    m_diagnosticsRow->setVisible(assisting);
+    m_recordStatus->setVisible(assisting&&!m_recordStatus->text().isEmpty());
+    m_pairedRgbButton->setEnabled(hasFreshRgb||(assisting&&viewingRgb));
+    m_tofPointsButton->setEnabled(hasFreshRgb&&!viewingRgb);
+    m_recordButton->setEnabled(hasFreshRgb&&!m_recorder&&!m_session->retainingRecoveryDisplay());
+    m_monocularButton->setEnabled(m_depthTabs->currentIndex()==1&&!m_switchUiActive&&!viewingRgb
         &&(m_monocularButton->isChecked()||!m_assistSnapshot.metresFloat32LE.isEmpty()));
     m_splitCorrectionButton->setEnabled(m_session&&m_session->splitCorrectionAvailable()&&!m_session->busy()
         &&!m_switchUiActive&&!m_session->monocularDisplay());
@@ -620,6 +681,61 @@ void DepthMapWidget::updateRvPresentation()
     const auto &snapshot = m_depthTabs->currentIndex()==1 ? m_assistSnapshot : m_snapshot;
     m_saveButton->setEnabled(!m_switchUiActive
         && !(m_session && m_session->retainingRecoveryDisplay()) && !snapshot.metresFloat32LE.isEmpty());
+}
+
+void DepthMapWidget::chooseDiagnosticRecordingFolder()
+{
+    QSettings settings;
+    const auto target=QFileDialog::getExistingDirectory(this,tr("Select diagnostic recording folder"),
+        settings.value("depthMap/diagnosticDirectory",QStandardPaths::writableLocation(QStandardPaths::MoviesLocation)).toString());
+    if(target.isEmpty())
+        return;
+    QString error;
+    if(startDiagnosticRecording(target,&error).isEmpty()){
+        m_recordStatus->setText(tr("Recording failed: %1").arg(error));
+        updateRvPresentation();
+        return;
+    }
+    settings.setValue("depthMap/diagnosticDirectory",target);
+}
+
+QString DepthMapWidget::startDiagnosticRecording(const QString &folder,QString *error)
+{
+    if(folder.isEmpty()||m_recorder||!m_recordButton->isEnabled()){
+        if(error)*error=tr("Wait for a fresh host-assisted depth frame.");
+        return {};
+    }
+    auto recorder=std::make_unique<RvDepthDiagnostic::SequenceRecorder>();
+    if(!recorder->start(folder,error))
+        return {};
+    m_recordingFolder=recorder->status()["folder"].toString();
+    m_recorder=std::move(recorder);
+    m_openRecording->setEnabled(false);
+    m_recordTimer->start();
+    updateDiagnosticRecording();
+    return m_recordingFolder;
+}
+
+void DepthMapWidget::updateDiagnosticRecording()
+{
+    const auto status=m_recorder->status();
+    const int frames=status["frames"].toInt(),dropped=status["dropped_frames"].toInt();
+    const double remaining=std::max(0.,RvDepthDiagnostic::SequenceRecorder::DurationMs-status["elapsed_ms"].toDouble());
+    if(status["complete"]==true){
+        m_recordTimer->stop();
+        const auto error=status["error"].toString();
+        m_recordStatus->setText(error.isEmpty()
+            ?tr("Saved %1 frames (%2 dropped) to %3").arg(frames).arg(dropped).arg(QDir::toNativeSeparators(m_recordingFolder))
+            :tr("Recording failed: %1").arg(error));
+        m_openRecording->setEnabled(true);
+        m_recorder.reset();
+        m_recordButton->setText(tr("Record diagnostic (10 s)"));
+    }else{
+        m_recordButton->setText(tr("Recording %1 s").arg(remaining/1000.,0,'f',1));
+        m_recordStatus->setText(tr("Recording: %1 frames, %2 dropped").arg(frames).arg(dropped));
+        if(remaining<=0)m_recorder->stop();
+    }
+    updateRvPresentation();
 }
 
 void DepthMapWidget::acceptRvSnapshot(const QByteArray &depth,const QJsonObject &metadata,const QImage &camera)
