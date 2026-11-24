@@ -5,7 +5,7 @@
   "sensors": [
     {
       "id": "fingertip",
-      "meshSha256": "3202250253100fea1101aeb65a21984cda894b78676a6a54552a41b47ce9fea2",
+      "meshSha256": "8def3e04e7ca2d21d35f0d07d993f8fb243d8a04a13a832394ac70b3f92a50d9",
       "sourceSha256": "836a000551327f0e681189a046fab7902a893de3f0aabff43b7c7467ee479148",
       "meshPositionM": [
         0.0,
@@ -6270,7 +6270,7 @@
     },
     {
       "id": "terminal",
-      "meshSha256": "27f54e47acae2138486100223517472a77e9548be46b7181af5e9366c0337e6b",
+      "meshSha256": "e3f0d9798797be2fe9c0b3fe0c085c3456df8829834c8bee0cb64130acbbda0c",
       "sourceSha256": "27c83d66bc332f5c043e2e3d4a83cd9dd7f3cea8fb39d8b97bdf1504443d1959",
       "meshPositionM": [
         -0.0,
@@ -12535,7 +12535,7 @@
     },
     {
       "id": "ultrathin",
-      "meshSha256": "7517bdc068e06279b9a8bc1afd64f57f28b96dcdf79241890f60ecf56654b41b",
+      "meshSha256": "ccec37c4d62cecad3fbde30e929e2c8cba599bce5ea8fb2cf2b19aae38930c35",
       "sourceSha256": "0d26022bc3688935f8061299368c086b57952ce7d94e4a6173724e788501bbe9",
       "meshPositionM": [
         -0.0,

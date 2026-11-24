@@ -69,6 +69,7 @@ public:
     static constexpr const char *GlobalScaleReusePolicy="latest_native_reuse_100ms_global_scale_v1";
     static constexpr double FreshRgbPairBudgetMs=200., PairClockUncertaintyMs=35.;
     static constexpr char FreshRgbReusePolicy[]="bounded_software_time_pair_not_hardware_sync";
+    static constexpr char SdkPairClock[]="sdk_rgb_decode_and_tof_transport_estimate";
     static bool isHostFusionExperiment(const QString &mode){return mode=="G"||mode=="B";}
     bool hasGlobalScaleReuseContract() const {
         const double delta=metadata["pair_delta_ms"].toDouble(1000),uncertainty=metadata["pair_clock_uncertainty_ms"].toDouble(-1);
@@ -90,7 +91,8 @@ public:
             &&std::isfinite(uncertainty)&&uncertainty>=0&&uncertainty<=PairClockUncertaintyMs
             &&metadata["rgb_timestamp_ns"].isDouble()&&metadata["rgb_timestamp_ns"].toDouble()>0
             &&std::abs((metadata["tof_timestamp_ns"].toDouble()-metadata["rgb_timestamp_ns"].toDouble())/1e6-delta)<=.001
-            &&metadata["pair_clock_source"]=="rtcp_prft_board_realtime_monotonic";
+            &&(metadata["pair_clock_source"]=="rtcp_prft_board_realtime_monotonic"
+                ||(fresh48&&metadata["pair_clock_source"]==QLatin1String(SdkPairClock)));
     }
     // Only B, or historical H diagnostics, may reuse the same measurement.
     bool isValidForHostFusion() const {

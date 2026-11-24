@@ -1,6 +1,5 @@
 #include "TactileTestFixtures.h"
-#include <QQuickWidget>
-#include <QQuickItem>
+#include "../sensors/TactileCanvas.h"
 #include "../sensors/TactileVisualizationWidget.h"
 #include "../RenderingSettings.h"
 #include "../SensorMainWindow.h"
@@ -204,7 +203,7 @@ int runTactileVisualizationTests(const QString &path)
             }
             const bool framebufferReady=!widget.m_canvas->grabFramebuffer().isNull();
             const auto published=widget.refreshCount()-refreshStart;
-            valid &= widget.m_canvas->status()==QQuickWidget::Ready&&widget.m_adapter->valid()
+            valid &= widget.m_canvas->ready()&&widget.m_adapter->valid()
                 &&widget.m_tareFrame.valid&&widget.m_liveFrame.sequence==quint64(replies.size())
                 &&widget.m_displayFilter.rejected==0&&published==measuredFrames
                 &&framebufferReady&&finalReadingsMatch&&!widget.m_serial.isRunning();
@@ -1134,7 +1133,7 @@ int runTactileVisualizationTests(const QString &path)
             &&restored.m_adapter->arrowWidthGain()==2.5
             &&restored.m_adapter->pointArrows()&&!restored.m_adapter->resultantArrow()&&!restored.m_adapter->componentArrows(),
             "restored settings apply to the scene adapter before capture starts");
-        auto *restoredLegend=restored.m_canvas->rootObject()?restored.m_canvas->rootObject()->findChild<QObject *>("tactileLegend"):nullptr;
+        auto *restoredLegend=restored.m_canvas->findChild<QObject *>("tactileLegend");
         check(!restoredLegend,"restored display settings do not recreate the model bottom-left legend");
         if(statusToggle)statusToggle->setChecked(true);
         check(!restored.m_serialStatus->isHidden()&&restored.m_filterStatus->isHidden()
@@ -1450,7 +1449,7 @@ int runTactileVisualizationTests(const QString &path)
     widget.m_serialSample={};widget.m_connectionSettings->setChecked(false);widget.updateSerialStatus();wait(30);
     auto *status=widget.findChild<QLabel*>("tactileSerialStatus");
     const int statusHeight=status->height();
-    auto *scene=widget.findChild<QQuickWidget*>("tactileQuickView");
+    auto *scene=widget.findChild<TactileCanvas*>("tactileSceneView");
     const auto sceneOrigin=scene->mapTo(&widget,QPoint());
     status->setText(QString(500,QChar('W'))+" Values outside manual range; raw values retained");wait(30);
     check(status->height()==statusHeight&&!status->wordWrap()&&scene->mapTo(&widget,QPoint())==sceneOrigin,"long transient serial warning cannot change layout height");
@@ -1460,7 +1459,7 @@ int runTactileVisualizationTests(const QString &path)
     const auto idleRefreshes=widget.refreshCount();
     check(widget.running()&&!widget.frame().valid&&widget.history().samples().empty(),
         "starting view refresh creates no measurements without a device");
-    auto *unavailable=scene->rootObject()->findChild<QObject *>("tactileNoDataMessage");
+    auto *unavailable=scene->findChild<QObject *>("tactileNoDataMessage");
     for(int type=0;type<3;++type) {
         widget.m_fingers->button(type)->click();wait(40);
         check(!widget.frame().valid&&!widget.m_adapter->valid()&&widget.history().samples().empty()
@@ -1598,7 +1597,7 @@ int runTactileVisualizationTests(const QString &path)
         &&checked.m_pointTable->item(0,1)->text()=="--"&&checked.m_tareButton->isEnabled()
         &&sameForce(checked.chartForce(),checkedGood.fingers[0].modules[0].points[0].force)&&checked.history().samples().size()==1,
         "CRC-on rejection retains the previous displayed values while raw frame stays invalid and history stays unchanged");
-    auto *heldLegend=checked.m_canvas->rootObject()?checked.m_canvas->rootObject()->findChild<QObject *>("tactileLegend"):nullptr;
+    auto *heldLegend=checked.m_canvas->findChild<QObject *>("tactileLegend");
     const auto heldTableLabel=checked.m_tableLabel->text();
     const auto heldSource=checked.m_adapter->sourceLabel();
     const auto heldCurve=checked.chartForce();

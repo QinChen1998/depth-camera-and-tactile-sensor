@@ -4,10 +4,7 @@
 #include <QtCore/QFile>
 #include "TactileSceneAdapter.h"
 #include "TactileSurfaceModel.h"
-#include "DockableQuick3DWidget.h"
-#include <QQuickItem>
-#include <QQmlEngine>
-#include <QQmlError>
+#include "TactileCanvas.h"
 #include <QCheckBox>
 #include <QSlider>
 #include <QTableWidget>
@@ -373,14 +370,16 @@ TactileVisualizationWidget::TactileVisualizationWidget(QWidget *parent) : QWidge
     connect(renderSettings,&RenderingSettings::lowCostRenderingChanged,this,[this,renderSettings]{
         m_adapter->setLowCostRendering(renderSettings->lowCostRendering());
     });
-    auto *quick = new DockableQuick3DWidget(left,
-        {"display", "orbitYaw", "orbitPitch", "cameraDistance", "cameraPan", "inspectedPoint"});
-    m_canvas=quick;m_canvas->setObjectName("tactileQuickView");m_canvas->setMinimumSize(260,260);m_canvas->setResizeMode(QQuickWidget::SizeRootObjectToView);m_canvas->setFocusPolicy(Qt::StrongFocus);
-    m_canvas->setInitialProperties({{"display",QVariant::fromValue(m_adapter)}});m_canvas->setClearColor(m_adapter->background());
-    m_viewError=new QLabel;m_viewError->setObjectName("tactileViewError");m_viewError->setWordWrap(true);m_viewError->hide();leftLayout->addWidget(m_viewError);
-    connect(m_canvas,&QQuickWidget::statusChanged,this,[this](QQuickWidget::Status status){
-        if(status==QQuickWidget::Error){QStringList errors;for(const auto &error:m_canvas->errors())errors<<error.toString();m_viewError->setText(tr("3D view unavailable: %1").arg(errors.join("\n")));m_viewError->show();stop();}
-        else if(status==QQuickWidget::Ready){m_viewError->hide();if(m_defaultConnectRequested)connectDefaultSerial();}
+    m_canvas = new TactileCanvas(m_adapter, left);
+    m_canvas->setObjectName("tactileSceneView");
+    m_canvas->setMinimumSize(260, 260);
+    m_viewError = new QLabel(tr("Tactile surface unavailable."), left);
+    m_viewError->setObjectName("tactileViewError");
+    m_viewError->setWordWrap(true);
+    m_viewError->setVisible(!m_canvas->ready());
+    leftLayout->addWidget(m_viewError);
+    connect(m_adapter, &TactileSceneAdapter::surfaceChanged, this, [this] {
+        m_viewError->setVisible(!m_canvas->ready());
     });
     auto *forceScale=new TactileScale;forceScale->setObjectName("tactileForceScale");
     leftLayout->addWidget(m_canvas,1);leftLayout->addWidget(forceScale);
@@ -454,7 +453,7 @@ TactileVisualizationWidget::TactileVisualizationWidget(QWidget *parent) : QWidge
     displayLayout->addWidget(tactileSettingRow(m_density));
     connect(m_density,&QComboBox::currentIndexChanged,this,[this](int index){
         m_adapter->setGridSize(m_density->itemData(index).toInt());
-        if(m_canvas->rootObject())m_canvas->rootObject()->setProperty("inspectedPoint",-1);
+        m_canvas->setInspectedPoint(-1);
         updateValues();
     });
     auto *opacityField=new QWidget;auto *opacityRow=new QHBoxLayout(opacityField);opacityRow->setContentsMargins(0,8,0,8);
@@ -487,7 +486,7 @@ TactileVisualizationWidget::TactileVisualizationWidget(QWidget *parent) : QWidge
         m_adapter->setCommunicationStatusVisible(visible);updatePanelStatus();updateSerialStatus();
     });
     m_splitter->addWidget(right);m_splitter->setChildrenCollapsible(false);m_splitter->setStretchFactor(0,1);m_splitter->setStretchFactor(1,1);m_splitter->setSizes({440,440});
-    connect(m_fingers,&QButtonGroup::idClicked,this,[this](int id){m_finger=id;if(m_canvas->rootObject())m_canvas->rootObject()->setProperty("inspectedPoint",-1);updateValues();});
+    connect(m_fingers,&QButtonGroup::idClicked,this,[this](int id){m_finger=id;m_canvas->setInspectedPoint(-1);updateValues();});
     connect(m_pointsToggle,&QPushButton::toggled,m_adapter,&TactileSceneAdapter::setPointArrows);connect(m_resultantToggle,&QPushButton::toggled,m_adapter,&TactileSceneAdapter::setResultantArrow);
     connect(m_componentsToggle,&QPushButton::toggled,m_adapter,&TactileSceneAdapter::setComponentArrows);
     connect(m_displayMode,&QComboBox::currentIndexChanged,this,[this]{
@@ -495,13 +494,9 @@ TactileVisualizationWidget::TactileVisualizationWidget(QWidget *parent) : QWidge
         m_adapter->setDotMatrix(dots);
         for(QWidget *control:QList<QWidget *>{m_arrowWidthGain,m_resultantSizeGain,m_pointsToggle,m_resultantToggle,m_componentsToggle})control->setEnabled(!dots);
     });
-    connect(m_resetView,&QPushButton::clicked,this,[this]{if(m_canvas->rootObject())QMetaObject::invokeMethod(m_canvas->rootObject(),"resetView");});
-    connect(m_frontView,&QPushButton::clicked,this,[this]{if(m_canvas->rootObject())QMetaObject::invokeMethod(m_canvas->rootObject(),"frontView");});
-    // QQuickWidget uses the GUI render loop; count completed offscreen renders,
-    // deduplicating the data serial. This does not measure screen presentation.
-    quick->renderWindowChanged=[this]{connect(m_canvas->quickWindow(),&QQuickWindow::afterRendering,this,[this]{recordView();});};
-    quick->renderWindowChanged();
-    if (QFile::exists(":/qml/TactileView.qml")) m_canvas->setSource(QUrl("qrc:/qml/TactileView.qml"));
+    connect(m_resetView, &QPushButton::clicked, m_canvas, &TactileCanvas::resetView);
+    connect(m_frontView, &QPushButton::clicked, m_canvas, &TactileCanvas::frontView);
+    connect(m_canvas, &TactileCanvas::painted, this, &TactileVisualizationWidget::recordView);
     m_timer.setTimerType(Qt::PreciseTimer);m_timer.setInterval(33);connect(&m_timer,&QTimer::timeout,this,&TactileVisualizationWidget::refresh);
     m_readingsTimer.setSingleShot(true);m_readingsTimer.setInterval(100);
     connect(&m_readingsTimer,&QTimer::timeout,this,&TactileVisualizationWidget::updateReadings);
@@ -639,7 +634,7 @@ void TactileVisualizationWidget::saveDisplaySettings()
 }
 void TactileVisualizationWidget::start()
 {
-    if(m_canvas->status()!=QQuickWidget::Ready || !isVisible() || m_started) return;
+    if(!m_canvas->ready() || !isVisible() || m_started) return;
     m_started=true;m_suspended=false;
     m_timer.start();refresh();
 }
@@ -675,7 +670,7 @@ void TactileVisualizationWidget::receiveSerialSample(const tactile::SerialSample
             const QSignalBlocker blocker(m_slave);m_slave->setValue(received.settings.slave);
             m_fingers->button(m_finger)->setChecked(true);
             if(changed){
-                if(m_canvas->rootObject())m_canvas->rootObject()->setProperty("inspectedPoint",-1);
+                m_canvas->setInspectedPoint(-1);
                 updateValues();
             }
         }
@@ -978,10 +973,10 @@ void TactileVisualizationWidget::resizeEvent(QResizeEvent *e)
 }
 void TactileVisualizationWidget::changeEvent(QEvent *e) {
     QWidget::changeEvent(e);
-    if(e->type()==QEvent::LanguageChange){retranslate();if(m_canvas->engine())m_canvas->engine()->retranslate();updateValues();}
+    if(e->type()==QEvent::LanguageChange){retranslate();m_canvas->update();updateValues();}
     if(e->type()==QEvent::FontChange && m_fingerBox)
         QTimer::singleShot(0,this,&TactileVisualizationWidget::updateRightPanelLayout);
-    if(e->type()==QEvent::PaletteChange){updateSettingsStyle();m_adapter->setPalette(palette());m_canvas->setClearColor(m_adapter->background());}
+    if(e->type()==QEvent::PaletteChange){updateSettingsStyle();m_adapter->setPalette(palette());}
 }
 void TactileVisualizationWidget::updateSettingsStyle()
 {
@@ -1281,7 +1276,7 @@ QStringList TactileVisualizationWidget::refreshSerialPorts()
 }
 void TactileVisualizationWidget::scanIdleSerialPorts()
 {
-    if(!m_port->isEnabled()||m_configTimer.isActive()||m_canvas->status()!=QQuickWidget::Ready)return;
+    if(!m_port->isEnabled()||m_configTimer.isActive()||!m_canvas->ready())return;
     auto ports=refreshSerialPorts();
     if(!m_autoConnectEnabled)return;
     m_portsReportedRemoved.removeIf([&](const QString &port){return !ports.contains(port,Qt::CaseInsensitive);});
@@ -1333,7 +1328,7 @@ void TactileVisualizationWidget::cancelSerialRetry()
 }
 void TactileVisualizationWidget::connectSerial(SerialAttempt attempt)
 {
-    if(m_serial.isRunning()||m_canvas->status()!=QQuickWidget::Ready)return;
+    if(m_serial.isRunning()||!m_canvas->ready())return;
     m_defaultConnectRequested=false;m_defaultConnectAttempted=true;
     cancelSerialRetry();
     setDeviceConfigStatus({});
@@ -1384,7 +1379,7 @@ void TactileVisualizationWidget::connectDefaultSerial()
 {
     if(m_defaultConnectAttempted)return;
     m_defaultConnectRequested=true;
-    if(!isVisible()||m_canvas->status()!=QQuickWidget::Ready)return;
+    if(!isVisible()||!m_canvas->ready())return;
     m_defaultConnectRequested=false;m_defaultConnectAttempted=true;
     m_observedSerialPorts=refreshSerialPorts();
     m_autoConnectEnabled=true;

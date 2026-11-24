@@ -21,7 +21,7 @@ python tools/run_offline_tests.py --configuration Debug --qt-root E:/Qt/6.11.1/m
 python -m unittest discover -s tests -p 'test_*.py' -v
 ```
 
-默认构建原生控制 worker，并同步部署 Qt、QML、视频插件。主工程在导入 Qt props 前设置 `IntDir`，qmake/MOC/RCC 中间文件进入 `x64/obj_<配置>/`。主推理进程使用同一构建复制的 `DctsInferenceWorker.exe`；不要用中文主程序文件名直接驱动 TensorRT 二进制 IPC。
+默认构建原生控制 worker，并同步部署 Qt Widgets、SDK 和视频插件。主工程在导入 Qt props 前设置 `IntDir`，qmake/MOC/RCC 中间文件进入 `x64/obj_<配置>/`。主推理进程使用同一构建复制的 `DctsInferenceWorker.exe`；不要用中文主程序文件名直接驱动 TensorRT 二进制 IPC。
 
 离线脚本仅允许以下八组，按需用 `--flags <标志> ...` 选择子集：
 
@@ -31,7 +31,7 @@ python -m unittest discover -s tests -p 'test_*.py' -v
 | `rv-tuner-test` | 调参协议、互斥、异步停止、板端模式、Native16 分片与同帧校验 |
 | `tactile-serial-test` | 串口协议、型号、零点、失败与恢复 |
 | `tactile-visualization-test` | 触觉显示、面板可见性、选择、曲线和断开 |
-| `tactile-3d-test` | QML 三维数据与生命周期 |
+| `tactile-3d-test` | Qt Widgets 三维显示和生命周期 |
 | `tactile-render-test` | 三维渲染、交互、显示刷新和关闭 |
 | `rv-assist-recovery-test` | 480×640/F6 Native48 米制几何、配对边界、有效测点、尺度连续性及旧 H 诊断回放 |
 | `rv-usb-enrollment-test` | USB 身份、地址规划、已有设备复用、完整检查回执、设置交接身份及登记准入 |
@@ -44,7 +44,7 @@ python -m unittest discover -s tests -p 'test_*.py' -v
 
 使用 `--rv-depth-diagnostic-replay <单帧诊断目录> <报告.json>` 可在离线环境重放 G/B 的已保存单帧。
 
-设置 `DCTS_LIVE_HOST_MODEL=depthpro2_s_vga_fp16` 或 `depthpro2_b_vga_fp16` 可实测相应型号的 ToF G 和 ToF B。专项核对 TensorRT 引擎身份、640×480 深度和配对 RGB 网格、配对预算及校正帧数。离线融合专项使用模拟平面核对两个型号的 F6 尺度、无效值处理、历史尺度和快照回放。
+设置 `DCTS_LIVE_HOST_MODEL=depthpro2_s_vga_fp16` 可实测 Depth Pro 2-S 的 ToF G 和 ToF B。专项核对 TensorRT 引擎身份、640×480 深度和配对 RGB 网格、配对预算及校正帧数。离线融合专项使用模拟平面核对Depth Pro 2-S 的 F6 尺度、无效值处理、历史尺度和快照回放。
 
 `--measurement-live-validation <绝对报告.json>` 通过「文件 → 测量采集」依次录制 RV1103 普通档 30 秒和 Gemini 335 60 秒，核验帧时长、序号、二进制长度、字节索引和有效测点。需要已登记的 RV1103、已安装 Orbbec SDK v2 及已连接的 Gemini 335。板端身份和实机开关与成像切换专项相同。录制文件保存在报告旁的独立目录。
 

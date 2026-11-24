@@ -115,10 +115,9 @@ if(-not $UseStagedPayload){
     Copy-Item -LiteralPath (Join-Path $desktop $exe) -Destination $payload
     Copy-Relative $desktop $payload 'DctsInferenceWorker.exe'
     Invoke-Native (Join-Path $qt 'bin/windeployqt.exe') @(
-        '--release','--qmldir',(Join-Path $project 'qml'),'--no-translations','--no-compiler-runtime',
-        '--skip-plugin-types','qmltooling','--exclude-plugins','qtvirtualkeyboardplugin',(Join-Path $payload $exe))
-    Get-ChildItem -LiteralPath (Join-Path $payload 'qml') -Filter '*.qmltypes' -Recurse -File |
-        ForEach-Object {Remove-Item -LiteralPath $_.FullName}
+        '--release','--no-translations','--no-compiler-runtime',(Join-Path $payload $exe))
+    Copy-Relative $desktop $payload 'CxwlDepthSdk.dll'
+    Copy-Item -LiteralPath (Join-Path $desktop 'cxwl-depth-sdk') -Destination $payload -Recurse
     Get-ChildItem -LiteralPath $toolchain.RedistDirectories[0] -Filter '*.dll' | Copy-Item -Destination $payload
     foreach($name in 'avcodec-61.dll','avformat-61.dll','avutil-59.dll','swresample-5.dll','swscale-8.dll'){
         if(-not (Test-Path -LiteralPath (Join-Path $payload $name) -PathType Leaf)){throw "Missing Qt FFmpeg library $name"}
@@ -226,9 +225,8 @@ if(-not $UseStagedPayload){
     Copy-Relative $PSScriptRoot $notices 'Third-Party-Notices.txt'
     $qtSource=Join-Path (Split-Path $qt) 'Src'
     Copy-Relative (Join-Path $qtSource 'qtbase/LICENSES') $notices 'LGPL-3.0-only.txt'
-    Copy-Relative (Join-Path $qtSource 'qtquick3d/LICENSES') $notices 'GPL-3.0-only.txt'
     $sbom=Join-Path $qt 'sbom'
-    foreach($module in 'qtbase','qtdeclarative','qtmultimedia','qtquick3d','qtshadertools','qtserialport','qtsvg','qtimageformats','qtlottie'){
+    foreach($module in 'qtbase','qtmultimedia','qtserialport','qtsvg','qtimageformats'){
         Copy-Relative $sbom (Join-Path $notices 'qt-sbom') "$module-6.11.1.spdx"
     }
 }

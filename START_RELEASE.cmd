@@ -10,14 +10,10 @@ if not defined DCTS_QT_ROOT (
 )
 set "PATH=%DCTS_QT_ROOT%\bin;%SystemRoot%\System32;%SystemRoot%"
 set "QT_PLUGIN_PATH=%DCTS_QT_ROOT%\plugins"
-set "QML_IMPORT_PATH=%DCTS_QT_ROOT%\qml"
-set "QML2_IMPORT_PATH=%DCTS_QT_ROOT%\qml"
 goto launch
 :local_runtime
 set "PATH=%~dp0x64\Release;%SystemRoot%\System32;%SystemRoot%"
 set "QT_PLUGIN_PATH=%~dp0x64\Release"
-set "QML_IMPORT_PATH=%~dp0x64\Release\qml"
-set "QML2_IMPORT_PATH=%~dp0x64\Release\qml"
 :launch
 cd /d "%~dp0"
 rem The default Release build selects the workspace TensorRT-RTX runtime.

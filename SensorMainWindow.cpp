@@ -3,10 +3,12 @@
 #include "RenderingSettings.h"
 #include "TactileDockWidget.h"
 #include "sensors/DepthMapWidget.h"
+#include "sensors/DepthSdkClient.h"
 #include "sensors/MeasurementCaptureDialog.h"
 #include "sensors/RtspCameraPage.h"
 #include "sensors/RvDeviceManagerDialog.h"
 #include "sensors/RvInferenceSettings.h"
+#include "sensors/RvImportDiagnostics.h"
 #include "sensors/RvPointCloudWidget.h"
 #include "sensors/RvTunerController.h"
 #include "sensors/TactileVisualizationWidget.h"
@@ -20,6 +22,7 @@
 #include <QMessageBox>
 #include <QScrollArea>
 #include <QSettings>
+#include <QStatusBar>
 #include <QTimer>
 #include <QVBoxLayout>
 #ifdef Q_OS_WIN
@@ -73,7 +76,37 @@ SensorMainWindow::SensorMainWindow(LanguageManager *language, QWidget *parent)
         dialog->setAttribute(Qt::WA_DeleteOnClose);
         dialog->open();
     },Qt::QueuedConnection);
-    connect(m_session,&RvSessionController::boardFilesRequired,this,&SensorMainWindow::offerBoardImport,Qt::QueuedConnection);
+    m_session->initializeDepthSdk();
+    auto *sdk = m_session->depthSdk();
+    connect(sdk, &DepthSdkClient::boardFilesRequired, this, [this, sdk](const QString &id) {
+        const auto revision = sdk->stopRevision();
+        QTimer::singleShot(0, this, [this, id, revision] { offerBoardImport(id, revision); });
+    });
+    connect(sdk, &DepthSdkClient::usbDiscovered, this, [this, sdk](const QJsonObject &status) {
+        const auto revision = sdk->stopRevision();
+        QTimer::singleShot(0, this, [this, sdk, status, revision] {
+            if (sdk->stopRevision() == revision) offerUsbSetup(status);
+        });
+    });
+    connect(sdk, &DepthSdkClient::usbStatusChanged, this, [this](const QJsonObject &status) {
+        if (!m_closing && !(m_devices && m_devices->operationPending())
+            && status["state"] == "enrolled" && status["rgb_lsc_offer"].toBool())
+            showDeviceManager()->offerUsbRgbLsc();
+    });
+    connect(sdk, &DepthSdkClient::captureError, this, [this, sdk](const QString &reason, const QJsonObject &usb) {
+        if (m_closing) return;
+        if (reason == "usb_setup_failed")
+            RvImportDiagnostics::showFailure(this, "usb_enrollment", tr("Could not connect the depth camera over USB."), usb);
+        else statusBar()->showMessage(sdk->captureStatusText(), 7000);
+    }, Qt::QueuedConnection);
+    connect(sdk, &DepthSdkClient::closeReady, this, [this] { if (m_closing) close(); });
+    auto *usbTimer = new QTimer(this);
+    usbTimer->setInterval(2500);
+    connect(usbTimer, &QTimer::timeout, this, [this, sdk] {
+        if (isVisible() && !m_closing && !m_session->tuner()->shutdownPending()
+            && !QApplication::activeModalWidget() && !(m_devices && m_devices->isVisible())) sdk->scanUsb();
+    });
+    usbTimer->start();
     m_tactile=new TactileDockWidget(this);
     m_depthDock=new QDockWidget(this);m_depthDock->setObjectName("depthMapDock");
     m_depthDock->setMinimumSize(380,220);
@@ -181,8 +214,6 @@ RvDeviceManagerDialog *SensorMainWindow::showDeviceManager(bool modal)
 {
     if (!m_devices) {
         m_devices = new RvDeviceManagerDialog(m_session, this);
-        connect(m_devices, &RvDeviceManagerDialog::usbConnectionRequested,
-                this, &SensorMainWindow::usbDeviceConnectionRequested);
         m_devices->setAttribute(Qt::WA_DeleteOnClose);
     }
     if (modal && !m_devices->isModal()) {
@@ -195,39 +226,40 @@ RvDeviceManagerDialog *SensorMainWindow::showDeviceManager(bool modal)
     return m_devices;
 }
 
-void SensorMainWindow::offerBoardImport(const RvDeviceProfile &device)
+void SensorMainWindow::offerBoardImport(const QString &id, quint64 revision)
 {
-    const auto stillSelected = [this, &device] {
+    const auto stillSelected = [this, &id, revision] {
+        auto *sdk = m_session->depthSdk();
         return !m_closing && m_session->userStopped() && !m_session->busy()
-            && m_session->deviceProfile().json() == device.json();
+            && sdk->canManageDevices() && sdk->stopRevision() == revision && sdk->activeDeviceId() == id;
     };
     if (!stillSelected()) return;
     if (QMessageBox::question(this, tr("Install required board files"),
-            tr("%1 is missing required board capture files. Open the capture support installer?")
-                .arg(device.name), QMessageBox::Yes | QMessageBox::No, QMessageBox::No) != QMessageBox::Yes
+            tr("The device needs board files before capture can start. Check and repair them now?"),
+            QMessageBox::Yes | QMessageBox::No, QMessageBox::No) != QMessageBox::Yes
         || !stillSelected()) return;
-    showDeviceManager(true)->importBoardFilesForStart(device);
+    showDeviceManager(true)->importBoardFilesForStart(id);
 }
 
-void SensorMainWindow::offerUsbSetup(bool existingDevice, bool networkSetup,const QJsonObject &identity)
+void SensorMainWindow::offerUsbSetup(const QJsonObject &status)
 {
-    if(m_closing || m_session->tuner()->shutdownPending())return;
-    const auto text=!existingDevice
+    auto *sdk = m_session->depthSdk();
+    const auto state = status["state"];
+    const auto checkId = status["check_id"].toInteger();
+    if (m_closing || m_session->tuner()->shutdownPending() || !sdk->userStopped() || checkId <= 0) return;
+    if (state == "ready") { sdk->connectViaUsb(quint64(checkId)); return; }
+    if (state != "registration_required" && state != "network_required" && state != "update_required") return;
+    const auto text = state == "registration_required"
         ? tr("A new RV1103 was detected. Go to Settings to add it automatically?")
-        : networkSetup ? tr("The RV1103 connection needs setup. Go to Settings to complete it automatically?")
-                       : tr("RV1103 board files need updating. Go to Settings to update them automatically?");
+        : state == "network_required" ? tr("The RV1103 connection needs setup. Go to Settings to complete it automatically?")
+                                      : tr("RV1103 board files need updating. Go to Settings to update them automatically?");
+    const auto stopRevision = sdk->stopRevision();
     QMessageBox prompt(QMessageBox::Question,tr("RV1103 connection"),text,
                        QMessageBox::Yes|QMessageBox::No,this);
     prompt.setObjectName("rvUsbSetupPrompt");
     prompt.setDefaultButton(QMessageBox::No);
-    if(prompt.exec()!=QMessageBox::Yes || m_closing || m_session->tuner()->shutdownPending())return;
-    auto *dialog=showDeviceManager();
-    const auto stopRevision=m_session->stopRevision();
-    // The watcher finishes its discovery callback before the shared USB action
-    // is dispatched. The same entry point also enforces the offline guard.
-    QTimer::singleShot(0,dialog,[dialog,identity,session=QPointer<RvSessionController>(m_session),stopRevision]{
-        if(session && session->stopRevision()==stopRevision)dialog->connectViaUsb(identity);
-    });
+    if (prompt.exec() == QMessageBox::Yes && !m_closing && !m_session->tuner()->shutdownPending()
+        && sdk->userStopped() && sdk->stopRevision() == stopRevision) showDeviceManager()->connectViaUsb(quint64(checkId));
 }
 
 SensorMainWindow::~SensorMainWindow()
@@ -296,7 +328,9 @@ void SensorMainWindow::closeEvent(QCloseEvent *event)
     if(m_session->tuner()->shutdownPending()&&!m_tunerCloseReady){
         event->ignore();m_closing=true;m_session->tuner()->stop();return;
     }
-    m_closing=true;saveLayout();m_tactile->display()->stop();m_session->stop();event->accept();
+    m_closing=true;
+    if (!m_session->depthSdk()->shutdown()) { event->ignore(); return; }
+    saveLayout();m_tactile->display()->stop();m_session->stop();event->accept();
 }
 
 void SensorMainWindow::changeEvent(QEvent *event)

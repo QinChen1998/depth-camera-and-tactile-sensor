@@ -13,7 +13,9 @@ This project retains the provenance and license material belonging to its sensor
 | dToF tuner payload | `tools/dtof_tuner/payload/LICENSE-MIT.TXT`, `provenance.json`; the same files are hashed in the deployed worker manifest |
 | VideoLAN VLC 3 managed RTSP/H.265 runtime | Installed `licenses/VLC/` contains the license, authors and matching release source location |
 | FFmpeg 7.1.3 headers and provenance | `third_party/ffmpeg_7_1_3/` |
-| Qt 6.11.1 and its QML/runtime dependencies | The matching Qt installation; `windeployqt` copies the binaries and plugins required by this application |
+| Qt 6.11.1 Widgets, multimedia and serial runtime | `windeployqt` collects the required DLLs and plugins. The installer includes the corresponding notices and SBOM files. |
+| CXWL Depth Camera SDK for Windows x64, 2.2.2 | The supplied Windows ZIP. The app dynamically links `CxwlDepthSdk.dll` and includes the vendor product license and third-party notices in `cxwl-depth-sdk/`. |
+| Adapted CXWL SDK Qt Viewer examples | The MIT notice in `third_party/cxwl-depth-sdk-example/LICENSE` applies to the adapted capture client, device manager and point-cloud canvas. |
 | Android SDK Platform-Tools (USB enrollment) | External ADB runtime in `platform-tools/` alongside the executable, with the distribution's `NOTICE.txt` and `source.properties` |
 
 The deployed model is recorded as `LicenseRef-Proprietary`, following the model provider's declaration of architecture redesign and retraining. Its usage notice is `UniDepthRuntimeRgb672VgaFP16RTX/licenses/Proprietary-Model-NOTICE.txt`. Existing model names, source/conversion identifiers and hashes remain as technical traceability records; this notice update does not alter or independently verify the model's training provenance. Any incorporated third-party source code, pretrained weights or training data remain subject to their applicable terms.

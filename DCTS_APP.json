@@ -11,11 +11,7 @@
     "host_unidepth_rgb672_vga_fp16_tof48_b",
     "host_depthpro2_s_vga_fp16",
     "host_depthpro2_s_vga_fp16_reuse_tof",
-    "host_depthpro2_b_vga_fp16",
-    "host_depthpro2_b_vga_fp16_reuse_tof",
-    "board_native_tof48",
     "board_native_tof48_1200k",
-    "board_native_tof48_high_accuracy",
     "board_native_tof48_high_accuracy_1200k"
   ],
   "unidepth_correction": "G"

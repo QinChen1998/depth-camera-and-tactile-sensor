@@ -1,5 +1,4 @@
 #pragma once
-#include "SceneInstanceBuffer.h"
 #include "TactileFrame.h"
 #include <cmath>
 #include <QObject>
@@ -8,8 +7,9 @@
 #include <QVector3D>
 #include <QPalette>
 
-using TactileInstanceBuffer = SceneInstanceBuffer;
-// Read-only QML presentation snapshot. No controller, source, or motion authority.
+struct TactileSurfaceModel;
+
+// Read-only tactile presentation snapshot.
 class TactileSceneAdapter final : public QObject {
     Q_OBJECT
     Q_PROPERTY(QVariantMap surface READ surface NOTIFY surfaceChanged)
@@ -21,11 +21,6 @@ class TactileSceneAdapter final : public QObject {
     Q_PROPERTY(QVariantMap resultant READ resultant NOTIFY frameChanged)
     Q_PROPERTY(bool valid READ valid NOTIFY frameChanged)
     Q_PROPERTY(QString sourceLabel READ sourceLabel NOTIFY sourceLabelChanged)
-    Q_PROPERTY(TactileInstanceBuffer *interpolatedPoints READ interpolatedPoints CONSTANT)
-    Q_PROPERTY(TactileInstanceBuffer *interpolatedPointShafts READ interpolatedPointShafts CONSTANT)
-    Q_PROPERTY(TactileInstanceBuffer *interpolatedPointHeads READ interpolatedPointHeads CONSTANT)
-    Q_PROPERTY(TactileInstanceBuffer *interpolatedComponentShafts READ interpolatedComponentShafts CONSTANT)
-    Q_PROPERTY(TactileInstanceBuffer *interpolatedComponentHeads READ interpolatedComponentHeads CONSTANT)
     Q_PROPERTY(bool communicationStatusVisible READ communicationStatusVisible NOTIFY optionsChanged)
     Q_PROPERTY(bool pointArrows READ pointArrows NOTIFY optionsChanged)
     Q_PROPERTY(bool resultantArrow READ resultantArrow NOTIFY optionsChanged)
@@ -66,6 +61,7 @@ public:
     void setGridSize(int size);
     int gridSize() const { return m_gridSize; }
     QVariantMap surface() const;
+    const TactileSurfaceModel &surfaceModel() const;
     QVariantList points() const {return m_points;}
     QVector3D dotBoundsMinimum() const {return m_dotMinimum;}
     QVector3D dotBoundsMaximum() const {return m_dotMaximum;}
@@ -73,12 +69,6 @@ public:
     bool valid() const {return m_valid;}
     QString sourceLabel() const { return m_sourceLabel; }
     void setSourceLabel(const QString &value) { if(m_sourceLabel!=value){m_sourceLabel=value;emit sourceLabelChanged();} }
-    TactileInstanceBuffer *interpolatedPoints() const { return m_interpolatedPoints; }
-    TactileInstanceBuffer *interpolatedPointShafts() const { return m_interpolatedPointShafts; }
-    TactileInstanceBuffer *interpolatedPointHeads() const { return m_interpolatedPointHeads; }
-    TactileInstanceBuffer *interpolatedComponentShafts() const { return m_interpolatedComponentShafts; }
-    TactileInstanceBuffer *interpolatedComponentHeads() const { return m_interpolatedComponentHeads; }
-    Q_INVOKABLE void setArrowMeshBounds(bool head,double bottom,double height);
     Q_INVOKABLE void selectRawPoint(int index) { if(m_valid&&index>=0&&index<rawPointCount())emit rawPointSelected(index); }
     bool communicationStatusVisible() const { return m_communicationStatusVisible; }
     void setCommunicationStatusVisible(bool value) { if(m_communicationStatusVisible!=value){m_communicationStatusVisible=value;emit optionsChanged();} }
@@ -104,15 +94,10 @@ signals:
     void optionsChanged();
 private:
     void rebuildPoints(const tactile::Finger *finger,int selectedModule);
-    void rebuildInstances();
-    TactileInstanceBuffer *m_interpolatedPoints,*m_interpolatedPointShafts,*m_interpolatedPointHeads;
-    TactileInstanceBuffer *m_interpolatedComponentShafts,*m_interpolatedComponentHeads;
-    double m_shaftBottom=-50,m_shaftHeight=100,m_headBottom=0,m_headHeight=100;
     int m_gridSize=2;
     int m_type=0;
     QVariantList m_points;
     QVector3D m_dotMinimum,m_dotMaximum;
-    QVector<QQuick3DInstancing::InstanceTableEntry> m_spheres,m_pointShafts,m_pointHeads,m_componentShafts,m_componentHeads;
     QVariantMap m_resultant;
     QPalette m_palette;
     bool m_valid=false,m_pointArrows=false,m_resultantArrow=true;

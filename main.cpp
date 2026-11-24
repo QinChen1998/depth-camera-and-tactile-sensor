@@ -220,7 +220,6 @@ int main(int argc,char **argv)
     }
     if(qEnvironmentVariable("RV_TEST_OFFLINE_ONLY")!="1")window.tactile()->display()->connectDefaultSerial();
     auto *inference=RvInferenceSettings::instance();
-    watchRvUsbDevices(window.session(),&window);
     QTimer::singleShot(0,inference,&RvInferenceSettings::detectDevices);
     app.setQuitOnLastWindowClosed(true);return app.exec();
 }

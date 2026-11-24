@@ -11,12 +11,8 @@ QVariantMap pressureArrow(const tactile::Force &force,double scale,double maximu
     return value;
 }
 }
-TactileSceneAdapter::TactileSceneAdapter(QObject *parent):QObject(parent),
-    m_interpolatedPoints(new TactileInstanceBuffer(this)),
-    m_interpolatedPointShafts(new TactileInstanceBuffer(this)),
-    m_interpolatedPointHeads(new TactileInstanceBuffer(this)),
-    m_interpolatedComponentShafts(new TactileInstanceBuffer(this)),
-    m_interpolatedComponentHeads(new TactileInstanceBuffer(this)) { invalidate(); }
+TactileSceneAdapter::TactileSceneAdapter(QObject *parent):QObject(parent) { invalidate(); }
+const TactileSurfaceModel &TactileSceneAdapter::surfaceModel() const { return tactileSurfaceModel(m_type); }
 QVector3D TactileSceneAdapter::pointPosition(int index,int type) {
     const auto &surface=tactileSurfaceModel(type);
     return surface.valid&&index>=0&&index<surface.positions.size()?surface.positions[index]:QVector3D();
@@ -113,9 +109,7 @@ void TactileSceneAdapter::rebuildPoints(const tactile::Finger *finger,int select
 }
 void TactileSceneAdapter::invalidate(bool typeChanged) {
     m_valid=false;rebuildPoints(nullptr,-1);
-    rebuildInstances();
     m_resultant=pressureArrow({},12,90);m_resultant["position"]=QVariant::fromValue(QVector3D());
-    // Update the raw repeater count before its delegates read a shorter list.
     if(typeChanged)emit surfaceChanged();
     emit frameChanged();
 }
@@ -138,70 +132,23 @@ void TactileSceneAdapter::publish(const tactile::Frame &frame,int finger,bool mo
     rebuildPoints(&f,moduleMode?module:-1);
     m_resultant=pressureArrow(moduleMode?f.modules[module].resultant:f.resultant,12.0/32767.0*m_arrowGain,90,m_reverseZArrows);
     m_resultant["position"]=QVariant::fromValue(tactileSurfaceModel(m_type).resultantPosition+m_resultant["offset"].value<QVector3D>()*.0001f);m_valid=true;
-    rebuildInstances();
     if(typeChanged)emit surfaceChanged();
     emit frameChanged();
 }
-void TactileSceneAdapter::setPalette(const QPalette &palette){m_palette=palette;rebuildInstances();emit themeChanged();}
-void TactileSceneAdapter::setPointArrows(bool value){if(value!=m_pointArrows){m_pointArrows=value;rebuildInstances();emit optionsChanged();}}
+void TactileSceneAdapter::setPalette(const QPalette &palette){m_palette=palette;emit themeChanged();}
+void TactileSceneAdapter::setPointArrows(bool value){if(value!=m_pointArrows){m_pointArrows=value;emit optionsChanged();}}
 void TactileSceneAdapter::setResultantArrow(bool value){if(value!=m_resultantArrow){m_resultantArrow=value;emit optionsChanged();}}
-void TactileSceneAdapter::setComponentArrows(bool value){if(value!=m_componentArrows){m_componentArrows=value;rebuildInstances();emit optionsChanged();}}
-void TactileSceneAdapter::setDotMatrix(bool value){if(value!=m_dotMatrix){m_dotMatrix=value;rebuildInstances();emit optionsChanged();}}
+void TactileSceneAdapter::setComponentArrows(bool value){if(value!=m_componentArrows){m_componentArrows=value;emit optionsChanged();}}
+void TactileSceneAdapter::setDotMatrix(bool value){if(value!=m_dotMatrix){m_dotMatrix=value;emit optionsChanged();}}
 void TactileSceneAdapter::setArrowWidthGain(double gain){
     if(!std::isfinite(gain)||gain<0.1||gain>10||gain==m_arrowWidthGain)return;
-    m_arrowWidthGain=gain;rebuildInstances();emit optionsChanged();
+    m_arrowWidthGain=gain;emit optionsChanged();
 }
 void TactileSceneAdapter::setResultantSizeGain(double gain){
     if(!std::isfinite(gain)||gain<0.1||gain>10||gain==m_resultantSizeGain)return;
     m_resultantSizeGain=gain;emit optionsChanged();
 }
 
-void TactileSceneAdapter::setArrowMeshBounds(bool head,double bottom,double height) {
-    if(!std::isfinite(bottom)||!std::isfinite(height)||height<=0||height>1000||std::abs(bottom)>1000)return;
-    auto &oldBottom=head?m_headBottom:m_shaftBottom;
-    auto &oldHeight=head?m_headHeight:m_shaftHeight;
-    if(oldBottom==bottom&&oldHeight==height)return;
-    oldBottom=bottom;oldHeight=height;rebuildInstances();
-}
-void TactileSceneAdapter::rebuildInstances() {
-    using Entry=QQuick3DInstancing::InstanceTableEntry;
-    auto &spheres=m_spheres,&pointShafts=m_pointShafts,&pointHeads=m_pointHeads,
-        &componentShafts=m_componentShafts,&componentHeads=m_componentHeads;
-    spheres.clear();pointShafts.clear();pointHeads.clear();componentShafts.clear();componentHeads.clear();
-    const int extras=m_valid?qMax(0,int(m_points.size())-rawPointCount()):0;
-    spheres.reserve(extras);pointShafts.reserve(extras);pointHeads.reserve(extras);
-    componentShafts.reserve(extras*3);componentHeads.reserve(extras*3);
-    // The same 0.1 mm glyph units used by TactileArrow, expressed in the sensor's
-    // metre grid; sensorRoot remains the only metres-to-millimetres conversion.
-    constexpr double glyphScale=.0001;
-    const auto appendArrow=[&](const QVariantMap &arrow,const QVector3D &anchor,double radius,
-        double thickness,const QColor &color,QVector<Entry> &shafts,QVector<Entry> &heads) {
-        if(!arrow["arrowVisible"].toBool())return;
-        const auto rotation=arrow["rotation"].value<QQuaternion>();
-        const double length=arrow["length"].toDouble();
-        const auto shaftPosition=anchor+rotation.rotatedVector(QVector3D(0,float(-m_shaftBottom*length/m_shaftHeight*glyphScale),0));
-        const auto headPosition=anchor+rotation.rotatedVector(QVector3D(0,float((length-m_headBottom*3/m_headHeight)*glyphScale),0));
-        shafts.append(TactileInstanceBuffer::entry(shaftPosition,
-            QVector3D(float(radius/50*glyphScale),float(length/m_shaftHeight*glyphScale),float(radius/50*glyphScale)),rotation,color));
-        const float headRadius=float(thickness*.81/50*glyphScale);
-        heads.append(TactileInstanceBuffer::entry(headPosition,QVector3D(headRadius,float(3/m_headHeight*glyphScale),headRadius),rotation,color));
-    };
-    static const QColor axisColors[]={QColor("#ff525d"),QColor("#48e58b"),QColor("#40baff")};
-    for(int i=rawPointCount();i<rawPointCount()+extras;++i) {
-        const auto point=m_points[i].toMap();const auto position=point[m_dotMatrix?"dotPosition":"position"].value<QVector3D>();
-        const double radius=m_dotMatrix?3.5:point["radius"].toDouble();
-        const float sphereRadius=float(radius/50*glyphScale);
-        spheres.append(TactileInstanceBuffer::entry(position,QVector3D(sphereRadius,sphereRadius,sphereRadius),{},point["color"].value<QColor>()));
-        if(m_dotMatrix)continue;
-        if(m_pointArrows)appendArrow(point,position,radius/2*m_arrowWidthGain,.75*m_arrowWidthGain,textColor(),pointShafts,pointHeads);
-        if(m_componentArrows){
-            const auto components=point["components"].toList();
-            for(int axis=0;axis<3;++axis)appendArrow(components[axis].toMap(),position,.875*m_arrowWidthGain,1.4*m_arrowWidthGain,axisColors[axis],componentShafts,componentHeads);
-        }
-    }
-    m_interpolatedPoints->setEntries(spheres);m_interpolatedPointShafts->setEntries(pointShafts);m_interpolatedPointHeads->setEntries(pointHeads);
-    m_interpolatedComponentShafts->setEntries(componentShafts);m_interpolatedComponentHeads->setEntries(componentHeads);
-}
 void TactileSceneAdapter::setModelOpacity(double value){
     if(!std::isfinite(value))return;
     value=std::clamp(value,0.0,1.0);

@@ -1,5 +1,4 @@
 #include "RvPointCloudWidget.h"
-#include "DockableQuick3DWidget.h"
 #include "RvAssistFusion.h"
 #include "RvCalibration.h"
 #include "RvCameraView.h"
@@ -7,9 +6,9 @@
 #include "RvDepthDiagnostic.h"
 #include "RvSessionController.h"
 #include "SceneInstanceBuffer.h"
-#include "../RenderingSettings.h"
 #include <QComboBox>
 #include <QDoubleSpinBox>
+#include <QEvent>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QLineEdit>
@@ -20,7 +19,6 @@
 #include <QVBoxLayout>
 #include <QtConcurrent/QtConcurrentRun>
 #include <QtEndian>
-#include <QtQuick3D/QQuick3DGeometry>
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -150,8 +148,8 @@ QVector4D displayColor(QRgb color)
 Instance nativePoint(const QVector3D &position)
 {
     const float depthMm = -position.z();
-    const float scale = std::max(3.5f, depthMm * .012f) / 100.f;
-    return {{scale, 0, 0, position.x()}, {0, scale, 0, position.y()}, {0, 0, scale, position.z()}, {}, {}};
+    const float diameter = std::max(3.5f, depthMm * .012f);
+    return {position, diameter, {}};
 }
 
 double savedNumber(const QSettings &settings, const char *key, double fallback, const QDoubleSpinBox &field)
@@ -166,9 +164,7 @@ RvPointCloudWidget::RvPointCloudWidget(RvSessionController *session, QWidget *pa
     : QWidget(parent), m_session(session),
       m_instances(new SceneInstanceBuffer(this)),
       m_depthInstances(new SceneInstanceBuffer(this)),
-      m_meshGeometry(new QQuick3DGeometry),
-      m_view(new DockableQuick3DWidget(this, {"pointInstances", "depthInstances", "depthPointDiameter", "renderSettings",
-          "meshGeometry", "meshVisible", "cameraTarget", "cameraDistance", "orbitYaw", "orbitPitch"})),
+      m_view(new RvPointCloudCanvas(m_instances, m_depthInstances, this)),
       m_status(new QLabel(this)), m_displayMode(new QComboBox(this)),
       m_colorMode(new QComboBox(this)), m_pause(new QPushButton(this)),
       m_accumulate(new QPushButton(this)), m_reset(new QPushButton(this)),
@@ -182,17 +178,7 @@ RvPointCloudWidget::RvPointCloudWidget(RvSessionController *session, QWidget *pa
     setObjectName("rvPointCloudWidget");
     m_instances->setObjectName("rvPointCloudInstances");
     m_depthInstances->setObjectName("rvPointCloudDepthInstances");
-    m_meshGeometry->QObject::setParent(this);
-    m_meshGeometry->setObjectName("rvPointCloudMeshGeometry");
-    m_meshGeometry->setPrimitiveType(QQuick3DGeometry::PrimitiveType::Triangles);
-    m_meshGeometry->setStride(sizeof(MeshVertex));
-    using Attribute = QQuick3DGeometry::Attribute;
-    m_meshGeometry->addAttribute(Attribute::PositionSemantic, offsetof(MeshVertex, position), Attribute::F32Type);
-    m_meshGeometry->addAttribute(Attribute::ColorSemantic, offsetof(MeshVertex, color), Attribute::F32Type);
-    m_meshGeometry->addAttribute(Attribute::IndexSemantic, 0, Attribute::U32Type);
     m_view->setObjectName("rvPointCloudView");
-    m_view->setResizeMode(QQuickWidget::SizeRootObjectToView);
-    m_view->setClearColor(QColor("#161b22"));
     m_view->setMinimumSize(300, 190);
     auto viewPolicy = m_view->sizePolicy();
     viewPolicy.setRetainSizeWhenHidden(true);
@@ -217,10 +203,7 @@ RvPointCloudWidget::RvPointCloudWidget(RvSessionController *session, QWidget *pa
     layout->addLayout(toolbar);
     layout->addWidget(m_view, 1);
     setupDisplayControls(*layout);
-    m_view->setInitialProperties({{"pointInstances", QVariant::fromValue(m_instances)},
-        {"depthInstances", QVariant::fromValue(m_depthInstances)}, {"depthPointDiameter", m_diameter->value()},
-        {"meshGeometry", QVariant::fromValue(static_cast<QObject *>(m_meshGeometry))},
-        {"renderSettings", QVariant::fromValue(RenderingSettings::instance())}});
+    m_view->setDepthPointDiameter(m_diameter->value());
 
     m_colorLegend->setObjectName("rvPointCloudColorLegend");
     m_colorLegend->setFixedSize(96, 7);
@@ -258,16 +241,7 @@ RvPointCloudWidget::RvPointCloudWidget(RvSessionController *session, QWidget *pa
     connect(m_session, &RvSessionController::dtofCandidateSelectionChanged, this, &RvPointCloudWidget::clearFrames);
     connect(m_session, &RvSessionController::stateChanged, this, &RvPointCloudWidget::updateStatus);
     connect(&m_depthConversion, &QFutureWatcher<DepthProjection>::finished, this, &RvPointCloudWidget::finishDepthConversion);
-    connect(m_reset, &QPushButton::clicked, this, [this] {
-        if (auto *scene = m_view->rootObject())
-            QMetaObject::invokeMethod(scene, "resetView");
-    });
-    connect(m_view, &QQuickWidget::statusChanged, this, [this](QQuickWidget::Status status) {
-        if (status == QQuickWidget::Ready)
-            presentLatest();
-        else
-            updateStatus();
-    });
+    connect(m_reset, &QPushButton::clicked, m_view, &RvPointCloudCanvas::resetView);
     retranslate();
 }
 
@@ -336,8 +310,7 @@ void RvPointCloudWidget::setupDisplayControls(QVBoxLayout &layout)
     });
     connect(m_diameter, &QDoubleSpinBox::valueChanged, this, [this](double diameter) {
         QSettings().setValue(DiameterKey, diameter);
-        if (auto *scene = m_view->rootObject())
-            scene->setProperty("depthPointDiameter", diameter);
+        m_view->setDepthPointDiameter(diameter);
     });
     const auto updateApply = [this] {
         const double minimum = m_colorMinimum->value();
@@ -401,10 +374,7 @@ void RvPointCloudWidget::setRenderingActive(bool active)
     m_renderingActive = active;
     if (!active || m_pause->isChecked())
         return;
-    if (m_view->source().isEmpty())
-        m_view->setSource(QUrl(QStringLiteral("qrc:/qml/RvPointCloudView.qml")));
-    else
-        presentLatest();
+    presentLatest();
 }
 
 void RvPointCloudWidget::setPaused(bool paused)
@@ -517,12 +487,9 @@ void RvPointCloudWidget::presentLatest()
 {
     if (!m_renderingActive || m_pause->isChecked())
         return;
-    if (auto *scene = m_view->rootObject()) {
-        scene->setProperty("depthPointDiameter", m_diameter->value());
-        if (capturesNative48(*m_session))
-            presentNativeFrames();
-        startDepthConversion();
-    }
+    m_view->setAssisted(capturesAssistedDepth(*m_session));
+    if (capturesNative48(*m_session)) presentNativeFrames();
+    startDepthConversion();
     updateStatus();
 }
 
@@ -669,12 +636,6 @@ RvPointCloudWidget::MeshData RvPointCloudWidget::makeMeshData(const QVector<Mesh
     if (indices.isEmpty())
         return {};
     MeshData mesh;
-    mesh.minimum = mesh.maximum = vertices.first().position;
-    for (const auto &vertex : vertices) {
-        const auto &p = vertex.position;
-        mesh.minimum = {std::min(mesh.minimum.x(), p.x()), std::min(mesh.minimum.y(), p.y()), std::min(mesh.minimum.z(), p.z())};
-        mesh.maximum = {std::max(mesh.maximum.x(), p.x()), std::max(mesh.maximum.y(), p.y()), std::max(mesh.maximum.z(), p.z())};
-    }
     mesh.vertices = QByteArray(reinterpret_cast<const char *>(vertices.constData()), vertices.size() * sizeof(MeshVertex));
     mesh.indices = QByteArray(reinterpret_cast<const char *>(indices.constData()), indices.size() * sizeof(quint32));
     return mesh;
@@ -682,20 +643,12 @@ RvPointCloudWidget::MeshData RvPointCloudWidget::makeMeshData(const QVector<Mesh
 
 void RvPointCloudWidget::publishMesh(const MeshData &mesh)
 {
-    const bool hasFaces = !mesh.indices.isEmpty();
-    if (hasFaces || !m_meshGeometry->indexData().isEmpty()) {
-        m_meshGeometry->setVertexData(mesh.vertices);
-        m_meshGeometry->setIndexData(mesh.indices);
-        m_meshGeometry->setBounds(mesh.minimum, mesh.maximum);
-        m_meshGeometry->update();
-    }
-    if (auto *scene = m_view->rootObject())
-        scene->setProperty("meshVisible", hasFaces);
+    m_view->setMesh(mesh.vertices, mesh.indices);
 }
 
 void RvPointCloudWidget::startDepthConversion()
 {
-    if (!m_depthDirty || m_depthConverting || m_pause->isChecked() || !m_renderingActive || !m_view->rootObject())
+    if (!m_depthDirty || m_depthConverting || m_pause->isChecked() || !m_renderingActive)
         return;
 
     const auto &depth = m_session->monocularDisplay() ? m_latestMonocularDepth : m_latestDepth;
@@ -762,7 +715,7 @@ void RvPointCloudWidget::projectDepth(QPromise<DepthProjection> &work, const QBy
         output = projected.points.data();
     }
     const double scale = MillimetresPerMetre / camera.focal;
-    Instance point{{1, 0, 0, 0}, {0, 1, 0, 0}, {0, 0, 1, 0}, {}, {}};
+    Instance point{};
     for (int row = 0; row < rows; ++row) {
         if (work.isCanceled())
             return;
@@ -793,9 +746,7 @@ void RvPointCloudWidget::projectDepth(QPromise<DepthProjection> &work, const QBy
                 vertices.append({{x, y, z}, color});
                 continue;
             }
-            point.row0.setW(x);
-            point.row1.setW(y);
-            point.row2.setW(z);
+            point.position = {x, y, z};
             // The unshaded point shader writes the display palette directly.
             point.color = color;
             std::memcpy(output, &point, sizeof(point));
@@ -819,14 +770,15 @@ void RvPointCloudWidget::projectDepth(QPromise<DepthProjection> &work, const QBy
 void RvPointCloudWidget::updateStatus()
 {
     const bool paused = m_pause->isChecked();
-    const bool ready = !paused && m_view->status() == QQuickWidget::Ready;
+    const bool ready = !paused && m_renderingActive;
     const bool tofAvailable = m_expiry.remainingTime() > 0;
     const bool assisted = capturesAssistedDepth(*m_session);
+    m_view->setAssisted(assisted);
     if (m_diameterControls->isHidden() == assisted)
         m_diameterControls->setVisible(assisted);
     const bool accumulating = m_accumulate->isChecked();
     const int pointCount = assisted ? m_depthInstances->count() : m_instances->count();
-    const qsizetype triangleCount = m_meshGeometry->indexData().size() / (3 * sizeof(quint32));
+    const qsizetype triangleCount = m_view->indexData().size() / (3 * sizeof(quint32));
     const bool native = capturesNative48(*m_session);
     const bool meshSelected = m_displayMode->currentIndex() == Mesh;
     const bool showingMesh = triangleCount > 0 || (meshSelected && pointCount == 0);
@@ -838,8 +790,6 @@ void RvPointCloudWidget::updateStatus()
     QString text;
     if (paused) {
         text = tr("Point cloud stopped");
-    } else if (m_view->status() == QQuickWidget::Error) {
-        text = tr("3D view unavailable");
     } else if (ready && accumulating && !m_accumulatedFrames.empty()) {
         text = (showingMesh ? tr("%1 / %2 frames · %3 triangles") : tr("%1 / %2 frames · %3 points"))
             .arg(m_accumulatedFrames.size()).arg(AccumulationFrameLimit).arg(showingMesh ? triangleCount : pointCount);

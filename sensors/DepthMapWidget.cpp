@@ -98,13 +98,7 @@ DepthMapWidget::DepthMapWidget(QWidget *parent)
         m_rvModel->addItem(QString(),QLatin1String(RvSessionController::DepthPro2ImagingScheme));
         m_rvModel->addItem(QString(),QLatin1String(RvSessionController::DepthPro2ReuseImagingScheme));
     }
-    if(RvAssistDepth::supportsHostModel(QLatin1String(RvCameraView::DepthPro2BVgaModel))){
-        m_rvModel->addItem(QString(),QLatin1String(RvSessionController::DepthPro2BImagingScheme));
-        m_rvModel->addItem(QString(),QLatin1String(RvSessionController::DepthPro2BReuseImagingScheme));
-    }
-    m_rvModel->addItem(QString(),"board_native_tof48");
     m_rvModel->addItem(QString(),QLatin1String(RvSessionController::Native48ExtendedIntegrationScheme));
-    m_rvModel->addItem(QString(),"board_native_tof48_high_accuracy");
     m_rvModel->addItem(QString(),QLatin1String(RvSessionController::Native48HighAccuracy1200KScheme));
     m_rvModel->setMinimumWidth(0);
     m_rvModel->setSizeAdjustPolicy(QComboBox::AdjustToContents);
@@ -430,11 +424,7 @@ void DepthMapWidget::retranslateUi()
     label(RvSessionController::ReuseLatestTofImagingScheme,tr("Host-assisted inference (B, reuse ToF)"));
     label(RvSessionController::DepthPro2ImagingScheme,tr("Depth Pro 2-S (ToF G)"));
     label(RvSessionController::DepthPro2ReuseImagingScheme,tr("Depth Pro 2-S (ToF B, reuse)"));
-    label(RvSessionController::DepthPro2BImagingScheme,tr("Depth Pro 2-B (ToF G)"));
-    label(RvSessionController::DepthPro2BReuseImagingScheme,tr("Depth Pro 2-B (ToF B, reuse)"));
-    label("board_native_tof48",tr("Board inference"));
     label(RvSessionController::Native48ExtendedIntegrationScheme,tr("Board inference (1200K)"));
-    label("board_native_tof48_high_accuracy",tr("Board inference high accuracy"));
     label(RvSessionController::Native48HighAccuracy1200KScheme,tr("Board inference high accuracy (1200K)"));
     m_depthTabs->setTabText(0,tr("Board depth"));m_depthTabs->setTabText(1,tr("Host assisted depth"));
     m_rvModel->setAccessibleName(tr("Imaging scheme:"));

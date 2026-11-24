@@ -19,7 +19,9 @@
 #include "../sensors/RvDeviceManagerDialog.h"
 #include "../sensors/RvPointCloudWidget.h"
 #include "../sensors/SceneInstanceBuffer.h"
-#include "../sensors/RvUsbEnrollment.h"
+#include "../sensors/DepthSdkClient.h"
+#include "../sensors/RvPointCloudCanvas.h"
+#include "../sensors/TactileCanvas.h"
 #include "../sensors/RvCaptureCalibration.h"
 #include "../sensors/RvTunerWidget.h"
 #include <QApplication>
@@ -41,9 +43,6 @@
 #include <QMenuBar>
 #include <QMessageBox>
 #include <QProcess>
-#include <QQuick3DGeometry>
-#include <QQuickItem>
-#include <QQuickWidget>
 #include <QPushButton>
 #include <QProgressBar>
 #include <QSpinBox>
@@ -190,20 +189,14 @@ int runPortSmokeTests(SensorMainWindow &window,LanguageManager &language,const Q
     const QString reuseHostScheme=QLatin1String(RvSessionController::ReuseLatestTofImagingScheme);
     const QString depthPro2Model=QLatin1String(RvCameraView::DepthPro2VgaModel);
     const QString depthPro2Scheme=QLatin1String(RvSessionController::DepthPro2ImagingScheme);
-    const QString depthPro2BModel=QLatin1String(RvCameraView::DepthPro2BVgaModel);
-    const QString depthPro2BScheme=QLatin1String(RvSessionController::DepthPro2BImagingScheme);
     const bool depthPro2Supported=RvAssistDepth::supportsHostModel(depthPro2Model);
-    const bool depthPro2BSupported=RvAssistDepth::supportsHostModel(depthPro2BModel);
-    const int researchModes=2*(int(depthPro2Supported)+int(depthPro2BSupported));
-    const int depthPro2BIndex=2+2*int(depthPro2Supported);
-    check("EXACT_IMAGING_SCHEMES",models&&models->count()==6+researchModes&&models->itemData(0)==visibleHostScheme
+    const int researchModes=2*int(depthPro2Supported);
+    check("EXACT_IMAGING_SCHEMES",models&&models->count()==4+researchModes&&models->itemData(0)==visibleHostScheme
         &&models->itemData(1)==reuseHostScheme
         &&models->findData(depthPro2Scheme)==(depthPro2Supported?2:-1)
         &&models->findData(RvSessionController::depthPro2Scheme(depthPro2Model,true))==(depthPro2Supported?3:-1)
-        &&models->findData(depthPro2BScheme)==(depthPro2BSupported?depthPro2BIndex:-1)
-        &&models->findData(RvSessionController::depthPro2Scheme(depthPro2BModel,true))==(depthPro2BSupported?depthPro2BIndex+1:-1)
-        &&models->itemData(3+researchModes)==QLatin1String(RvSessionController::Native48ExtendedIntegrationScheme)
-        &&models->itemData(5+researchModes)==QLatin1String(RvSessionController::Native48HighAccuracy1200KScheme));
+        &&models->itemData(2+researchModes)==QLatin1String(RvSessionController::Native48ExtendedIntegrationScheme)
+        &&models->itemData(3+researchModes)==QLatin1String(RvSessionController::Native48HighAccuracy1200KScheme));
     check("OTHER_IMAGING_SCHEMES_ABSENT",models
         &&models->findData("host_unidepth_wide_576_fp16_tof16")==-1
         &&models->findData("board_litesr_near_full_host_contour_hd")==-1
@@ -251,13 +244,13 @@ int runPortSmokeTests(SensorMainWindow &window,LanguageManager &language,const Q
         check("DEPTHPRO2_DIRECT_REMAP_EQUALS_CENTER_OF_EXISTING_MAP",vga.size()==QSize(640,480)
             &&vga==RvCameraStream::prepareHd(decoded,calibration).copy(RvCameraView::VgaInputRoi));
         bool testedResearchMode=false;
-        for(const auto &scheme:{depthPro2Scheme,depthPro2BScheme}){
+        for(const auto &scheme:{depthPro2Scheme}){
             const auto model=RvSessionController::depthPro2ModelForScheme(scheme);
             if(!RvAssistDepth::supportsHostModel(model)||!RvAssistDepth::preflightError(model).isEmpty())continue;
             testedResearchMode=true;
             const auto *runtime=RvCameraView::depthPro2Runtime(model);
             const auto &profile=runtime->view;
-            const QString variant=scheme==depthPro2BScheme?QStringLiteral("DEPTHPRO2_B"):QStringLiteral("DEPTHPRO2");
+            const QString variant=QStringLiteral("DEPTHPRO2");
             const auto reuseScheme=RvSessionController::depthPro2Scheme(model,true);
             session->selectImagingScheme(reuseScheme,session->dtofCandidateSettings());
             check(variant+"_SELECTS_TOF_B_WITHOUT_STARTING_CAMERA",
@@ -327,10 +320,10 @@ int runPortSmokeTests(SensorMainWindow &window,LanguageManager &language,const Q
             dock->show();
             dock->raise();
             settle(80);
-            auto *view = dock->findChild<QQuickWidget *>("rvPointCloudView");
+            auto *view = dock->findChild<RvPointCloudCanvas *>("rvPointCloudView");
             auto *instances = dock->findChild<SceneInstanceBuffer *>("rvPointCloudInstances");
             auto *depthInstances = dock->findChild<SceneInstanceBuffer *>("rvPointCloudDepthInstances");
-            auto *mesh = dock->findChild<QQuick3DGeometry *>("rvPointCloudMeshGeometry");
+            auto *mesh = view;
             auto *displayMode = dock->findChild<QComboBox *>("rvPointCloudDisplayMode");
             auto *colorMode = dock->findChild<QComboBox *>("rvPointCloudColorMode");
             auto *status = dock->findChild<QLabel *>("rvPointCloudStatus");
@@ -349,10 +342,7 @@ int runPortSmokeTests(SensorMainWindow &window,LanguageManager &language,const Q
                 && status->text() == pointCloudText("Start capture in Depth Map or Camera raw video."));
             check("POINT_CLOUD_STOP_CONTROL", pause && pause->isEnabled() && !pause->isChecked()
                 && pause->text() == pointCloudText("Stop point cloud"));
-            check("POINT_CLOUD_QML_READY", depthInstances && view && view->status() == QQuickWidget::Ready);
-            if (view && view->status() == QQuickWidget::Error)
-                for (const auto &error : view->errors())
-                    out << error.toString() << '\n';
+            check("POINT_CLOUD_WIDGET_READY", depthInstances && view && view->isVisible());
             check("POINT_CLOUD_DISPLAY_MODE_DEFAULTS_TO_POINTS", mesh && displayMode && displayMode->isEnabled()
                 && displayMode->currentText() == pointCloudText("Points")
                 && displayMode->count() == 2 && mesh->indexData().isEmpty());
@@ -367,7 +357,7 @@ int runPortSmokeTests(SensorMainWindow &window,LanguageManager &language,const Q
             check("POINT_CLOUD_LEGEND_USES_JET", ramp.size() == QSize(256, 1)
                 && ramp.pixel(0, 0) == qRgb(0, 0, 127) && ramp.pixel(64, 0) == qRgb(0, 128, 255)
                 && ramp.pixel(255, 0) == qRgb(127, 0, 0));
-            if (instances && depthInstances && view && view->status() == QQuickWidget::Ready
+            if (instances && depthInstances && view && view->isVisible()
                 && mesh && displayMode && colorMode && pause && accumulate
                 && diameter && colorMinimum && colorMaximum && applyRange) {
                 session->selectImagingScheme("board_native_tof48", {});
@@ -416,14 +406,14 @@ int runPortSmokeTests(SensorMainWindow &window,LanguageManager &language,const Q
                     && instances->instanceColor(0).rgb() == PointCloudColorScale::color(-expected(2).z() / 1000.)
                     && instances->instanceColor(0).rgb() != PointCloudColorScale::color(frame.distanceMm(2) / 1000.));
 
-                const auto cameraDistance = [&] { return view->rootObject()->property("cameraDistance").toDouble(); };
+                const auto cameraDistance = [&] { return view->property("cameraDistance").toDouble(); };
                 const double initialDistance = cameraDistance();
-                const auto initialTarget = view->rootObject()->property("cameraTarget").value<QVector3D>();
+                const auto initialTarget = view->property("cameraTarget").value<QVector3D>();
                 const auto checkFixedView = [&] {
                     return cameraDistance() == initialDistance
-                        && view->rootObject()->property("cameraTarget").value<QVector3D>() == initialTarget;
+                        && view->property("cameraTarget").value<QVector3D>() == initialTarget;
                 };
-                const auto meshVisible = [&] { return view->rootObject()->property("meshVisible").toBool(); };
+                const auto meshVisible = [&] { return view->property("meshVisible").toBool(); };
                 const auto framebufferHasColor = [&](QRgb rgb) {
                     const auto image = view->grabFramebuffer().convertToFormat(QImage::Format_RGB32);
                     for (int y = 0; y < image.height(); ++y) {
@@ -464,14 +454,18 @@ int runPortSmokeTests(SensorMainWindow &window,LanguageManager &language,const Q
                 settle(30);
                 check("POINT_CLOUD_FRAME_DOES_NOT_REFIT", checkFixedView() && instances->count() == 2
                     && (instances->instancePosition(1) - expected(32 * 48 - 1)).length() < .001f);
-                const auto *axes = view->rootObject()->findChild<QObject *>("rvPointCloudAxes");
-                const auto *axisLabels = view->rootObject()->findChild<QObject *>("rvPointCloudAxisLabels");
-                check("POINT_CLOUD_XYZ_REFERENCE_WITHOUT_GRID", axes && axes->property("count").toInt() == 3
-                    && axisLabels && axisLabels->property("count").toInt() == 3
-                    && !view->rootObject()->property("gridStepMm").isValid());
-                view->rootObject()->setProperty("cameraDistance", initialDistance * 1.8);
-                view->grabFramebuffer().save(path + ".point-cloud-axes.png");
-                view->rootObject()->setProperty("cameraDistance", initialDistance);
+                view->setProperty("cameraDistance", initialDistance * 1.8);
+                const auto axisSnapshot = view->grabFramebuffer().convertToFormat(QImage::Format_RGB32);
+                bool red=false, green=false, blue=false;
+                for(int y=0; y<axisSnapshot.height(); ++y) for(int x=0; x<axisSnapshot.width(); ++x) {
+                    const auto pixel = axisSnapshot.pixel(x,y);
+                    red |= qRed(pixel) > qGreen(pixel)+20 && qRed(pixel) > 100;
+                    green |= qGreen(pixel) > qRed(pixel)+6 && qGreen(pixel) > 70;
+                    blue |= qBlue(pixel) > qRed(pixel)+30 && qBlue(pixel) > 85;
+                }
+                check("POINT_CLOUD_XYZ_REFERENCE_COLORS_RENDER",red&&green&&blue);
+                axisSnapshot.save(path + ".point-cloud-axes.png");
+                view->setProperty("cameraDistance", initialDistance);
 
                 const auto sendPointFrame = [&](int number) {
                     sample(2, quint16(3000 + number * 20), 1);
@@ -539,13 +533,13 @@ int runPortSmokeTests(SensorMainWindow &window,LanguageManager &language,const Q
                 const double manualDistance = cameraDistance();
                 check("POINT_CLOUD_WHEEL_ZOOMS", zoomedOut && manualDistance < initialDistance);
 
-                QQuickItem *scene = view->rootObject();
+                auto *scene = view;
                 scene->setProperty("orbitYaw", 42);
                 sendPointFrame(103);
                 dock->setFloating(true);
                 settle(100);
-                check("POINT_CLOUD_FLOAT_PRESERVES_VIEW", view->status() == QQuickWidget::Ready && view->rootObject()
-                    && view->rootObject()->property("orbitYaw").toInt() == 42
+                check("POINT_CLOUD_FLOAT_PRESERVES_VIEW", view->isVisible() && view
+                    && view->property("orbitYaw").toInt() == 42
                     && cameraDistance() == manualDistance && instances->count() == 2);
                 dock->setFloating(false);
                 dock->raise();
@@ -597,7 +591,7 @@ int runPortSmokeTests(SensorMainWindow &window,LanguageManager &language,const Q
                 frame.samples.fill(0);
                 nativePatch(800.);
                 emit session->tofFrameReady(frame);
-                auto *sceneRoot = view->rootObject();
+                auto *sceneRoot = view;
                 const auto formerTarget = sceneRoot->property("cameraTarget");
                 const auto patchCenter = (expected(meshCell) + expected(meshCell + 49)) * .5f;
                 sceneRoot->setProperty("cameraTarget", patchCenter);
@@ -638,7 +632,7 @@ int runPortSmokeTests(SensorMainWindow &window,LanguageManager &language,const Q
                     && std::abs(meshPosition(0).z() + 801.f) <= .13f);
                 dock->setFloating(true);
                 settle(100);
-                check("POINT_CLOUD_FLOAT_PRESERVES_MESH_AND_HISTORY", view->status() == QQuickWidget::Ready
+                check("POINT_CLOUD_FLOAT_PRESERVES_MESH_AND_HISTORY", view->isVisible()
                     && meshVisible() && triangleCount() == 200 && cameraDistance() == manualDistance);
                 dock->setFloating(false);
                 dock->raise();
@@ -755,7 +749,7 @@ int runPortSmokeTests(SensorMainWindow &window,LanguageManager &language,const Q
                 const double viewDistance = cameraDistance();
                 diameter->setValue(4.2);
                 const QSettings pointPreferences;
-                check("POINT_CLOUD_ASSISTED_DISPLAY_PREFERENCES", view->rootObject()->property("depthPointDiameter").toDouble() == 4.2
+                check("POINT_CLOUD_ASSISTED_DISPLAY_PREFERENCES", view->property("depthPointDiameter").toDouble() == 4.2
                     && cameraDistance() == viewDistance && depthInstances->instancePosition(0) == nearPosition
                     && pointPreferences.value("pointCloud/assistedPointDiameterPx").toDouble() == 4.2
                     && pointPreferences.value("pointCloud/assistedColorMinimumM").toDouble() == .2
@@ -962,15 +956,15 @@ int runPortSmokeTests(SensorMainWindow &window,LanguageManager &language,const Q
                 dock->setFloating(true);
                 settle(100);
                 check("POINT_CLOUD_ASSISTED_FLOAT_PRESERVES_GEOMETRY_AND_ZOOM", waitForCount(pixels)
-                    && cameraDistance() == manualDistance && view->rootObject()->property("orbitYaw").toInt() == 42
-                    && view->rootObject()->property("depthPointDiameter").toDouble() == 4.2);
+                    && cameraDistance() == manualDistance && view->property("orbitYaw").toInt() == 42
+                    && view->property("depthPointDiameter").toDouble() == 4.2);
                 dock->setFloating(false);
                 dock->raise();
                 settle(60);
                 if (reset)
                     reset->click();
-                check("POINT_CLOUD_RESET_VIEW", view->rootObject()
-                    && view->rootObject()->property("orbitYaw").toInt() == -25 && checkFixedView()
+                check("POINT_CLOUD_RESET_VIEW", view
+                    && view->property("orbitYaw").toInt() == -25 && checkFixedView()
                     && diameter->value() == 4.2 && colorMaximum->value() == 2.0);
 
                 displayMode->setCurrentIndex(1);
@@ -1038,19 +1032,27 @@ int runPortSmokeTests(SensorMainWindow &window,LanguageManager &language,const Q
         RvSessionController reopened;
         check(QString("RETIRED_SCHEME_MIGRATES_TO_G_")+retired,reopened.currentImagingScheme()==visibleHostScheme&&reopened.userStopped()&&reopened.assistDepthEnabled()&&reopened.dtofCandidateMode()==RvDtofCandidates::Native48&&!QSettings().contains("depth/boardLiteSrHostHoleMode"));
     }
-    for(const auto *scheme:{"board_native_tof48",RvSessionController::Native48ExtendedIntegrationScheme,
-                            "board_native_tof48_high_accuracy",RvSessionController::Native48HighAccuracy1200KScheme}){
+    for(const auto &migration : {
+            std::pair{"board_native_tof48", RvSessionController::Native48ExtendedIntegrationScheme},
+            std::pair{"board_native_tof48_high_accuracy", RvSessionController::Native48HighAccuracy1200KScheme}}) {
+        QSettings().setValue("depth/imagingScheme", migration.first);
+        RvSessionController migrated;
+        check(QString("OLD_BOARD_SCHEME_MIGRATES_TO_1200K_")+migration.first,
+            migrated.currentImagingScheme()==migration.second&&migrated.native48ExtendedIntegration()
+            &&QSettings().value("depth/imagingScheme").toString()==migration.second);
+    }
+    for(const auto *scheme:{RvSessionController::Native48ExtendedIntegrationScheme,
+                            RvSessionController::Native48HighAccuracy1200KScheme}){
         const QString schemeId=QLatin1String(scheme);
         const int expectedMode=schemeId.contains("high_accuracy")?RvDtofCandidates::Native48HighAccuracy:RvDtofCandidates::Native48;
-        const bool expected1200K=schemeId.endsWith("_1200k");
         session->selectImagingScheme(scheme,{});
         check(QString("NATIVE_MODE_SELECTS_WHILE_STOPPED_")+scheme,session->userStopped()&&!session->busy()&&!session->assistDepthEnabled()
             &&session->currentImagingScheme()==scheme&&models->currentData()==scheme
-            &&session->dtofCandidateMode()==expectedMode&&session->native48ExtendedIntegration()==expected1200K
+            &&session->dtofCandidateMode()==expectedMode&&session->native48ExtendedIntegration()
             &&window.depth()->selectedWidth()==48&&window.depth()->selectedHeight()==32);
         RvSessionController reopened;
         check(QString("NATIVE_MODE_PERSISTS_")+scheme,reopened.currentImagingScheme()==scheme&&!reopened.assistDepthEnabled()&&reopened.userStopped()
-            &&reopened.dtofCandidateMode()==expectedMode&&reopened.native48ExtendedIntegration()==expected1200K);
+            &&reopened.dtofCandidateMode()==expectedMode&&reopened.native48ExtendedIntegration());
 #ifdef Q_OS_WIN
         const QTemporaryDir launchFixture;
         auto *control=reopened.m_previewControl;
@@ -1069,7 +1071,7 @@ int runPortSmokeTests(SensorMainWindow &window,LanguageManager &language,const Q
         const auto arguments=control->arguments();
         check(QString("NATIVE_MODE_START_USES_SELECTED_INTEGRATION_")+scheme,intercepted
             &&arguments.value(0)=="--dtof"&&arguments.value(1)==QString::number(expectedMode)
-            &&arguments.count("--native48-1200k")==int(expected1200K));
+            &&arguments.count("--native48-1200k")==1);
 #endif
     }
     session->selectImagingScheme(visibleHostScheme,{});
@@ -1116,7 +1118,6 @@ int runPortSmokeTests(SensorMainWindow &window,LanguageManager &language,const Q
             if(warning){warning->accept();settle(20);}
         }
         if(qEnvironmentVariable("RV_TEST_OFFLINE_ONLY")=="1"){
-            watchRvUsbDevices(session,&window);
             session->startAutomatically();
             session->startAutomatically(true);
             settle(50);
@@ -1282,14 +1283,12 @@ int runPortSmokeTests(SensorMainWindow &window,LanguageManager &language,const Q
     check("ABOUT_BRANDING",aboutDialog && aboutDialog->windowTitle()==QStringLiteral("关于")
         && aboutName && aboutVersion && aboutLogo && !window.windowIcon().isNull());
     if(aboutDialog)aboutDialog->reject();
-    check("CHINESE_IMAGING_SCHEMES",models&&models->count()==6+researchModes&&models->itemText(0)==QString::fromUtf8("上位机辅助推理（G）")
+    check("CHINESE_IMAGING_SCHEMES",models&&models->count()==4+researchModes&&models->itemText(0)==QString::fromUtf8("上位机辅助推理（G）")
         &&models->itemText(1)==QString::fromUtf8("上位机辅助推理（B，复用 ToF）")
         &&(!depthPro2Supported||(models->itemText(2)==QString::fromUtf8("Depth Pro 2-S（ToF G）")
             &&models->itemText(3)==QString::fromUtf8("Depth Pro 2-S（ToF B，复用）")))
-        &&(!depthPro2BSupported||(models->itemText(depthPro2BIndex)==QString::fromUtf8("Depth Pro 2-B（ToF G）")
-            &&models->itemText(depthPro2BIndex+1)==QString::fromUtf8("Depth Pro 2-B（ToF B，复用）")))
-        &&models->itemText(3+researchModes)==QString::fromUtf8("板端推理（1200K）")
-        &&models->itemText(5+researchModes)==QString::fromUtf8("板端推理高精度（1200K）"));
+        &&models->itemText(2+researchModes)==QString::fromUtf8("板端推理（1200K）")
+        &&models->itemText(3+researchModes)==QString::fromUtf8("板端推理高精度（1200K）"));
     check("CHINESE_SHARED_CONTROL_LABELS",controlsPresent&&depthStart->text()==cameraStart->text()
         &&depthStop->text()==cameraStop->text()&&depthReconnect->text()==cameraReconnect->text());
     check("CHINESE_IMAGING_SCHEME_TOOLTIP",models&&models->toolTip()==QString::fromUtf8("选择深度图和原视频共享会话的成像方案。"));
@@ -1618,8 +1617,8 @@ int runPortSmokeTests(SensorMainWindow &window,LanguageManager &language,const Q
         window.depth()->clearAssistDepth({});
     }
     session->selectImagingScheme(visibleHostScheme,{});
-    auto *view=window.tactile()->display()->findChild<QQuickWidget *>("tactileQuickView");
-    check("TACTILE_QML_READY",view&&view->status()==QQuickWidget::Ready);
+    auto *view=window.tactile()->display()->findChild<TactileCanvas *>("tactileSceneView");
+    check("TACTILE_WIDGET_READY",view&&view->ready());
     const auto *tactile=window.tactile()->display();
     check("FIRST_RUN_136_TACTILE_OUTPUT_POINTS",tactile->displayPointCount()==136);
     check("OFFLINE_TACTILE_WAITS_FOR_DEVICE",!tactile->frame().valid&&tactile->history().samples().empty()
@@ -1656,58 +1655,30 @@ int runPortSmokeTests(SensorMainWindow &window,LanguageManager &language,const Q
     {
         RvDeviceManagerDialog devices(session);
         auto *direction=devices.findChild<QComboBox *>("rvDeviceRotation");
-        auto *form=qobject_cast<QFormLayout *>(direction->parentWidget()->layout());
-        auto *label=form?qobject_cast<QLabel *>(form->labelForField(direction)):nullptr;
-        check("CHINESE_HOST_DIRECTION_LABEL",label&&label->text()==QString::fromUtf8("上位机推理输入朝向"));
-        check("DEVICE_MANAGER_SHOWS_EFFECTIVE_DIRECTION",direction->currentData().toInt()==priorDirection);
-        check("DEVICE_MANAGER_NO_CAMERA_MOUNT_CONTROL",!devices.findChild<QWidget *>("rvDeviceCameraMount"));
-        auto *confirm=devices.findChild<QCheckBox *>("rvDeviceConfirm");
-        auto *temporaryFov=devices.findChild<QCheckBox *>("rvDeviceTemporaryFov");
-        auto *save=devices.findChild<QPushButton *>("rvDeviceSave");
-        auto *automaticCalibration=devices.findChild<QLabel *>("rvDeviceCalibration");
-        check("CALIBRATION_AUTOMATIC_WITHOUT_FOV_SELECTOR",!temporaryFov&&automaticCalibration&&automaticCalibration->text().contains("F=6"));
-        confirm->setChecked(true);save->click();
-        auto *installCapture=devices.findChild<QPushButton *>("rvDeviceInstallCapture");
-        auto *connectUsb=devices.findChild<QPushButton *>("rvDeviceConnectUsb");
-        check("USB_CONNECT_ACTION",connectUsb&&connectUsb->isEnabled()
-            &&connectUsb->text()==QString::fromUtf8("USB 一键连接"));
-        if(connectUsb&&qEnvironmentVariable("RV_TEST_OFFLINE_ONLY")=="1"){
-            bool requested=false;
-            const auto connection=QObject::connect(&devices,&RvDeviceManagerDialog::usbConnectionRequested,&devices,
-                [&requested]{requested=true;});
-            connectUsb->click();
-            QObject::disconnect(connection);
-            check("USB_CONNECT_OFFLINE_GUARD",!requested
-                &&devices.findChild<QLabel *>("rvDeviceStatus")->text()==QString::fromUtf8("离线模式下无法通过 USB 连接设备。"));
-        }
-        check("CAPTURE_INSTALL_ACTION",installCapture&&installCapture->isEnabled()
-            &&installCapture->text()==QString::fromUtf8("安装板端采集支持…"));
-        if(installCapture&&qEnvironmentVariable("RV_TEST_OFFLINE_ONLY")=="1"){
-            installCapture->click();
-            bool noImportProcess=true;
-            for(auto *process:devices.findChildren<QProcess *>())noImportProcess&=process->state()==QProcess::NotRunning;
-            check("CAPTURE_INSTALL_OFFLINE_GUARD",noImportProcess
-                &&devices.findChild<QLabel *>("rvDeviceStatus")->text()==QString::fromUtf8("离线模式无法安装板端采集支持。"));
-        }
-        confirm->setChecked(true);save->click();
-        check("SAVE_ADOPTS_LEGACY_DIRECTION",RvDeviceStore().active().inputRotation==priorDirection
-            &&session->assistInputRotationDegrees()==priorDirection&&!QSettings().contains(legacyKey)
-            &&RvDeviceStore().active().cameraMountRotation==device.cameraMountRotation);
-        direction->setCurrentIndex(direction->findData(device.inputRotation));
-        confirm->setChecked(true);save->click();
-        check("DEVICE_MANAGER_UPDATES_EFFECTIVE_DIRECTION",RvDeviceStore().active().inputRotation==device.inputRotation
-            &&session->assistInputRotationDegrees()==device.inputRotation&&session->userStopped());
+        const auto *usb=devices.findChild<QPushButton *>("rvDeviceConnectUsb");
+        const auto *grid=devices.findChild<QPushButton *>("rvDeviceCheckRgbLsc");
+        const auto *recover=devices.findChild<QPushButton *>("rvDeviceRecover");
+        const auto *maintain=devices.findChild<QPushButton *>("rvDeviceMaintainCapture");
+        check("SDK_DEVICE_MANAGER_READY",session->depthSdk()->available()
+            &&session->depthSdk()->captureDiagnostics()["sdk_version"]=="2.2.2");
+        check("SDK_DEVICE_MANAGER_HAS_USB_GRID_AND_REPAIR",usb&&grid&&recover&&maintain);
+        check("DEVICE_MANAGER_NO_MANUAL_TRUST_FIELDS",!devices.findChild<QWidget *>("rvDeviceConfirm")
+            &&!devices.findChild<QWidget *>("rvDeviceCameraMount")&&!devices.findChild<QWidget *>("rvDeviceTemporaryFov"));
+        check("DEVICE_MANAGER_SHOWS_EFFECTIVE_DIRECTION",direction&&direction->count()==2
+            &&direction->currentData().toInt()==priorDirection);
+        devices.connectViaUsb();
+        const auto *status=devices.findChild<QLabel *>("rvDeviceStatus");
+        check("USB_CONNECT_OFFLINE_GUARD",status&&!devices.operationPending()&&session->depthSdk()->userStopped()
+            &&status->text()==QCoreApplication::translate("RvDeviceManagerDialog","USB connection is unavailable in offline mode."));
     }
     language.setLanguage(LanguageManager::Language::English);settle(100);
     check("ENGLISH_WINDOW",window.windowTitle()==QStringLiteral("触想工作台（内测版）"));
     check("ENGLISH_ABOUT_MENU",about && about->text()=="About");
-    check("ENGLISH_IMAGING_SCHEMES",models&&models->count()==6+researchModes&&models->itemText(0)=="Host-assisted inference (G)"
+    check("ENGLISH_IMAGING_SCHEMES",models&&models->count()==4+researchModes&&models->itemText(0)=="Host-assisted inference (G)"
         &&models->itemText(1)=="Host-assisted inference (B, reuse ToF)"
         &&(!depthPro2Supported||(models->itemText(2)=="Depth Pro 2-S (ToF G)"&&models->itemText(3)=="Depth Pro 2-S (ToF B, reuse)"))
-        &&(!depthPro2BSupported||(models->itemText(depthPro2BIndex)=="Depth Pro 2-B (ToF G)"
-            &&models->itemText(depthPro2BIndex+1)=="Depth Pro 2-B (ToF B, reuse)"))
-        &&models->itemText(3+researchModes)=="Board inference (1200K)"
-        &&models->itemText(5+researchModes)=="Board inference high accuracy (1200K)");
+        &&models->itemText(2+researchModes)=="Board inference (1200K)"
+        &&models->itemText(3+researchModes)=="Board inference high accuracy (1200K)");
     check("ENGLISH_IMAGING_SCHEME_TOOLTIP",models&&models->toolTip()=="Select the imaging scheme for the shared depth and camera session.");
     {
         QSettings settings;
@@ -1720,33 +1691,6 @@ int runPortSmokeTests(SensorMainWindow &window,LanguageManager &language,const Q
         else settings.remove("camera/streamUrlV4");
     }
     if (qEnvironmentVariable("RV_TEST_OFFLINE_ONLY")=="1") {
-        const auto answerImport=[&](QMessageBox::StandardButton answer){
-            bool prompted=false;
-            QTimer responder;
-            QObject::connect(&responder,&QTimer::timeout,&window,[&]{
-                auto *prompt=qobject_cast<QMessageBox *>(QApplication::activeModalWidget());
-                if(!prompt||prompt->windowTitle()!="Install required board files")return;
-                prompted=true;
-                prompt->button(answer)->click();
-            });
-            responder.start(10);
-            emit session->boardFilesRequired(session->deviceProfile());
-            settle(80);
-            return prompted;
-        };
-        check("MISSING_FILES_DECLINE_STAYS_STOPPED",answerImport(QMessageBox::No)&&session->userStopped()
-            &&!window.findChild<RvDeviceManagerDialog *>());
-        const bool accepted=answerImport(QMessageBox::Yes);
-        auto *devices=window.findChild<RvDeviceManagerDialog *>();
-        const auto *status=devices?devices->findChild<QLabel *>("rvDeviceStatus"):nullptr;
-        check("MISSING_FILES_CONFIRM_REUSES_IMPORT",accepted&&devices&&devices->isModal()&&status
-            &&status->text()=="Board capture installation is unavailable in offline mode."&&session->userStopped());
-        auto *maintain=devices?devices->findChild<QPushButton *>("rvDeviceMaintainCapture"):nullptr;
-        if(maintain) maintain->click();
-        check("BOARD_MAINTENANCE_OFFLINE_GUARD",maintain&&status
-            &&status->text()=="Board file maintenance is unavailable in offline mode."&&session->userStopped());
-        if(devices)devices->close();
-        settle(30);
         const auto answerUsbSetup=[&](bool existing,bool network,QMessageBox::StandardButton answer,bool cancelPending=false){
             bool prompted=false,noParameters=false;
             QTimer responder;
@@ -1761,11 +1705,11 @@ int runPortSmokeTests(SensorMainWindow &window,LanguageManager &language,const Q
                     : network ? "The RV1103 connection needs setup. Go to Settings to complete it automatically?"
                               : "RV1103 board files need updating. Go to Settings to update them automatically?";
                 noParameters &= prompt->text()==QCoreApplication::translate("SensorMainWindow",expected);
+                if(cancelPending)session->depthSdk()->stop();
                 prompt->button(answer)->click();
-                if(cancelPending)QTimer::singleShot(0,session,&RvSessionController::stop);
             });
             responder.start(10);
-            window.offerUsbSetup(existing,network);
+            window.offerUsbSetup({{"state", !existing ? "registration_required" : network ? "network_required" : "update_required"}, {"check_id", 1}});
             settle(50);
             return prompted&&noParameters;
         };
@@ -1774,9 +1718,7 @@ int runPortSmokeTests(SensorMainWindow &window,LanguageManager &language,const Q
         {
             const bool prompted=answerUsbSetup(false,false,QMessageBox::Yes,true);
             auto *manager=window.findChild<RvDeviceManagerDialog *>();
-            const auto *usbStatus=manager?manager->findChild<QLabel *>("rvDeviceStatus"):nullptr;
-            check("USB_SETUP_STOP_BEFORE_DISPATCH_CANCELS",prompted&&manager&&usbStatus
-                &&usbStatus->text()!="USB connection is unavailable in offline mode."&&session->userStopped());
+            check("USB_SETUP_STOP_BEFORE_DISPATCH_CANCELS",prompted&&!manager&&session->userStopped());
             if(manager)manager->close();
             settle(30);
         }

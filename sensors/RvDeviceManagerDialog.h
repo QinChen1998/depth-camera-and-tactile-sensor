@@ -1,79 +1,69 @@
 #pragma once
-#include "RvDeviceStore.h"
-#include <QtCore/QPointer>
-#include <QtWidgets/QDialog>
-#include <memory>
-class RvSessionController;
-class DexterousHandVisualization;
-class QTableWidget;
-class QLineEdit;
-class QSpinBox;
-class QComboBox;
-class QCheckBox;
+
+#include <QDialog>
+#include <QJsonObject>
+
 class QLabel;
+class QListWidget;
+class QProgressBar;
 class QPushButton;
-class QProcess;
-class QTimer;
-class QPlainTextEdit;
-class QCloseEvent;
-class QShowEvent;
+class DepthSdkClient;
+class RvSessionController;
+class QComboBox;
+
 class RvDeviceManagerDialog final : public QDialog {
     Q_OBJECT
 public:
-    explicit RvDeviceManagerDialog(RvSessionController *session,QWidget *parent=nullptr);
-    ~RvDeviceManagerDialog() override;
-    void importBoardFilesForStart(const RvDeviceProfile &device);
-    void beginUsbEnrollment();
+    explicit RvDeviceManagerDialog(RvSessionController *session, QWidget *parent = nullptr);
+    void importBoardFilesForStart(const QString &id);
+    void connectViaUsb(quint64 checkId = 0);
+    bool operationPending() const;
     void finishUsbEnrollment(bool added);
-    void connectViaUsb(const QJsonObject &expectedIdentity = {});
-signals:
-    void usbConnectionRequested(RvDeviceManagerDialog *dialog);
+    void offerUsbRgbLsc();
+
 protected:
     void reject() override;
     void closeEvent(QCloseEvent *event) override;
     void showEvent(QShowEvent *event) override;
+    void changeEvent(QEvent *event) override;
+
 private:
-    friend int runRvDeviceTests(DexterousHandVisualization &,const QString &);
-    void reload();
-    void refresh(const QString &id={});
-    void edit(const RvDeviceProfile &profile,bool fresh=false);
-    RvDeviceProfile draft() const;
-    void save();
-    void activate();
-    void remove();
-    void importDevices();
-    void prepareCaptureRuntime(const QString &operation, bool resumeImaging = false);
-    void exportDevices();
-    void runWorker(const QString &operation);
-    void readDeviceInformation();
-    void confirmSerialRead();
-    void acceptWorkerResult(const QJsonObject &result);
-    void operationFailed(const QString &reason,int code=-1);
-    void showBoardImportFailure(const QString &reason,const QString &phase,int code);
-    void cancelOperation();
-    void invalidateSerial();
-    void message(const QString &text,bool error=false);
-    void busy(bool value);
-    void updateFingerprint();
-    QPointer<RvSessionController> m_session;
-    std::unique_ptr<RvDeviceStore> m_store;
-    QString m_id,m_operation,m_probeHost,m_savedFingerprint,m_probeId,m_probeUsername,m_probeKey,m_workerFailure;
-    int m_probePort=0;
-    bool m_fresh=false,m_readingSerial=false,m_resumeImaging=false;
-    bool m_usbEnrollmentPending=false;
-    QWidget *m_details;
-    QTableWidget *m_table;
-    QLineEdit *m_name,*m_host,*m_serial,*m_key,*m_username;
-    QSpinBox *m_port;
-    QComboBox *m_rotation;
-    // Preserve old profiles without exposing a camera preprocessing setting.
-    int m_legacyCameraMountRotation=0;
-    QLabel *m_calibration;
-    QCheckBox *m_legacy,*m_confirm;
-    QLabel *m_status,*m_fingerprint,*m_active;
-    QPushButton *m_save,*m_use,*m_remove,*m_probe,*m_verify,*m_forget,*m_readSerial,*m_installCapture,*m_maintainCapture;
-    QPlainTextEdit *m_serialHelp;
-    QVector<QPushButton*> m_actions;
-    QProcess *m_worker;
-    QTimer *m_timeout;
+    friend int runPortSmokeTests(class SensorMainWindow &, const QString &);
+    enum class BoardOperation { None, RepairForStart, Maintenance, Recovery };
+    enum class GridOperation { None, Checking, Confirming, Calibrating };
+    QString selectedId() const;
+    bool canManageSavedDevice() const;
+    void refresh(const QString &id);
+    void syncControls();
+    void initializeLabels();
+    void selectDevice();
+    void removeDevice();
+    void checkBoardFiles();
+    void checkRgbLsc();
+    bool confirmRgbLsc(bool fromUsb);
+    void updateRgbLscOperation(const QJsonObject &status);
+    void runBoardOperation(BoardOperation operation, const QString &id);
+    void updateBoardOperation(const QJsonObject &status);
+    void updateUsbOperation(const QJsonObject &status);
+    void message(const QString &text, bool error = false);
+
+    RvSessionController *const m_imaging;
+    DepthSdkClient *const m_session;
+    QListWidget *const m_devices;
+    QPushButton *const m_usb;
+    QPushButton *const m_select;
+    QPushButton *const m_remove;
+    QPushButton *const m_maintain;
+    QPushButton *const m_grid;
+    QPushButton *const m_recover;
+    QComboBox *const m_rotation;
+    QProgressBar *const m_gridProgress;
+    QLabel *const m_status;
+    bool m_registryReady = false;
+    bool m_usbPending = false;
+    BoardOperation m_operation = BoardOperation::None;
+    GridOperation m_gridOperation = GridOperation::None;
+    QString m_gridDevice;
+    QString m_operationDevice;
+    quint64 m_operationStopRevision = 0;
 };

@@ -15,12 +15,10 @@
 namespace RvCameraView {
 inline constexpr const char *UniDepthVgaNative48="unidepth_rgb672_vga_fp16_tof48";
 inline constexpr const char *DepthPro2VgaModel="depthpro2_s_vga_fp16";
-inline constexpr const char *DepthPro2BVgaModel="depthpro2_b_vga_fp16";
 inline constexpr const char *DepthPro2Backend="native-tensorrt-fp16";
 inline constexpr const char *DepthPro2Worker="DctsDepthPro2Worker.exe";
 inline constexpr const char *DepthPro2Engine="depthpro2-s-vga-fp16.engine";
 inline constexpr const char *DepthPro2EngineSha="cd01ebaa9f8376c4c71788cba583e1627eba8fa62c42c4e0ab2e94a24b04bc2c";
-inline constexpr const char *DepthPro2BEngineSha="42c1d06f110a3c0580bfd0c75b083651ed44350e627bdd4e7cc439c1a742e441";
 inline constexpr const char *DepthPro2TensorRt="10.16.1.11";
 inline constexpr const char *LegacyNative16Model="unidepth_rgb672_vga_fp16_tof16";
 inline bool isUniDepthNative48(const QString &model){return model==QLatin1String(UniDepthVgaNative48);}
@@ -61,26 +59,14 @@ inline constexpr Profile DepthPro2Vga{
     "583c4d630779fd231f969c738733624963ad34bd3c29f9c64088257e3436f97c",
     "fp16","Depth Pro 2-S",DepthPro2Engine,640,480,-1,DepthPro2Grid,0.,0.,false,
     640,480,640,480};
-inline constexpr Profile DepthPro2BVga=[] {
-    auto view=DepthPro2Vga;
-    view.sourceSha="39686cc10484668fa4c7d96705aa682ee11344067b5033b28f8e4c82804e6fa8";
-    view.graphSha=view.sourceSha;
-    view.weightsSha="244ff85e0d9bde6e0f985de1c61420abc4c2110265b495c974556225ac2b60ed";
-    view.modelName="Depth Pro 2-B";
-    view.graphFile="depthpro2-b-vga-fp16.engine";
-    return view;
-}();
 struct DepthPro2Runtime {
     const Profile &view;
     const char *engineSha,*directory,*overrideKey;
 };
 inline constexpr DepthPro2Runtime DepthPro2SRuntime{
     DepthPro2Vga,DepthPro2EngineSha,"DepthPro2Runtime","RV_DEPTHPRO2_ROOT"};
-inline constexpr DepthPro2Runtime DepthPro2BRuntime{
-    DepthPro2BVga,DepthPro2BEngineSha,"DepthPro2BRuntime","RV_DEPTHPRO2_B_ROOT"};
 inline const DepthPro2Runtime *depthPro2Runtime(const QString &model){
     if(model==QLatin1String(DepthPro2VgaModel))return &DepthPro2SRuntime;
-    if(model==QLatin1String(DepthPro2BVgaModel))return &DepthPro2BRuntime;
     return nullptr;
 }
 inline bool isDepthPro2(const QString &model){return depthPro2Runtime(model)!=nullptr;}

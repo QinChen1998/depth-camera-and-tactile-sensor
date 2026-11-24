@@ -11,7 +11,7 @@
 #include "../sensors/RvInferenceRuntime.h"
 #include "../sensors/RvInferenceSettings.h"
 #include "../sensors/RvTunerController.h"
-#include "../sensors/RvUsbEnrollment.h"
+#include "../sensors/DepthSdkClient.h"
 #include "../sensors/RvDeviceManagerDialog.h"
 #include "../sensors/SceneInstanceBuffer.h"
 #include <QApplication>
@@ -26,8 +26,7 @@
 #include <QLineEdit>
 #include <QMessageBox>
 #include <QPushButton>
-#include <QQuickItem>
-#include <QQuickWidget>
+#include "../sensors/RvPointCloudCanvas.h"
 #include <QWheelEvent>
 #include <QElapsedTimer>
 #include <QEventLoop>
@@ -91,7 +90,7 @@ int runMeasurementLiveValidation(SensorMainWindow &window, const QString &path)
     const auto integration = qEnvironmentVariable("DCTS_MEASUREMENT_LIVE_1200K");
     const bool highAccuracy = integration == "high_accuracy";
     const bool validate1200K = highAccuracy || integration == "1";
-    QString scheme = QStringLiteral("board_native_tof48");
+    QString scheme = QLatin1String(RvSessionController::Native48ExtendedIntegrationScheme);
     if (highAccuracy) scheme = QLatin1String(RvSessionController::Native48HighAccuracy1200KScheme);
     else if (validate1200K) scheme = QLatin1String(RvSessionController::Native48ExtendedIntegrationScheme);
     session->selectImagingScheme(scheme, {});
@@ -185,11 +184,7 @@ int runMeasurementLiveValidation(SensorMainWindow &window, const QString &path)
     return passed && written ? 0 : 1;
 }
 
-struct RvDtofBoardStreamTestAccess {
-    static void disconnectReceiver(RvDtofBoardStream &stream) { stream.socket.disconnectFromHost(); }
-};
-
-// Explicitly authorized real USB onboarding through the ordinary UI/worker.
+// Explicitly authorized real USB onboarding through the SDK device manager.
 // Device registration is isolated by main.cpp and exported only as test evidence.
 int runUsbEnrollmentLiveValidation(SensorMainWindow &window,const QString &path){
     auto *session=window.session();const auto serial=qEnvironmentVariable("DCTS_LIVE_SERIAL");
@@ -202,26 +197,9 @@ int runUsbEnrollmentLiveValidation(SensorMainWindow &window,const QString &path)
     RvDeviceStore initialStore(session->deviceStorePath());bool previouslyRegistered=false;
     for(const auto &profile:initialStore.profiles())previouslyRegistered|=profile.serial==serial;
     report["previously_registered"]=previouslyRegistered;
-    watchRvUsbDevices(session,&window);
     auto *inference=RvInferenceSettings::instance();
-    const bool exerciseDeferredStart=qEnvironmentVariable("DCTS_USB_TEST_DEFER_INFERENCE")=="1";
-    bool preparingObserved=false,cancelNextDeferredStart=false,deferredStopIssued=false;
-    QObject inferenceObserver;
-    if(exerciseDeferredStart){
-        // Hold the detection state until this real enrollment has queued a start.
-        inference->m_enumerating=true;
-        QObject::connect(session,&RvSessionController::stateChanged,&inferenceObserver,[&]{
-            if((preparingObserved&&!cancelNextDeferredStart)
-                ||session->automaticConnectionStage()!=RvSessionController::AutomaticConnectionStage::PreparingInference)return;
-            preparingObserved=true;
-            const bool cancel=cancelNextDeferredStart;
-            cancelNextDeferredStart=false;
-            QTimer::singleShot(50,&inferenceObserver,[&,cancel]{
-                if(cancel){session->stop();deferredStopIssued=true;}
-                inference->detectDevices();
-            });
-        });
-    }else inference->detectDevices();
+    const bool exerciseStopDuringConnect=qEnvironmentVariable("DCTS_USB_TEST_DEFER_INFERENCE")=="1";
+    inference->detectDevices();
     auto *action=window.findChild<QAction*>("rvDeviceManagerAction");if(!action)return 3;
     action->trigger();auto *manager=window.findChild<RvDeviceManagerDialog*>();if(!manager)return 3;
     auto *connectButton=manager->findChild<QPushButton*>("rvDeviceConnectUsb");
@@ -251,12 +229,13 @@ int runUsbEnrollmentLiveValidation(SensorMainWindow &window,const QString &path)
         auto *dialog=qobject_cast<QDialog*>(QApplication::activeModalWidget());
         if(!dialog)return;
         if(auto *message=qobject_cast<QMessageBox*>(dialog)){
+            if(message->objectName()=="rvRgbLscPrompt"){message->done(QMessageBox::Cancel);return;}
             report["error"]=message->text()+"\n"+message->informativeText();
             failed=true;message->done(QMessageBox::Close);
         }
     });
     responder.start(20);connectButton->click();
-    const bool registered=waitFor([&]{return failed||(connectButton->isEnabled()
+    const bool registered=waitFor([&]{return failed||(!manager->operationPending()
         &&manager->property("rvUsbRuntimeReplaced").isValid()&&session->deviceProfile().serial==serial);},240000)&&!failed
         &&session->deviceProfile().serial==serial;
     report["parameters_requested"]=false;report["registered"]=registered;
@@ -267,22 +246,20 @@ int runUsbEnrollmentLiveValidation(SensorMainWindow &window,const QString &path)
     report["first_depth_received_and_painted"]=firstDepth;
     if(!firstDepth)report["first_capture_detail"]=session->detailText();
     report["first_depth_frames"]=depthFrames;report["first_painted_frames"]=paintedFrames;
-    report["deferred_inference_start_observed"]=preparingObserved;
     const bool testRecovery=qEnvironmentVariable("DCTS_USB_TEST_STREAM_RECOVERY")=="1";
     bool recovered=!testRecovery;
-    if(firstDepth&&testRecovery&&session->m_dtofStream){
-        const auto previous=session->m_dtofReceipt["generation"].toString();
-        const auto boot=session->m_dtofReceipt["boot_id"];
+    if(firstDepth&&testRecovery){
+        const auto previous=lastDepth["source_generation"].toString();
+        const auto boot=lastDepth["boot_id"];
         const int beforeRecovery=positiveFrames,beforePaint=paintedFrames;
         const auto resumed=[&]{return lastDepth["source_generation"].toString()!=previous
             &&positiveFrames-beforeRecovery>=30&&paintedFrames-beforePaint>=20;};
-        RvDtofBoardStreamTestAccess::disconnectReceiver(*session->m_dtofStream);
+        session->reconnectNow();
         recovered=waitFor([&]{return invalidDepth||stopped()||resumed();},75000)
             &&!invalidDepth&&!session->userStopped()&&resumed()
-            &&session->m_dtofReceipt["boot_id"]==boot
-            &&session->m_dtofReceipt["candidate_stream_recovery"]==QLatin1String(RvCaptureContract::CandidateRecoveryProtocol);
+            &&lastDepth["boot_id"]==boot;
         report["stream_recovery_passed"]=recovered;
-        report["stream_recovery_new_generation"]=session->m_dtofReceipt["generation"].toString()!=previous;
+        report["stream_recovery_new_generation"]=lastDepth["source_generation"].toString()!=previous;
         if(!recovered)report["stream_recovery_detail"]=session->detailText();
     }
     if(registered){
@@ -310,7 +287,7 @@ int runUsbEnrollmentLiveValidation(SensorMainWindow &window,const QString &path)
         const auto count=RvDeviceStore(session->deviceStorePath()).profiles().size();
         const int beforeFrames=positiveFrames,beforePainted=paintedFrames;
         connectButton->click();
-        reconnected=waitFor([&]{return failed||(connectButton->isEnabled()
+        reconnected=waitFor([&]{return failed||(!manager->operationPending()
             &&manager->property("rvUsbRuntimeReplaced").isValid());},240000)&&!failed
             &&session->deviceProfile().json()==firstProfile
             &&RvDeviceStore(session->deviceStorePath()).profiles().size()==count
@@ -322,15 +299,14 @@ int runUsbEnrollmentLiveValidation(SensorMainWindow &window,const QString &path)
         report["repeat_depth_received_and_painted"]=repeatDepth;reconnected&=repeatDepth;
         idle=stopAndInspect();
     }
-    bool deferredStopHonored=!exerciseDeferredStart;
-    if(exerciseDeferredStart&&reconnected&&idle){
+    bool deferredStopHonored=!exerciseStopDuringConnect;
+    if(exerciseStopDuringConnect&&reconnected&&idle){
         const int beforeFrames=depthFrames;
-        cancelNextDeferredStart=true;
-        inference->m_enumerating=true;
         connectButton->click();
+        const bool connecting=session->depthSdk()->captureTransitionPending();
+        session->stop();
         const auto restarted=[&]{return !session->userStopped()||depthFrames!=beforeFrames;};
-        deferredStopHonored=waitFor([&]{return failed||deferredStopIssued;},240000)&&deferredStopIssued&&!failed
-            &&waitFor([&]{return !inference->detecting()||restarted();},15000)&&!inference->detecting()
+        deferredStopHonored=connecting&&!failed&&waitFor([&]{return !session->busy();},35000)
             &&!waitFor(restarted,3500);
         report["deferred_user_stop_honored"]=deferredStopHonored;
         idle=stopAndInspect();
@@ -342,7 +318,7 @@ int runUsbEnrollmentLiveValidation(SensorMainWindow &window,const QString &path)
     report["depth_width"]=lastDepth["width"];report["depth_height"]=lastDepth["height"];report["depth_unit"]=lastDepth["depth_unit"];
     report["model_sha256"]=lastDepth["model_sha256"];
     report["passed"]=registered&&firstDepth&&idle&&reconnected&&expectedRepair&&recovered
-        &&(!exerciseDeferredStart||preparingObserved)&&deferredStopHonored&&report["registry_exported"].toBool();
+        &&deferredStopHonored&&report["registry_exported"].toBool();
     if(!registered&&!report.contains("error"))report["error"]="USB registration did not complete";
     save(path,report);manager->close();window.close();return report["passed"].toBool()?0:2;
 }
@@ -651,10 +627,10 @@ int runImagingSwitchValidation(SensorMainWindow &window,const QString &path){
     auto *host=static_cast<RvDepthView*>(window.depth()->findChild<QWidget*>("rvAssistDepthCanvas"));
     auto *native=static_cast<RvDepthView*>(window.depth()->findChild<QWidget*>("rvNativeDepthCanvas"));
     if(!menu||!host||!native)return 3;
-    const QString h=QLatin1String(RvSessionController::GlobalRgbImagingScheme),ordinary="board_native_tof48",high="board_native_tof48_high_accuracy";
-    const QString extended=QLatin1String(RvSessionController::Native48ExtendedIntegrationScheme);
-    const QString highExtended=QLatin1String(RvSessionController::Native48HighAccuracy1200KScheme);
-    const QStringList schemes{h,ordinary,extended,ordinary,high,highExtended,extended,highExtended,high,h,high,ordinary,h};
+    const QString h=QLatin1String(RvSessionController::GlobalRgbImagingScheme);
+    const QString ordinary=QLatin1String(RvSessionController::Native48ExtendedIntegrationScheme);
+    const QString high=QLatin1String(RvSessionController::Native48HighAccuracy1200KScheme);
+    const QStringList schemes{h,ordinary,high,ordinary,high,h,high,ordinary,h};
     QJsonObject report{{"passed",false},{"calibration_release",RvCalibration::Release},{"rendering","offscreen_widget_grab"}};
     QJsonArray stages;bool all=true;QString priorGeneration;
     for(const auto &scheme:schemes){
@@ -681,10 +657,10 @@ int runImagingSwitchValidation(SensorMainWindow &window,const QString &path){
             if(scheme!=h){
                 invalid|=session->assistDepthEnabled()||bytes!=rawDepth||m["tof_sequence"]!=rawMeta["tof_sequence"]
                     ||m["depth_unit"]!="sensor_radial_m_float32"||m["native_order"]!=true
-                    ||m["sensor_mode"]!=((scheme==high||scheme==highExtended)?12:11);
-                if(scheme==extended||scheme==highExtended)
-                    invalid|=m["imaging_scheme"]!=scheme
-                        ||rawMeta["tof_sensor_readback"].toObject()["main_iterations_k"]!=RvCaptureContract::Native48ExtendedIntegrationK;
+                    ||m["sensor_mode"]!=(scheme==high?12:11)||m["imaging_scheme"]!=scheme;
+                const auto sensor=rawMeta["tof_sensor_readback"].toObject();
+                if(sensor.contains("main_iterations_k"))
+                    invalid|=sensor["main_iterations_k"]!=RvCaptureContract::Native48ExtendedIntegrationK;
             }else{
                 invalid|=!RvCameraView::validOutputGrid(m);
                 if(m["dtof_present"]==true){
@@ -741,7 +717,7 @@ int runPointCloudLiveValidation(SensorMainWindow &window, const QString &path)
     }
 
     auto *dock = window.findChild<QDockWidget *>("pointCloudDock");
-    auto *view = window.findChild<QQuickWidget *>("rvPointCloudView");
+    auto *view = window.findChild<RvPointCloudCanvas *>("rvPointCloudView");
     auto *instances = window.findChild<SceneInstanceBuffer *>("rvPointCloudInstances");
     auto *depthInstances = window.findChild<SceneInstanceBuffer *>("rvPointCloudDepthInstances");
     auto *diameter = window.findChild<QDoubleSpinBox *>("rvPointCloudPointDiameter");
@@ -758,8 +734,8 @@ int runPointCloudLiveValidation(SensorMainWindow &window, const QString &path)
     }
     dock->show();
     dock->raise();
-    if (!waitFor([&] { return view->status() == QQuickWidget::Ready; }, 3000)) {
-        save(path, {{"passed", false}, {"detail", "Point cloud QML did not load"}});
+    if (!waitFor([&] { return view->isVisible(); }, 3000)) {
+        save(path, {{"passed", false}, {"detail", "Point cloud widget did not become visible"}});
         return 2;
     }
 
@@ -769,7 +745,7 @@ int runPointCloudLiveValidation(SensorMainWindow &window, const QString &path)
     bool all = true;
     const QString hostScheme = QLatin1String(RvSessionController::GlobalRgbImagingScheme);
     const auto cloudCleared = [&] { return instances->count() == 0 && depthInstances->count() == 0; };
-    const auto cameraDistance = [&] { return view->rootObject()->property("cameraDistance").toDouble(); };
+    const auto cameraDistance = [&] { return view->property("cameraDistance").toDouble(); };
     const auto coloredPixels = [](const QImage &image) {
         // The unlit points are saturated; the neutral grid and muted axes are below this threshold.
         int count = 0;
@@ -784,10 +760,12 @@ int runPointCloudLiveValidation(SensorMainWindow &window, const QString &path)
         return count;
     };
     double manualDistance = cameraDistance();
-    for (const auto &scheme : {hostScheme, QStringLiteral("board_native_tof48"), QStringLiteral("board_native_tof48_high_accuracy")}) {
+    const QString ordinary=QLatin1String(RvSessionController::Native48ExtendedIntegrationScheme);
+    const QString high=QLatin1String(RvSessionController::Native48HighAccuracy1200KScheme);
+    for (const auto &scheme : {hostScheme, ordinary, high}) {
         QObject scope;
         const bool assisted = scheme == hostScheme;
-        const int expectedMode = scheme == "board_native_tof48" ? RvCaptureContract::Native48 : RvCaptureContract::Native48HighAccuracy;
+        const int expectedMode = scheme == ordinary ? RvCaptureContract::Native48 : RvCaptureContract::Native48HighAccuracy;
         int frames = 0, videoFrames = 0, peakPoints = 0;
         qint64 lastSequence = 0;
         QString generation;

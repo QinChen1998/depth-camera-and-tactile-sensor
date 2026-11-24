@@ -2,7 +2,7 @@
 
 #include "PointCloudColorScale.h"
 #include "RvTofFrame.h"
-#include "SceneInstanceBuffer.h"
+#include "RvPointCloudCanvas.h"
 #include <QFutureWatcher>
 #include <QPromise>
 #include <QTimer>
@@ -14,8 +14,6 @@ class QComboBox;
 class QDoubleSpinBox;
 class QLabel;
 class QPushButton;
-class QQuick3DGeometry;
-class QQuickWidget;
 class QVBoxLayout;
 class RvSessionController;
 namespace RvCameraView { struct Profile; }
@@ -35,13 +33,9 @@ private:
         QVector<SceneInstanceBuffer::InstanceTableEntry> points;
         QVector<quint32> indices;
     };
-    struct MeshVertex {
-        QVector3D position;
-        QVector4D color;
-    };
+    using MeshVertex = RvPointCloudCanvas::Vertex;
     struct MeshData {
         QByteArray vertices, indices;
-        QVector3D minimum, maximum;
     };
     struct DepthProjection {
         QByteArray points;
@@ -80,8 +74,7 @@ private:
     RvSessionController *const m_session;
     SceneInstanceBuffer *const m_instances;
     SceneInstanceBuffer *const m_depthInstances;
-    QQuick3DGeometry *const m_meshGeometry;
-    QQuickWidget *const m_view;
+    RvPointCloudCanvas *const m_view;
     QLabel *const m_status;
     QComboBox *const m_displayMode;
     QComboBox *const m_colorMode;

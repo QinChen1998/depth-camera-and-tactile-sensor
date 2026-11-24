@@ -263,7 +263,7 @@ QString modelRoot(const QString &model){
 }
 bool hdSource(const QJsonObject &m,const RvCameraView::Profile &view,bool allowReuse=false) {
     const auto integer=[&](const char *key){const double n=m[key].toDouble(-1);return m[key].isDouble()&&n>0&&n<=9007199254740991.0&&std::floor(n)==n;};
-    if(m["source_protocol"]!="HDA1"||m["source_transport"]!="rtsp_h265"
+    if(m["source_protocol"]!="HDA1"||(m["source_transport"]!="rtsp_h265"&&m["source_transport"]!="cxwl_depth_sdk")
         ||m["source_candidate_mode"]!=RvCaptureContract::Native48
         ||m["model"]!="Native"||m["source_rgb_width"]!=2304||m["source_rgb_height"]!=1296
         ||m["rgb_width"]!=view.inputWidth||m["rgb_height"]!=view.inputHeight||!m["dtof_present"].isBool()
@@ -277,7 +277,8 @@ bool hdSource(const QJsonObject &m,const RvCameraView::Profile &view,bool allowR
             ||(m["tof_reused"]!=false&&(!allowReuse||m["tof_reused"]!=true))
             ||!std::isfinite(delta)||!std::isfinite(bound)||bound<0||bound>35||std::abs(delta)+bound>200
             ||std::abs((m["tof_timestamp_ns"].toDouble()-m["rgb_timestamp_ns"].toDouble())/1e6-delta)>.001
-            ||m["pair_clock_source"]!="rtcp_prft_board_realtime_monotonic"
+            ||(m["pair_clock_source"]!="rtcp_prft_board_realtime_monotonic"
+                &&!(m["source_transport"]=="cxwl_depth_sdk"&&m["pair_clock_source"]==QLatin1String(RvTofFrame::SdkPairClock)))
             ||m["source_engine"]!="native-hd-capture-v1"||m["generation_source"]!="host_presentation_epoch"
             ||!QRegularExpression("^[0-9a-f]{32}$").match(m["source_generation"].toString()).hasMatch())return false;
     }else {

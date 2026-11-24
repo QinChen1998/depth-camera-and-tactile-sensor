@@ -1,7 +1,9 @@
 Qt 6.11.1 (Qt Company and contributors)
 https://doc.qt.io/qt-6.11/licensing.html
 https://download.qt.io/archive/qt/6.11/6.11.1/single/
-Qt Quick 3D: commercial license or GPL-3.0-only. See qt-sbom for component-specific licensing.
+The desktop uses the Qt Widgets renderer. See qt-sbom for component-specific licensing.
+
+CXWL Depth Camera SDK 2.2.2 is dynamically linked. The SDK product license and SDK runtime notices are in cxwl-depth-sdk.
 
 FFmpeg (FFmpeg developers)
 https://doc.qt.io/qt-6.11/qtmultimedia-attribution-ffmpeg.html

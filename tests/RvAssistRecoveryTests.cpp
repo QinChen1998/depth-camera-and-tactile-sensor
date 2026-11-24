@@ -1,4 +1,5 @@
 #include "RvAssistRecoveryTests.h"
+#include "../sensors/DepthSdkClient.h"
 #include "../sensors/RvAssistFusion.h"
 #include "../sensors/RvCameraView.h"
 #include "../sensors/RvDepthDiagnostic.h"
@@ -17,6 +18,49 @@
 
 namespace {
 using namespace RvAssistFusion;
+
+bool sdkNativeMeasurementContract() {
+    constexpr int columns = 48, rows = 32, stride = 52;
+    QByteArray depth(columns * rows * 4, 0), valid(stride * rows, 0), snr(stride * rows, 0);
+    const auto setRange = [&](int index, quint16 code) {
+        const float metres = float(code) * .00025f;
+        quint32 bits;
+        std::memcpy(&bits, &metres, sizeof(bits));
+        qToLittleEndian(bits, depth.data() + index * 4);
+        const auto quality = index / columns * stride + index % columns;
+        valid[quality] = 1;
+        snr[quality] = 37;
+    };
+    setRange(0, 4001);
+    setRange(columns + 3, 65535);
+    const QByteArray generation(32, 'a');
+    CxwlDepthFrameEx frame{};
+    frame.size = sizeof(frame);
+    frame.frame.size = sizeof(frame.frame);
+    frame.frame.sequence = 11;
+    frame.frame.session_epoch = 3;
+    frame.frame.timestamp_ns = 1'000'000'000;
+    frame.frame.capture_generation_utf8 = generation.constData();
+    frame.snr = {snr.constData(), quint64(snr.size()), columns, rows, stride, CXWL_DEPTH_PIXEL_U8};
+    frame.valid_mask = {valid.constData(), quint64(valid.size()), columns, rows, stride, CXWL_DEPTH_PIXEL_U8};
+    const QJsonObject metadata{{"work_mode", "dtof_candidate"}, {"protocol", "LSG2"}, {"candidate_mode", 24},
+        {"engine", RvCaptureContract::NativeEngine}, {"model_sha256", ""}, {"capture_only", true},
+        {"depth_present", false}, {"photon_enabled", false}, {"boot_id", "11111111-2222-3333-4444-555555555555"},
+        {"generation", 3}, {"source_generation", QString::fromLatin1(generation)}, {"frame_id", 11},
+        {"tof_sequence", 11}, {"tof_timestamp_ns", 1'000'000'000}, {"tof_reused", false},
+        {"dtof_width", columns}, {"dtof_height", rows}, {"dtof_bytes", depth.size()},
+        {"dtof_format", "range_uq2_u16le_snr_u8_valid_u8"}, {"dtof_range_unit", "0.25_mm"},
+        {"dtof_source", "tmf8829_ipc_first_peak"}, {"dtof_coordinate", "sensor_radial_native"}};
+    const auto native = DepthSdkFrames::nativeMeasurement(frame, depth, metadata);
+    if (!native.isValid() || native.rangeUq2(0) != 4001 || native.rangeUq2(columns + 3) != 65535
+        || native.snr(columns + 3) != 37 || native.valid(2) || native.radialMetres() != depth) return false;
+    auto wrongEpoch = metadata;
+    wrongEpoch["generation"] = 2;
+    if (!DepthSdkFrames::nativeMeasurement(frame, depth, wrongEpoch).samples.isEmpty()) return false;
+    frame.valid_mask.byte_count = 14;
+    return DepthSdkFrames::nativeMeasurement(frame, depth, metadata).samples.isEmpty();
+}
+
 std::vector<float> decode(const QByteArray &b){
     std::vector<float> z(b.size()/4);
     for(int i=0;i<int(z.size());++i){auto bits=qFromLittleEndian<quint32>(b.constData()+4*i);std::memcpy(&z[i],&bits,4);}return z;
@@ -53,6 +97,7 @@ int runRvAssistRecoveryTests(const QString &path){
     QFile report(path);if(!report.open(QIODevice::WriteOnly|QIODevice::Text))return 3;
     QTextStream out(&report);bool all=true;
     const auto check=[&](const QString &name,bool ok){out<<name<<' '<<(ok?"PASS":"FAIL")<<Qt::endl;all&=ok;};
+    check("SDK_NATIVE_MEASUREMENT_RETAINS_CODES_QUALITY_AND_IDENTITY", sdkNativeMeasurementContract());
     {
         const auto &view=RvCameraView::Portrait;
         const auto &cal=calibrationForFov(6);
@@ -83,6 +128,9 @@ int runRvAssistRecoveryTests(const QString &path){
             pair.metadata["rgb_timestamp_ns"]=1e9-delta*1e6;
             pair.metadata["tof_reused"]=true;
             check(QString("PORTRAIT_NATIVE48_PAIR_BUDGET_%1").arg(delta,0,'f',3),
+                fuseGlobalScale(mono,pair,cal,view).ok()==(std::abs(delta)<=165.));
+            pair.metadata["pair_clock_source"] = QLatin1String(RvTofFrame::SdkPairClock);
+            check(QString("SDK_NATIVE48_PAIR_BUDGET_%1").arg(delta,0,'f',3),
                 fuseGlobalScale(mono,pair,cal,view).ok()==(std::abs(delta)<=165.));
         }
         tof.metadata["tof_warning_flags"]=16;
@@ -190,8 +238,8 @@ int runRvAssistRecoveryTests(const QString &path){
             }
         }
 
-        for(const auto *modelId:{RvCameraView::DepthPro2VgaModel,RvCameraView::DepthPro2BVgaModel}){
-            const QString model=QLatin1String(modelId);
+        {
+            const QString model=QLatin1String(RvCameraView::DepthPro2VgaModel);
             const auto &vga=RvCameraView::outputProfile(model);
             const auto *runtime=RvCameraView::depthPro2Runtime(model);
             auto measurement=tof;

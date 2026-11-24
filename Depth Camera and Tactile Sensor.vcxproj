@@ -29,14 +29,15 @@
     <OutDir>$(MSBuildProjectDirectory)\x64\$(Configuration)\</OutDir>
     <IntDir>$(MSBuildProjectDirectory)\x64\obj_$(Configuration)\</IntDir>
     <TargetName>触想工作台</TargetName>
+    <CxwlDepthSdkRoot Condition="'$(CxwlDepthSdkRoot)' == ''">$(MSBuildProjectDirectory)\x64\sdk-dependencies\CXWLDepthSDK-2.2.2-win64</CxwlDepthSdkRoot>
   </PropertyGroup>
   <Import Project="$(QtMsBuild)\qt_defaults.props"/>
   <PropertyGroup Label="QtSettings" Condition="'$(Configuration)' == 'Debug'">
-    <QtModules>core;gui;widgets;network;multimedia;serialport;qml;quick;quickwidgets;quick3d;concurrent</QtModules>
-    <QtBuildConfig>debug</QtBuildConfig>
+    <QtModules>core;gui;widgets;network;multimedia;serialport;concurrent</QtModules>
+    <QtBuildConfig>release</QtBuildConfig>
   </PropertyGroup>
   <PropertyGroup Label="QtSettings" Condition="'$(Configuration)' == 'Release'">
-    <QtModules>core;gui;widgets;network;multimedia;serialport;qml;quick;quickwidgets;quick3d;concurrent</QtModules>
+    <QtModules>core;gui;widgets;network;multimedia;serialport;concurrent</QtModules>
     <QtBuildConfig>release</QtBuildConfig>
   </PropertyGroup>
   <Import Project="$(QtMsBuild)\Qt.props"/>
@@ -46,12 +47,13 @@
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
       <WarningLevel>Level3</WarningLevel>
       <AdditionalOptions>/utf-8 /Zc:__cplusplus %(AdditionalOptions)</AdditionalOptions>
-      <AdditionalIncludeDirectories>$(ProjectDir)third_party\ffmpeg_7_1_3;$(ProjectDir)dependency_sources\openvino\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(CxwlDepthSdkRoot)\SDK\include;$(ProjectDir)third_party\ffmpeg_7_1_3;$(ProjectDir)dependency_sources\openvino\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
       <PreprocessorDefinitions>NOMINMAX;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
-      <AdditionalDependencies>bcrypt.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>$(CxwlDepthSdkRoot)\SDK\lib\CxwlDepthSdk.lib;advapi32.lib;bcrypt.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <AdditionalOptions>/PDBALTPATH:%_PDB% %(AdditionalOptions)</AdditionalOptions>
     </Link>
@@ -83,10 +85,12 @@
     <ClCompile Include="LanguageManager.cpp"/>
     <ClCompile Include="TactileDockWidget.cpp"/>
     <ClCompile Include="sensors\DepthMapWidget.cpp"/>
+    <ClCompile Include="sensors\DepthSdkClient.cpp"/>
     <ClCompile Include="sensors\DepthMeasurement.cpp"/>
     <ClCompile Include="sensors\GeminiMeasurement.cpp"/>
     <ClCompile Include="sensors\MeasurementCaptureDialog.cpp"/>
     <ClCompile Include="sensors\RvPointCloudWidget.cpp"/>
+    <ClCompile Include="sensors\RvPointCloudCanvas.cpp"/>
     <ClCompile Include="sensors\ImageDisplaySettings.cpp"/>
     <ClCompile Include="sensors\RtspCameraPage.cpp"/>
     <ClCompile Include="sensors\RvAssistDepth.cpp">
@@ -108,11 +112,13 @@
     <ClCompile Include="sensors\RvDtofBoardStream.cpp"/>
     <ClCompile Include="sensors\RvDtofCandidates.cpp"/>
     <ClCompile Include="sensors\RvSessionController.cpp"/>
+    <ClCompile Include="sensors\RvSessionSdk.cpp"/>
     <ClCompile Include="sensors\RvTunerController.cpp"/>
     <ClCompile Include="sensors\RvTunerProtocol.cpp"/>
     <ClCompile Include="sensors\RvTunerWidget.cpp"/>
     <ClCompile Include="sensors\TactileFrame.cpp"/>
     <ClCompile Include="sensors\TactileSceneAdapter.cpp"/>
+    <ClCompile Include="sensors\TactileCanvas.cpp"/>
     <ClCompile Include="sensors\TactileSerialSource.cpp"/>
     <ClCompile Include="sensors\TactileAutoZero.cpp"/>
     <ClInclude Include="sensors\TactileAutoZero.h"/>
@@ -134,8 +140,9 @@
     <ClInclude Include="sensors\DepthColorScale.h"/>
     <ClInclude Include="sensors\PointCloudColorScale.h"/>
     <QtMoc Include="sensors\DepthMapWidget.h"/>
-    <ClInclude Include="sensors\DockableQuick3DWidget.h"/>
+    <QtMoc Include="sensors\DepthSdkClient.h"/>
     <QtMoc Include="sensors\RvPointCloudWidget.h"/>
+    <QtMoc Include="sensors\RvPointCloudCanvas.h"/>
     <QtMoc Include="sensors\MeasurementCaptureDialog.h"/>
     <QtMoc Include="sensors\SceneInstanceBuffer.h"/>
     <ClInclude Include="sensors\DepthPost.h"/>
@@ -172,6 +179,7 @@
     <ClInclude Include="sensors\TactileHistory.h"/>
     <ClInclude Include="sensors\TactileMetrics.h"/>
     <QtMoc Include="sensors\TactileSceneAdapter.h"/>
+    <QtMoc Include="sensors\TactileCanvas.h"/>
     <QtMoc Include="sensors\TactileSerialSource.h"/>
     <ClInclude Include="sensors\TactileSurfaceModel.h"/>
     <QtMoc Include="sensors\TactileVisualizationWidget.h"/>
@@ -179,12 +187,6 @@
     <ResourceCompile Include="SensorApp.rc"/>
     <QtRcc Include="SensorResources.qrc"/>
     <QtRcc Include="Component_depth.qrc"/>
-    <None Include="qml\RvPointCloudView.qml"/>
-    <None Include="qml\RvCloudPoint.vert"/>
-    <None Include="qml\RvCloudPoint.frag"/>
-    <None Include="qml\RvCloudNativePoint.vert"/>
-    <None Include="qml\RvCloudMesh.vert"/>
-    <None Include="qml\RvCloudMesh.frag"/>
     <QtRcc Include="Component_tactile.qrc"/>
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets"/>
@@ -194,6 +196,12 @@
   </PropertyGroup>
   <Target Name="CopyInferenceWorker" AfterTargets="Build" Condition="'$(DctsUseCudaEp)' != 'true' or '$(DctsInstallerBuild)' == 'true'">
     <Copy SourceFiles="$(TargetPath)" DestinationFiles="$(TargetDir)DctsInferenceWorker.exe" SkipUnchangedFiles="true"/>
+  </Target>
+  <Target Name="PrepareCxwlDepthSdk" BeforeTargets="PrepareForBuild" Condition="'$(DesignTimeBuild)' != 'true'">
+    <Exec Command="pwsh -NoProfile -File &quot;$(MSBuildProjectDirectory)\tools\prepare_depth_sdk.ps1&quot; -SdkRoot &quot;$(CxwlDepthSdkRoot)&quot;" />
+  </Target>
+  <Target Name="DeployCxwlDepthSdk" AfterTargets="Build" Condition="'$(DesignTimeBuild)' != 'true'">
+    <Exec Command="pwsh -NoProfile -File &quot;$(MSBuildProjectDirectory)\tools\prepare_depth_sdk.ps1&quot; -SdkRoot &quot;$(CxwlDepthSdkRoot)&quot; -DeployDirectory &quot;$(TargetDir).&quot;" />
   </Target>
   <Target Name="BuildSensorRvWorker" BeforeTargets="PrepareForBuild" Condition="'$(NativeWorkersBuild)' == 'true' and '$(DesignTimeBuild)' != 'true'">
     <Exec Command="&quot;$(MSBuildProjectDirectory)/tools/build_rv_worker.cmd&quot; &quot;$(Configuration)&quot; &quot;$(QtInstall)&quot; &quot;$(MSBuildBinPath)/MSBuild.exe&quot;"/>

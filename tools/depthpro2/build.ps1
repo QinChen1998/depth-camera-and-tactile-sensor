@@ -5,7 +5,7 @@ param(
     [Parameter(Mandatory=$true)][string]$CudaCrtInclude,
     [Parameter(Mandatory=$true)][string]$EnginePath,
     [Parameter(Mandatory=$true)][string]$AppleLicense,
-    [ValidateSet('S','B')][string]$Variant='S',
+    [ValidateSet('S')][string]$Variant='S',
     [string]$QtRoot='',
     [string]$MSBuild='',
     [string]$OutputDirectory=''
@@ -16,10 +16,8 @@ $projectRoot=Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
 . (Join-Path $projectRoot 'tools/resolve_vs2022_toolchain.ps1')
 $MSBuild=(Resolve-Vs2022Toolchain -MSBuild $MSBuild -RequireMSBuild).MSBuild
 $QtRoot=Resolve-Qt611Root -QtRoot $QtRoot -MSBuild $MSBuild
-$runtimeName=if($Variant -eq 'B'){'DepthPro2BRuntime'}else{'DepthPro2Runtime'}
-$engineName="depthpro2-$($Variant.ToLowerInvariant())-vga-fp16.engine"
-$hashConstant=if($Variant -eq 'B'){'DepthPro2BEngineSha'}else{'DepthPro2EngineSha'}
-if(!$OutputDirectory){$OutputDirectory=Join-Path $projectRoot $runtimeName}
+$engineName='depthpro2-s-vga-fp16.engine'
+if(!$OutputDirectory){$OutputDirectory=Join-Path $projectRoot 'DepthPro2Runtime'}
 
 $buildArgs=@((Join-Path $PSScriptRoot 'DepthPro2Worker.vcxproj'),'/t:Build','/p:Configuration=Release','/p:Platform=x64',
     "/p:DepthPro2QtRoot=$QtRoot","/p:DepthPro2TrtSdk=$TensorRtSdk","/p:DepthPro2CudaRoot=$CudaRoot",
@@ -42,7 +40,7 @@ foreach($name in $inputs.Keys){
 }
 $engineHash=$files[$engineName]
 $profile=Get-Content -LiteralPath (Join-Path $projectRoot 'sensors/RvCameraView.h') -Raw
-if($profile -notmatch ($hashConstant+'="([a-f0-9]{64})"') -or $engineHash -ne $Matches[1]){
+if($profile -notmatch 'DepthPro2EngineSha="([a-f0-9]{64})"' -or $engineHash -ne $Matches[1]){
     throw "The engine does not match the selected local Depth Pro 2-$Variant profile"
 }
 New-Item -ItemType Directory -Force -Path $OutputDirectory | Out-Null

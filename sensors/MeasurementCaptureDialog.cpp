@@ -1,4 +1,5 @@
 #include "MeasurementCaptureDialog.h"
+#include "RvCameraView.h"
 #include "RvCalibration.h"
 #include "RvSessionController.h"
 #include <QComboBox>
@@ -221,30 +222,34 @@ void MeasurementCaptureDialog::acceptNative(const RvTofFrame &frame)
         {"width", 48}, {"height", 32}, {"scale_mm_per_code", .25}, {"candidate_mode", m_mode},
         {"imaging_scheme", m_scheme}, {"source_clock", "rv_board_monotonic"},
         {"sensor_fov", meta["sensor_fov_correction"]}, {"processing_fov", RvCalibration::Fov},
-        {"calibration_release", QLatin1String(RvCalibration::Release)}};
+        {"calibration_release", meta["calibration_release"].toString(QLatin1String(RvCalibration::Release))}};
+    const bool sdk = meta["native_range_source"] == "sdk_radial_f32_and_quality";
     const auto sensor = meta["tof_sensor_readback"].toObject();
     if (m_session->native48ExtendedIntegration()
+        && (!sdk || sensor.contains("main_iterations_k"))
         && sensor["main_iterations_k"] != RvCaptureContract::Native48ExtendedIntegrationK) {
         m_job->stop(RvSessionController::tr("The sensor did not confirm 1200K main integration."));
         return;
     }
     if (!sensor.isEmpty())
         format["sensor_readback"] = sensor;
+    if (sdk) format["native_range_source"] = meta["native_range_source"];
     submitRv({frame.samples, format, fields(meta, {"generation", "tof_warning_flags", "raw_age_ms"}),
               meta["tof_sequence"].toInteger(), meta["tof_timestamp_ns"].toInteger(), DepthMeasurement::nowNs()});
 }
 
 void MeasurementCaptureDialog::acceptAssist(const QByteArray &depth, const QJsonObject &meta)
 {
-    if (!m_job || !m_rv || !m_assisted || meta["depth_unit"] != "camera-Z_m_float32"
-        || meta["width"] != 480 || meta["height"] != 640 || depth.size() != 480 * 640 * 4)
+    if (!m_job || !m_rv || !m_assisted || meta["depth_unit"] != "camera-Z_m_float32" || !RvCameraView::validOutputGrid(meta))
         return;
+    const auto &view = RvCameraView::outputProfile(meta["assist_host_model"].toString());
+    if (depth.size() != view.depthBytes()) return;
     const auto format = QJsonObject{{"encoding", "f32_le_metres"}, {"coordinate", "rv_rgb_camera_z"},
-        {"width", 480}, {"height", 640}, {"invalid_code", 0},
+        {"width", view.outputWidth}, {"height", view.outputHeight}, {"invalid_code", 0},
         {"depth_K", meta["depth_K"]}, {"imaging_scheme", m_scheme},
         {"source_clock", "host_rgb_decode_monotonic"}};
     submitRv({depth, format, fields(meta, {"source_generation", "video_pts_us", "rgb_timestamp_ns",
-                                         "tof_sequence", "tof_timestamp_ns", "tof_reused", "pair_delta_ms",
+                                         "tof_sequence", "tof_timestamp_ns", "tof_reused", "pair_delta_ms", "pair_clock_source",
                                          "depth_source", "assist_fusion"}),
               meta["frame_id"].toInteger(), meta["host_decoded_monotonic_ns"].toInteger(), DepthMeasurement::nowNs()});
 }

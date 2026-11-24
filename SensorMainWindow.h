@@ -14,7 +14,6 @@ class MeasurementCaptureDialog;
 class QMenu;
 class QAction;
 class QMessageBox;
-struct RvDeviceProfile;
 
 class SensorMainWindow final : public QMainWindow {
     Q_OBJECT
@@ -25,9 +24,7 @@ public:
     DepthMapWidget *depth() const { return m_depth; }
     TactileDockWidget *tactile() const { return m_tactile; }
     void resetLayout();
-    void offerUsbSetup(bool existingDevice, bool networkSetup = false, const QJsonObject &identity = {});
-signals:
-    void usbDeviceConnectionRequested(RvDeviceManagerDialog *dialog);
+    void offerUsbSetup(const QJsonObject &status);
 protected:
     bool nativeEvent(const QByteArray &eventType, void *message, qintptr *result) override;
     void changeEvent(QEvent *event) override;
@@ -39,7 +36,7 @@ private:
     void refreshPresets();
     void savePreset();
     RvDeviceManagerDialog *showDeviceManager(bool modal = false);
-    void offerBoardImport(const RvDeviceProfile &device);
+    void offerBoardImport(const QString &id, quint64 revision);
     LanguageManager *m_language;
     RvSessionController *m_session;
     TactileDockWidget *m_tactile=nullptr;

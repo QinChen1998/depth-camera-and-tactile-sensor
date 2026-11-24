@@ -26,7 +26,8 @@ QJsonObject document(const QByteArray &bytes) {
     QJsonParseError error; const auto doc=QJsonDocument::fromJson(bytes,&error);
     require(error.error==QJsonParseError::NoError && doc.isObject(), "Invalid device registry JSON");
     const auto obj=doc.object();
-    require(obj["schema"]==1 && obj["kind"]=="rv1103-devices" && obj["devices"].isArray(), "Unsupported device registry format");
+    require(obj["schema"]==1 && (obj["kind"]=="rv1103-devices"||obj["kind"]=="cxwl-depth-camera-devices")
+        && obj["devices"].isArray(), "Unsupported device registry format");
     for (const auto &key:obj.keys()) require(QStringList{"schema","kind","devices","active"}.contains(key), "Unexpected device registry field; credentials must not be imported");
     return obj;
 }
@@ -52,16 +53,18 @@ QJsonObject RvDeviceProfile::json() const {
     return result;
 }
 RvDeviceProfile RvDeviceProfile::fromJson(const QJsonObject &o) {
-    QStringList fields={"id","name","host","ssh_port","serial","public_key","username","calibration","input_rotation","legacy_coordinator","last_connected"};
+    QStringList fields={"id","name","host","ssh_port","serial","public_key","username","calibration","legacy_coordinator","last_connected"};
+    const bool hasInput=o.contains("input_rotation");
     const bool hasMount=o.contains("camera_mount_rotation");
     const bool hasTemporary=o.contains("temporary_fov_calibration");
-    require(o.size()==fields.size()+int(hasMount)+int(hasTemporary), "Incomplete device profile");
+    require(o.size()==fields.size()+int(hasMount)+int(hasTemporary)+int(hasInput), "Incomplete device profile");
     for(const auto &key:fields)require(o.contains(key), "Incomplete device profile");
     if(hasMount)fields.append("camera_mount_rotation");
     if(hasTemporary)fields.append("temporary_fov_calibration");
+    if(hasInput)fields.append("input_rotation");
     for(const auto &key:o.keys())require(fields.contains(key), "Unknown device field; passwords/private keys are not permitted");
     for(const auto &key:QStringList{"id","name","host","serial","public_key","username","calibration","last_connected"})require(o[key].isString(), "Device field must be text");
-    require(o["ssh_port"].isDouble()&&o["input_rotation"].isDouble()&&o["legacy_coordinator"].isBool(), "Invalid device field types");
+    require(o["ssh_port"].isDouble()&&(!hasInput||o["input_rotation"].isDouble())&&o["legacy_coordinator"].isBool(), "Invalid device field types");
     RvDeviceProfile p;p.id=o["id"].toString();p.name=o["name"].toString();p.host=o["host"].toString();p.sshPort=o["ssh_port"].toInt(-1);
     require(!hasTemporary||o["temporary_fov_calibration"].isBool(),"Temporary FOV calibration must be boolean");
     p.temporaryFovCalibration=o["temporary_fov_calibration"].toBool();
@@ -69,8 +72,8 @@ RvDeviceProfile RvDeviceProfile::fromJson(const QJsonObject &o) {
     p.cameraMountRotation=hasMount?o["camera_mount_rotation"].toInt(-1):
         (p.serial=="REDACTED_DEVICE_SERIAL"&&p.publicKey==""?180:0);
     require(!hasMount||(o["camera_mount_rotation"].isDouble()&&o["camera_mount_rotation"].toDouble()==p.cameraMountRotation),"Camera mounting angle must be an integer");
-    p.inputRotation=o["input_rotation"].toInt(-2);p.legacyCoordinator=o["legacy_coordinator"].toBool();p.lastConnected=o["last_connected"].toString();
-    require(o["ssh_port"].toDouble()==p.sshPort&&o["input_rotation"].toDouble()==p.inputRotation,"Integer device fields required");p.validate();p.calibration=QLatin1String(RvCalibration::Id);p.temporaryFovCalibration=false;return p;
+    p.inputRotation=hasInput?o["input_rotation"].toInt(-2):0;p.legacyCoordinator=o["legacy_coordinator"].toBool();p.lastConnected=o["last_connected"].toString();
+    require(o["ssh_port"].toDouble()==p.sshPort&&(!hasInput||o["input_rotation"].toDouble()==p.inputRotation),"Integer device fields required");p.validate();p.calibration=QLatin1String(RvCalibration::Id);p.temporaryFovCalibration=false;return p;
 }
 void RvDeviceProfile::validate() const {
     require(QRegularExpression("^[A-Za-z0-9_-]{1,64}$").match(id).hasMatch(), "Invalid device ID");
