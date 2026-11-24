@@ -61,13 +61,26 @@ QImage paint(const std::vector<float> &z,const QSize &size,double lo,double hi,b
         for(int x=0;x<size.width();++x)p[x]=DepthColorScale::color(z[y*size.width()+x],lo,hi,true,black);}return image;
 }
 const RvCameraView::Profile &frameProfile(const QJsonObject &metadata) {
+    if(const auto *runtime=RvCameraView::depthPro2Runtime(metadata["assist_host_model"].toString()))
+        return runtime->view;
     return RvCameraView::isPortrait(metadata)?RvCameraView::Portrait:RvCameraView::Rgb672VgaFp16;
 }
 bool frameGridValid(const QJsonObject &metadata) {
     const auto model=metadata["assist_host_model"].toString();
     if(model==QLatin1String(RvCameraView::LegacyNative16Model))
         return !metadata.contains("assist_output_grid")&&metadata["width"]==640&&metadata["height"]==480;
-    return RvCameraView::isUniDepth(model)&&RvCameraView::validOutputGrid(metadata);
+    return RvCameraView::isHostDepth(model)&&RvCameraView::validOutputGrid(metadata);
+}
+bool validModelMetadata(const QJsonObject &metadata) {
+    const auto model=metadata["assist_host_model"].toString();
+    const auto *runtime=RvCameraView::depthPro2Runtime(model);
+    if(!runtime)return RvInferenceRuntime::validGraphMetadata(metadata);
+    if(metadata["assist_backend"]!=QLatin1String(RvCameraView::DepthPro2Backend)
+        ||metadata["assist_execution_device"]!=QLatin1String(RvCameraView::DepthPro2Backend))return false;
+    const auto identity=RvCameraView::depthPro2Identity(model,*runtime);
+    for(auto it=identity.begin();it!=identity.end();++it)
+        if(metadata["assist_"+it.key()]!=it.value())return false;
+    return true;
 }
 bool write(const QString &path,const QByteArray &bytes){QSaveFile f(path);return f.open(QIODevice::WriteOnly)&&f.write(bytes)==bytes.size()&&f.commit();}
 bool png(const QString &path,const QImage &image){QSaveFile f(path);return f.open(QIODevice::WriteOnly)&&image.save(&f,"PNG")&&f.commit();}
@@ -83,11 +96,11 @@ QByteArray encode(const std::vector<float> &mono,const RvAssistFusion::Result &r
     };
     reasons(result.globalReasons,depthBytes);reasons(result.localReasons,depthBytes+ReasonBytes);return out;
 }
-bool validPayload(const QByteArray &p,int depthBytes){
+bool validPayload(const QByteArray &p,int depthBytes,bool allowMissing){
     if((depthBytes!=DepthBytes&&depthBytes!=640*480*4)||p.size()!=depthBytes+2*ReasonBytes)return false;
     const auto *data=p.constData();
     for(int i=0;i<depthBytes/4;++i){const auto bits=qFromLittleEndian<quint32>(data+4*i);float z;std::memcpy(&z,&bits,4);
-        if(!std::isfinite(z)||z<=0)return false;}
+        if(!std::isfinite(z)||z<0||(!allowMissing&&z==0))return false;}
     for(int i=depthBytes;i<p.size();++i)if(quint8(data[i])>RvAssistFusion::AlreadySupported)return false;
     return true;
 }
@@ -105,10 +118,11 @@ bool matchesPairedNative(const QJsonObject &metadata,const RvTofFrame &native)
 bool Snapshot::valid()const{
     const auto &m=output.metadata;
     const auto &profile=frameProfile(m);
-    if(!frameGridValid(m)||!validPayload(payload)||output.metresFloat32LE.size()!=DepthBytes
+    const bool depthPro2=RvCameraView::isDepthPro2(m["assist_host_model"].toString());
+    if(!frameGridValid(m)||!validPayload(payload,DepthBytes,depthPro2)||output.metresFloat32LE.size()!=DepthBytes
        ||output.cameraImage.size()!=profile.outputSize()||m["depth_unit"]!="camera-Z_m_float32")return false;
     if(profile.provisional&&(m["assist_provisional_model"]!=true||m["assist_candidate_parity_mean_limit"]!=profile.parityMeanLimit))return false;
-    if(m["rectify_map_sha256"]!=QLatin1String(profile.mapSha)||!RvInferenceRuntime::validGraphMetadata(m)
+    if(m["rectify_map_sha256"]!=QLatin1String(profile.mapSha)||!validModelMetadata(m)
        ||m["depth_K"].toArray()!=RvCameraView::intrinsics(profile)
        ||m["assist_output_restored_to_calibrated_grid"]!=true
        ||(m["assist_input_rotation_degrees"]!=0&&m["assist_input_rotation_degrees"]!=180))return false;
@@ -131,7 +145,7 @@ bool Snapshot::valid()const{
 }
 bool Snapshot::save(const QString &parent,QString *result)const{
     const auto fail=[&](const QString &s){if(result)*result=s;return false;};
-    if(!valid())return fail("No complete, matching UniDepth diagnostic snapshot");
+    if(!valid())return fail("No complete, matching host depth diagnostic snapshot");
     if(!QDir().mkpath(parent))return fail("Cannot create diagnostic directory");
     QTemporaryDir stage(QDir(parent).filePath(".host-depth-diagnostic-XXXXXX"));if(!stage.isValid())return fail("Cannot stage diagnostic snapshot");
     const auto &m=output.metadata;const auto fit=m["assist_fusion"].toObject();
@@ -163,7 +177,8 @@ bool Snapshot::save(const QString &parent,QString *result)const{
     }
     painter.end();
     const auto inference=m["assist_input_rotation_degrees"]==180?output.cameraImage.transformed(QTransform().rotate(180)):output.cameraImage;
-    QJsonObject manifest{{"schema",2},{"kind","unidepth_diagnostic"},{"captured_utc",output.capturedUtc.toString(Qt::ISODateWithMs)},
+    const bool depthPro2=RvCameraView::isDepthPro2(m["assist_host_model"].toString());
+    QJsonObject manifest{{"schema",2},{"kind",depthPro2?"depthpro2_diagnostic":"unidepth_diagnostic"},{"captured_utc",output.capturedUtc.toString(Qt::ISODateWithMs)},
         {"saved_utc",QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs)},{"metadata",m},{"native_metadata",native.metadata},
         {"reference","same paired RGB and ToF; adopted agreement is not independent ground truth"},
         {"comparison_scale","Recorded applied global scale"},
@@ -206,7 +221,7 @@ struct SequenceRecorder::State {
             {"dropped_frames",dropped},{"bytes",double(bytes)},{"complete",complete},{"error",error},
             {"elapsed_ms",double(clock.elapsed())},
             {"packet_encoding","uint32le JSON byte count, JSON UTF-8, then packed RGB888, mono+reasons, native, final f32"},
-            {"rgb_coordinates","672x504 calibrated input before model rotation; depth uses the per-frame grid and intrinsics"}};
+            {"rgb_coordinates","Calibrated input before model rotation; each packet gives the input size and depth grid"}};
     }
 
     void run()
@@ -325,14 +340,19 @@ void SequenceRecorder::append(const QByteArray &depth,const QJsonObject &metadat
     }
     const auto frame = metadata["frame_id"].toInteger(-1);
     const auto mode = metadata["assist_experiment"].toString();
+    const auto model = metadata["assist_host_model"].toString();
+    const bool depthPro2 = RvCameraView::isDepthPro2(model);
     const bool split = metadata[RvAssistFusion::SplitCorrectionField] == true;
+    const auto revision = depthPro2 ? RvAssistFusion::vgaRevision(mode) : RvAssistFusion::portraitRevision(mode,split);
+    // Allow the faster VGA streams to absorb short disk stalls without blocking inference.
+    const auto queueLimit = depthPro2 ? 32u : 8u;
     const bool pairValid = native.samples.isEmpty() ? metadata["dtof_present"] == false
                                                      : matchesPairedNative(metadata,native);
-    if (frame <= state->lastFrame || state->queue.size() >= 8 || !pairValid
+    if (frame <= state->lastFrame || state->queue.size() >= queueLimit || !pairValid
         || !RvTofFrame::isHostFusionExperiment(mode) || !RvCameraView::validOutputGrid(metadata)
-        || metadata["assist_fusion_revision"] != QLatin1String(RvAssistFusion::portraitRevision(mode,split))
+        || metadata["assist_fusion_revision"] != QLatin1String(revision)
         || metadata["assist_diagnostic_payload"] != "mono_reasons_v1" || depth.size() != DepthBytes
-        || diagnostic.size() != PayloadBytes || input.size() != RvCameraView::Rgb672VgaFp16.inputSize()) {
+        || diagnostic.size() != PayloadBytes || input.size() != RvCameraView::profile(model).inputSize()) {
         ++state->dropped;
         return;
     }
@@ -375,12 +395,17 @@ int replay(const QString &folder,const QString &reportPath,const QString &compar
     try{
         const auto require=[](bool ok,const char *s){if(!ok)throw std::runtime_error(s);};
         QFile f(QDir(folder).filePath("manifest.json"));require(f.open(QIODevice::ReadOnly)&&f.size()<262144,"Invalid diagnostic manifest");
-        const auto manifest=QJsonDocument::fromJson(f.readAll()).object();require((manifest["schema"]==1||manifest["schema"]==2)&&manifest["kind"]=="unidepth_diagnostic","Unsupported diagnostic schema");
+        const auto manifest=QJsonDocument::fromJson(f.readAll()).object();
+        const auto m=manifest["metadata"].toObject();
+        const bool depthPro2=RvCameraView::isDepthPro2(m["assist_host_model"].toString());
+        require(depthPro2?(manifest["schema"]==2&&manifest["kind"]=="depthpro2_diagnostic"):
+                ((manifest["schema"]==1||manifest["schema"]==2)&&manifest["kind"]=="unidepth_diagnostic"),
+                "Unsupported diagnostic schema");
         const auto load=[&](const char *name,int size){QFile file(QDir(folder).filePath(name));require(file.open(QIODevice::ReadOnly)&&file.size()==size,"Invalid diagnostic binary length");
             const auto bytes=file.readAll();require(manifest["files_sha256"].toObject()[name]==QString::fromLatin1(digest(bytes)),"Diagnostic fingerprint mismatch");return bytes;};
-        const auto m=manifest["metadata"].toObject();require(frameGridValid(m),"Unknown diagnostic model or grid");
+        require(frameGridValid(m),"Unknown diagnostic model or grid");
         const auto &profile=frameProfile(m);
-        require(m["rectify_map_sha256"]==QLatin1String(profile.mapSha)&&RvInferenceRuntime::validGraphMetadata(m),"Diagnostic model or view mismatch");
+        require(m["rectify_map_sha256"]==QLatin1String(profile.mapSha)&&validModelMetadata(m),"Diagnostic model or view mismatch");
         const auto nativeMeta=manifest["native_metadata"].toObject();
         const RvTofFrame tof{load("tof.bin",nativeMeta["dtof_bytes"].toInt()),nativeMeta};
         const auto monoBytes=load("mono.f32",DepthBytes),savedBytes=load("depth.f32",DepthBytes),reasons=load("reasons.bin",2*ReasonBytes);
@@ -394,11 +419,13 @@ int replay(const QString &folder,const QString &reportPath,const QString &compar
         const auto &cal=paired?RvAssistFusion::calibrationForNativeGrid(fov,tof.columns(),tof.rows()):RvAssistFusion::calibrationForFov(fov);
         QFile geometry(fov==6?RvCalibration::GeometryResource:fov==2?":/camera/dtof_m48_geometry_f2.bin":":/camera/dtof_m48_geometry.bin");require(geometry.open(QIODevice::ReadOnly)&&manifest["geometry_sha256"]==QString::fromLatin1(digest(geometry.readAll())),"Diagnostic calibration mismatch");
         const auto mode=m["assist_experiment"].toString();
-        const bool current=RvCameraView::isPortrait(m);
+        const bool portrait=RvCameraView::isPortrait(m);
+        const bool current=portrait||depthPro2;
         require(m["assist_fusion_revision"]!=QLatin1String(RvAssistFusion::SplitCorrectionRevision),
                 "Split G replay requires the preceding RGB and ToF frame sequence");
-        const auto revision=current?RvAssistFusion::portraitRevision(mode):"global_scale_latest_native_rgb_v2";
-        require((current&&archivedG(m))||((current?RvTofFrame::isHostFusionExperiment(mode):mode=="H")
+        const auto revision=depthPro2?RvAssistFusion::vgaRevision(mode):
+            (portrait?RvAssistFusion::portraitRevision(mode):"global_scale_latest_native_rgb_v2");
+        require((portrait&&archivedG(m))||((current?RvTofFrame::isHostFusionExperiment(mode):mode=="H")
                 &&m["assist_fusion_revision"]==QLatin1String(revision)),
                 "Unsupported recorded correction revision");
         const auto fit=m["assist_fusion"].toObject();
@@ -414,7 +441,7 @@ int replay(const QString &folder,const QString &reportPath,const QString &compar
         RvAssistFusion::Result repaired;
         double measured=0;
         std::vector<float> values;
-        const bool reconstruct=current&&(!paired||archivedG(m)||fit.contains("measured_scale"));
+        const bool reconstruct=current&&(!paired||(portrait&&archivedG(m))||fit.contains("measured_scale"));
         if(reconstruct){
             measured=fit.contains("measured_scale")?fit["measured_scale"].toDouble(0):1.;
             require(std::isfinite(measured)&&measured>0,"Invalid recorded measured scale");

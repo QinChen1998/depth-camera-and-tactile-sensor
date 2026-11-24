@@ -34,8 +34,14 @@ int main(void)
     assert(dcts_write_calibration(path,"unsafe\"run",6,1)==-1);++checks;
     remove(receipt);rmdir(folder);
     assert(tmf8829_observe08());++checks;
-    for(unsigned warning=0;warning<256;++warning){
-        assert(!tmf8829_warning_fatal(warning)==(warning==0u||warning==8u||warning==16u));++checks;
+    for(int observe=0;observe<2;++observe){
+        assert(setenv("CANONICAL_WARNING_POLICY",observe?"observe-0x08":"strict",1)==0);++checks;
+        for(unsigned warning=0;warning<256;++warning){
+            const int allowed = warning==0x00u || warning==0x10u
+                || (observe && (warning==0x08u || warning==0x18u));
+            assert(!tmf8829_warning_fatal(warning)==allowed);++checks;
+        }
+        assert(tmf8829_warning_fatal(0x118u));++checks;
     }
     printf("PASS software FOV calibration and actual sensor receipt: %u assertions\n",checks);
     return 0;

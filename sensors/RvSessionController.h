@@ -68,6 +68,16 @@ public:
     bool hostHdAssist() const {return m_hostAssistSelected&&m_dtofMode==RvDtofCandidates::Native48&&m_config.cameraWidth==2304;}
     static constexpr char GlobalRgbImagingScheme[]="host_unidepth_rgb672_vga_fp16_tof48_g";
     static constexpr char ReuseLatestTofImagingScheme[]="host_unidepth_rgb672_vga_fp16_tof48_b";
+    static constexpr char DepthPro2ImagingScheme[]="host_depthpro2_s_vga_fp16";
+    static constexpr char DepthPro2BImagingScheme[]="host_depthpro2_b_vga_fp16";
+    static constexpr char DepthPro2ReuseImagingScheme[]="host_depthpro2_s_vga_fp16_reuse_tof";
+    static constexpr char DepthPro2BReuseImagingScheme[]="host_depthpro2_b_vga_fp16_reuse_tof";
+    static QString depthPro2ModelForScheme(const QString &scheme);
+    static QString depthPro2Scheme(const QString &model,bool reuse);
+    static bool reusesLatestTof(const QString &scheme);
+    static constexpr char Native48ExtendedIntegrationScheme[]="board_native_tof48_1200k";
+    static constexpr char Native48HighAccuracy1200KScheme[]="board_native_tof48_high_accuracy_1200k";
+    bool native48ExtendedIntegration() const { return m_native48ExtendedIntegration; }
     bool monocularDisplay() const {return m_monocularDisplay;}
     void setMonocularDisplay(bool enabled);
     bool splitCorrectionAvailable() const;
@@ -196,6 +206,7 @@ private:
     QString m_autoStartAttemptedDevice;
     quint64 m_stopRevision=0;
     int m_dtofMode=-1;
+    bool m_native48ExtendedIntegration=false;
     RvDtofCandidates::Settings m_dtofSettings;
     QString m_dtofOptions,m_dtofToken;
     QJsonObject m_dtofReceipt;

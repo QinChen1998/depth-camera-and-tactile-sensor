@@ -42,6 +42,12 @@ python -m unittest discover -s tests -p 'test_*.py' -v
 
 给 `--host-assist-live-validation` 设置 `DCTS_HOST_DIAGNOSTIC_DIRECTORY` 后，专项依次测试 G 和 B 的测点叠加、配对 RGB 对照、10 秒录制和单帧回放，并在指定的本地目录保存 RGB 和测量数据。离线融合专项覆盖 B 复用、G/B 无配对时的历史尺度和旧版 G 诊断回放。当前 G/B 按快照保存的测量尺度和应用尺度重建结果。分区校正的状态依赖前序帧，单帧入口会提示使用序列。
 
+设置 `DCTS_LIVE_HOST_MODEL=depthpro2_s_vga_fp16` 或 `depthpro2_b_vga_fp16` 可实测相应型号的 ToF G 和 ToF B。专项核对 TensorRT 引擎身份、640×480 深度和配对 RGB 网格、配对预算及校正帧数。离线融合专项使用模拟平面核对两个型号的 F6 尺度、无效值处理、历史尺度和快照回放。
+
+`--measurement-live-validation <绝对报告.json>` 通过「文件 → 测量采集」依次录制 RV1103 普通档 30 秒和 Gemini 335 60 秒，核验帧时长、序号、二进制长度、字节索引和有效测点。需要已登记的 RV1103、已安装 Orbbec SDK v2 及已连接的 Gemini 335。板端身份和实机开关与成像切换专项相同。录制文件保存在报告旁的独立目录。
+
+设置 `DCTS_MEASUREMENT_LIVE_1200K=1` 时，此专项录制 RV1103 普通 1200K 档 30 秒。设置为 `high_accuracy` 则录制高精度 1200K 档 30 秒。两者均校验模式号、档位 ID、传感器实读主积分和帧序号连续性。
+
 判定同时检查退出码、报告存在、有独立 PASS 断言且无 FAIL。统计不把 `BYPASS` 字符串或 `RESULT PASS` 汇总行当作新断言。Python 测试覆盖缺报告、空报告、仅汇总、FAIL、非零退出、环境隔离和非离线命令拒绝。
 
 ## USB 自动发现与免填参数（2026-11-09）

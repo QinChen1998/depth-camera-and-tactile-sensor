@@ -13,9 +13,13 @@
 | 上位机辅助推理（G） | `host_unidepth_rgb672_vga_fp16_tof48_g` | 同帧竖幅单目深度与 48×32 ToF 全局尺度校正，每份测量只用一次 |
 | 上位机辅助推理（B，复用 ToF） | `host_unidepth_rgb672_vga_fp16_tof48_b` | 同一套模型与尺度校正，允许复用最新合格测量 |
 | 板端推理 | `board_native_tof48` | 48×32 普通原生 ToF 径向距离，无神经网络 |
+| 板端推理（1200K） | `board_native_tof48_1200k` | 48×32 普通原生 ToF，本次采集主积分 1200K |
 | 板端推理高精度 | `board_native_tof48_high_accuracy` | 48×32 高精度原生 ToF 径向距离，无神经网络 |
+| 板端推理高精度（1200K） | `board_native_tof48_high_accuracy_1200k` | 48×32 高精度原生 ToF，本次采集主积分 1200K |
 
 两个主机方案共用 worker 模型 ID `unidepth_rgb672_vga_fp16_tof48`。可见产品入口声明见 `DCTS_APP.json`，入口过滤由 `DepthMapWidget`、`RvSessionController`、`RvAssistDepth` 和 `RuntimeDiscovery` 实现。共享协议中的历史常量用于识别旧诊断格式。
+
+Depth Pro 2-S 和 2-B 共用 F6 的 Native48 与 2304×1296 H.265 采集会话。两者的原方案 ID `host_depthpro2_s_vga_fp16` 和 `host_depthpro2_b_vga_fp16` 对应 G，加 `_reuse_tof` 后缀的 ID 对应 B。RGB 准备线程只计算 672×504 校正表中 `(16,12,640,480)` 子网格。焦距约 385.185 px，主点为 (319.5, 239.5)。`DctsDepthPro2Worker.exe` 校验模型、图和引擎身份，并把 TensorRT 预测恢复到这个网格。主进程按请求保留原生 ToF，在验证返回的帧号和模型身份后，用同一网格的 F6 投影和 G/B 全局尺度校正生成深度、点云和快照。近场分区校正仍供 UniDepth G 使用。
 
 移植来源 `E:/WORK/Dexterous Hand Visualization` 只读。当前工程的源码、模型包、RV worker、资源和配置均独立；日常运行不依赖该来源项目目录。
 

@@ -22,9 +22,10 @@ double median(std::vector<double> v) {
     const double upper=v[n/2];
     return n%2 ? upper : (upper+*std::max_element(v.begin(),v.begin()+n/2))/2;
 }
-template<class T> double sample(const std::vector<T> &v,int w,int h,double x,double y) {
+template<class T> double sample(const std::vector<T> &v,int w,int h,double x,double y,bool requirePositive=false) {
     x=std::clamp(x,0.0,double(w-1)); y=std::clamp(y,0.0,double(h-1));
     const int ix=int(x),iy=int(y),jx=std::min(ix+1,w-1),jy=std::min(iy+1,h-1);
+    if(requirePositive&&std::min({v[iy*w+ix],v[iy*w+jx],v[jy*w+ix],v[jy*w+jx]})<=0)return 0;
     const double ax=x-ix,ay=y-iy;
     return (1-ay)*((1-ax)*v[iy*w+ix]+ax*v[iy*w+jx])
         +ay*((1-ax)*v[jy*w+ix]+ax*v[jy*w+jx]);
@@ -164,7 +165,7 @@ QJsonValue defaultNativeProjection(const RvTofFrame &tof) {
     const auto fov=m.contains("dtof_fov_correction")?m["dtof_fov_correction"]:m["tof_fov_correction"];
     if(!tof.samples.isEmpty()&&fov==6&&tof.columns()==48&&tof.rows()==32
         &&RvTofFrame::isHostFusionExperiment(m["assist_experiment"].toString())
-        &&RvCameraView::isUniDepthNative48(m["assist_host_model"].toString()))
+        &&RvCameraView::isHostDepth(m["assist_host_model"].toString()))
         return QString::fromLatin1(CloseNative48Projection);
     return QJsonValue(QJsonValue::Undefined);
 }
@@ -184,12 +185,12 @@ NativeProjection projectNativePoint(double radius,int id,const Calibration &cal,
     return {pixel,z};
 }
 
-Result monocular(const std::vector<float> &mono,const char *reason,QSize size) {
+Result monocular(const std::vector<float> &mono,const char *reason,QSize size,bool allowMissing) {
     const int pixels=size.width()*size.height();
     Result result;
     result.globalReasons=result.localReasons=QByteArray(1536,NoMeasurement);
     if(mono.size()!=pixels) {result.error="Invalid monocular dimensions";return result;}
-    for(float z:mono)if(!std::isfinite(z)||z<=0) {result.error="Invalid monocular camera-Z output";return result;}
+    for(float z:mono)if(!std::isfinite(z)||z<0||(!allowMissing&&z==0)) {result.error="Invalid monocular camera-Z output";return result;}
     result.depth.resize(pixels*4);
     qToLittleEndian<quint32>(mono.data(),qsizetype(mono.size()),result.depth.data());
     result.diagnostics["fusion_mode"]="monocular";result.diagnostics["dtof_corrected"]=false;
@@ -208,7 +209,9 @@ Result fuseGlobalScale(const std::vector<float> &mono,const RvTofFrame &tof,
     result.globalReasons=result.localReasons=QByteArray(nativeCount,Invalid);
     const auto fail=[&](const char *message) {result.depth.clear();result.error=QString::fromLatin1(message);return result;};
     const auto projection=tof.metadata.value(NativeProjectionField);
-    if(!projection.isUndefined()&&(projection!=defaultNativeProjection(tof)||view.outputSize()!=RvCameraView::Portrait.outputSize()))
+    const auto model=tof.metadata["assist_host_model"].toString();
+    const bool allowMissing=RvCameraView::isDepthPro2(model);
+    if(!projection.isUndefined()&&(projection!=defaultNativeProjection(tof)||view.outputSize()!=RvCameraView::outputProfile(model).outputSize()))
         return fail("Invalid native ToF projection");
     if(!cal.valid || mono.size()!=width*height || cameraSize!=QSize(width,height) || !tof.isValidForHostFusion() || !nativeGridMatches(tof,cal)
         || tof.metadata["rgb_width"].toInt()!=view.inputWidth
@@ -216,11 +219,11 @@ Result fuseGlobalScale(const std::vector<float> &mono,const RvTofFrame &tof,
         || !tof.metadata["pair_delta_ms"].isDouble()
         || std::abs(tof.metadata["pair_delta_ms"].toDouble())>200)
         return fail("Unmatched RGB/dToF frame or calibration");
-    for(float z:mono)if(!std::isfinite(z) || z<=0) return fail("Invalid monocular camera-Z output");
+    for(float z:mono)if(!std::isfinite(z)||z<0||(!allowMissing&&z==0))return fail("Invalid monocular camera-Z output");
     // Only measurement support failures may fall back; frame/calibration and
     // model validity have already been checked. Temporal scaling is separate.
     const auto monocular=[&](const char *reason) {
-        auto output=RvAssistFusion::monocular(mono,reason,cameraSize);
+        auto output=RvAssistFusion::monocular(mono,reason,cameraSize,allowMissing);
         // Preserve the already collected diagnostics of the paired path.
         for(auto it=output.diagnostics.begin();it!=output.diagnostics.end();++it)result.diagnostics[it.key()]=it.value();
         result.depth=std::move(output.depth);
@@ -244,9 +247,10 @@ Result fuseGlobalScale(const std::vector<float> &mono,const RvTofFrame &tof,
         const double u=point.pixel.x(),v=point.pixel.y();
         if(u<3 || u>width-4 || v<3 || v>height-4){result.globalReasons[i]=result.localReasons[i]=Outside;continue;}
         ++projected;
-        if(!awayFromModelEdge(mono,width,int(u),int(v))) {result.globalReasons[i]=result.localReasons[i]=Boundary;++edgeRejected;continue;}
+        const double prediction=sample(mono,width,height,u,v,allowMissing);
+        if(prediction<=0||!awayFromModelEdge(mono,width,int(u),int(v))) {result.globalReasons[i]=result.localReasons[i]=Boundary;++edgeRejected;continue;}
         result.globalReasons[i]=result.localReasons[i]=GlobalRejected;
-        anchors.push_back({u,v,z,std::log(z/sample(mono,width,height,u,v)),i});
+        anchors.push_back({u,v,z,std::log(z/prediction),i});
     }
     result.diagnostics={{"tof_total_zones",nativeCount},{"tof_good_zones",good},{"tof_projected_in_view",projected},
         {"anchors_projected",int(anchors.size())},{"anchors_edge_rejected",edgeRejected}};
@@ -270,7 +274,7 @@ Result fuseGlobalScale(const std::vector<float> &mono,const RvTofFrame &tof,
     result.depth.resize(width*height*4);
     auto *depth=result.depth.data();
     for(int i=0;i<width*height;++i){const float z=float(mono[i]*scale);
-        if(!std::isfinite(z)||z<=0)return fail("Non-finite fused depth");
+        if(!std::isfinite(z)||z<0||(!allowMissing&&z==0))return fail("Non-finite fused depth");
         quint32 bits;std::memcpy(&bits,&z,4);qToLittleEndian(bits,depth+4*i);
     }
     QJsonArray used;for(const auto &a:fit.inliers)used.append(a.nativeIndex);
@@ -419,7 +423,7 @@ QJsonObject agreement(const std::vector<float> &mono,const Result &output,
         {"middle_0.7_to_1.5m",middle.json()},{"far_over_1.5m",far.json()}};
 }
 
-Result ScaleContinuity::apply(Result result,qint64 nowMs,qint64 epoch,qint64 generation,qint64 frameId) {
+Result ScaleContinuity::apply(Result result,qint64 nowMs,qint64 epoch,qint64 generation,qint64 frameId,bool allowMissing) {
     if(!result.ok()) {reset();return result;}
     if(initialized&&(epoch!=boundEpoch||generation!=boundGeneration||nowMs<lastMs))reset();
     const bool reliable=result.diagnostics["dtof_corrected"].toBool();
@@ -443,7 +447,7 @@ Result ScaleContinuity::apply(Result result,qint64 nowMs,qint64 epoch,qint64 gen
     for(int i=0;i<result.depth.size()/4;++i) {
         quint32 bits=qFromLittleEndian<quint32>(depth+4*i);float value;
         std::memcpy(&value,&bits,4);value=float(value*factor);
-        if(!std::isfinite(value)||value<=0) {reset();result.depth.clear();result.error=QStringLiteral("Invalid temporally scaled depth");return result;}
+        if(!std::isfinite(value)||value<0||(!allowMissing&&value==0)) {reset();result.depth.clear();result.error=QStringLiteral("Invalid temporally scaled depth");return result;}
         std::memcpy(&bits,&value,4);qToLittleEndian(bits,depth+4*i);
     }
     result.diagnostics["measured_scale"]=measured;

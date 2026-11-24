@@ -60,7 +60,7 @@ struct UsbRuntimePlan {
 // Inspection and installation must compare the same complete payload, including
 // scripts patched with the board's saved sensor settings. This only reads files.
 template<class Connection>
-UsbRuntimePlan usbRuntimePlan(Connection &connection, const QDir &runtime)
+UsbRuntimePlan usbRuntimePlan(Connection &connection, const QDir &runtime, bool exactInventory = false)
 {
     require(device.fov()==RvCalibration::Fov,"USB setup requires the current calibration");
     UsbRuntimePlan plan;
@@ -107,7 +107,25 @@ UsbRuntimePlan usbRuntimePlan(Connection &connection, const QDir &runtime)
     for(const auto &file:files)checks+=QString("check %1 %2 %3\n").arg(shellQuote(boardPath(file.relative)),tunerHash(file.bytes),file.executable?"1":"0");
     checks+=QString("if [ -e /root/rv1103_mw_spi/bin/tof_driver ] || [ -L /root/rv1103_mw_spi/bin/tof_driver ]; then check /root/rv1103_mw_spi/bin/tof_driver %1 1; fi\n").arg(capture.driverSha);
     checks+="for path in /root/r144_depth /root/dtof_candidates_20261009 /root/dtof_tuner /root/rv1103_mw_spi /root/rv1103_mw_spi/bin; do [ ! -L \"$path\" ] || ready=0; done\n"
-        "grep -q '^[[:space:]]*\\[ ! -f /root/r144_depth/spi_native16.enabled \\] || return 0$' /oem/usr/bin/RkLunch.sh || ready=0\nprintf '%s\\n' \"$ready\"\n";
+        "grep -q '^[[:space:]]*\\[ ! -f /root/r144_depth/spi_native16.enabled \\] || return 0$' /oem/usr/bin/RkLunch.sh || ready=0\n";
+    if (exactInventory) {
+        const QStringList roots{"/root/r144_depth", BoardCandidateDir, "/root/dtof_tuner"};
+        auto allowed=roots;
+        allowed << "/root/r144_depth/calibration_current" << "/root/r144_depth/rkipc_before_setup.ini";
+        for (const auto &file : files) {
+            if (file.relative != "S99zdepth") allowed << boardPath(file.relative);
+        }
+        QStringList pathTests;
+        for (const auto &path : allowed) pathTests << ("-path " + shellQuote(path));
+        checks += "if [ \"$ready\" = 1 ]; then\n"
+            " backup=/root/r144_depth/rkipc_before_setup.ini\n"
+            " if [ -e \"$backup\" ] || [ -L \"$backup\" ]; then [ -f \"$backup\" ] && [ ! -L \"$backup\" ] || ready=0; fi\n"
+            " extra=$(find " + roots.join(' ') +
+            " \\( -path /root/dtof_tuner/persistence -type d -prune \\) -o ! \\( " +
+            pathTests.join(" -o ") + " \\) -print) || ready=0\n"
+            " [ -z \"$extra\" ] || ready=0\nfi\n";
+    }
+    checks += "printf '%s\\n' \"$ready\"\n";
     return plan;
 }
 
@@ -128,14 +146,19 @@ bool matchesNativeCaptureCapabilities(const QByteArray &receipt, int fov)
         && capabilities["model_inference"] == false && capabilities["photon_enabled"] == false;
 }
 
-bool ensureUsbRuntime(Ssh &connection, const QDir &runtime, const QString &boot)
+struct UsbRuntimeUpdate {
+    bool changed = false;
+    QString rollback;
+};
+
+UsbRuntimeUpdate ensureUsbRuntime(Ssh &connection, const QDir &runtime, const QString &boot, bool exactInventory = false)
 {
-    const auto plan=usbRuntimePlan(connection,runtime);
+    const auto plan=usbRuntimePlan(connection,runtime,exactInventory);
     const auto &files=plan.files;
     const auto &checks=plan.checks;
     const auto state=connection.execute(checks).trimmed();
     require(state=="0"||state=="1","Invalid complete USB runtime inspection receipt");
-    if(state=="1")return false;
+    if(state=="1")return {};
     const auto stage="/root/.dcts-setup-"+QUuid::createUuid().toString(QUuid::Id128);
     const auto quoted=shellQuote(stage);
     const auto mode=connection.execute("if [ -e /root/r144_depth ] || [ -L /root/r144_depth ] || [ -e /root/dtof_candidates_20261009 ] || [ -L /root/dtof_candidates_20261009 ] || [ -e /root/dtof_tuner ] || [ -e /etc/init.d/S99zdepth ] || [ -e /oem/usr/bin/RkLunch.sh.dcts-before-bootstrap ] || [ -e /run/r144_depth ] || [ -e /run/dtof_candidates ]; then echo repair; else echo fresh; fi").trimmed();
@@ -159,6 +182,7 @@ bool ensureUsbRuntime(Ssh &connection, const QDir &runtime, const QString &boot)
     connection.execute("set -eu; umask 077; mkdir "+quoted+"; cd "+quoted
         +"; mkdir depth candidate tuner; mkdir depth/calibration_current");
     QString phase;
+    bool activating=false;
     try {
         QByteArray manifest;
         for(const auto &file:files) {
@@ -166,6 +190,7 @@ bool ensureUsbRuntime(Ssh &connection, const QDir &runtime, const QString &boot)
             upload(file.relative,file.bytes,file.executable);
             manifest+=tunerHash(file.bytes).toLatin1()+"  "+file.relative.toLatin1()+"\n";
         }
+        phase="upload files.sha256";
         upload("files.sha256",manifest,false);
         phase="staged capture capability check";
         const auto capabilities = connection.execute(
@@ -177,16 +202,93 @@ bool ensureUsbRuntime(Ssh &connection, const QDir &runtime, const QString &boot)
         // Bind activation to the exact receipt already parsed on the host.
         setup.replace("@NATIVE_CAPABILITIES_SHA@", tunerHash(capabilities).toLatin1());
         phase="board preflight, capture check and activation";
+        activating=true;
         require(connection.execute(command("activate"), 75000, setup) == capabilities,
                 "The activated native capture capability receipt differs from the validated receipt.");
     } catch (const std::exception &error) {
-        // Keep staging and rollback evidence on failure, including interrupted
-        // SSH uploads. Never delete the last copy of an earlier deployment.
+        // Before activation, the maintenance transaction owns a staging copy
+        // of host payload files. Once activation starts, preserve the rollback.
+        if (exactInventory && !activating) {
+            try {
+                connection.execute("set -eu; if [ -d " + quoted + " ] && [ ! -L " + quoted
+                    + " ] && [ ! -e " + quoted + "/previous ] && [ ! -L " + quoted
+                    + "/previous ]; then rm -rf " + quoted + "; fi");
+            } catch(const std::exception &) {}
+        }
         throw Error(QString("RV1103 setup (%1): %2").arg(phase,QString::fromUtf8(error.what())));
     }
     require(connection.execute(checks).trimmed()=="1","USB runtime readback differs after installation");
     connection.execute("rm -rf "+quoted);
-    return true;
+    return {true, mode == "repair" ? stage + ".before" : QString()};
+}
+
+// Keep at most one older rollback on the board. Archive the transaction's
+// replaced files to the host so an out-of-inventory file frees board space.
+int archiveOlderUsbRollbacks(Ssh &connection, const QDir &archiveDirectory, const QString &boot,
+                             QJsonArray &archives, const QString &justReplaced = {})
+{
+    const QString listing=QStringLiteral(R"SH(
+for path in $(ls -dt /root/.dcts-setup-*.before 2>/dev/null); do
+    [ -d "$path" ] && [ ! -L "$path" ] || continue
+    printf '%s\n' "$path"
+done | grep -E '^/root/\.dcts-setup-[0-9a-f]{32}\.before$' || true
+)SH");
+    const auto snapshot=QString::fromLatin1(connection.execute(listing).trimmed());
+    auto paths=snapshot.split('\n',Qt::SkipEmptyParts);
+    const QRegularExpression rollbackPath(QStringLiteral("^/root/\\.dcts-setup-[0-9a-f]{32}\\.before$"));
+    require(justReplaced.isEmpty() || paths.contains(justReplaced),"The current installation rollback could not be found");
+    for (const auto &path : paths) {
+        require(rollbackPath.match(path).hasMatch(), "Invalid managed rollback path");
+    }
+    const auto keep=std::find_if(paths.cbegin(),paths.cend(),[&](const auto &path){return path!=justReplaced;});
+    if (keep != paths.cend()) {
+        const auto retained=*keep;
+        paths.removeOne(retained);
+    }
+    if (paths.isEmpty()) return 0;
+
+    QStringList quotedPaths, names;
+    for (const auto &path : paths) {
+        quotedPaths << shellQuote(path);
+        names << shellQuote(path.mid(QStringLiteral("/root/").size()));
+    }
+    const auto prelude=tunerPrelude();
+    const auto checkBoard="[ \"$(cat /proc/sys/kernel/random/boot_id)\" = " + shellQuote(boot)
+        + " ] || fail 'Board boot changed during file maintenance'\n";
+    connection.execute(prelude + checkBoard + "health;quiescent;receivers_gone\n");
+    require(archiveDirectory.mkpath("."), "Cannot create the local board archive directory");
+    const auto archivePath=archiveDirectory.filePath("rv1103-rollbacks-" + QUuid::createUuid().toString(QUuid::Id128) + ".tar");
+    const auto tar="tar -cf - -C /root " + names.join(' ');
+    QSaveFile archive(archivePath);
+    require(archive.open(QIODevice::WriteOnly), "Cannot open the local board archive");
+    connection.execute(tar,90000,{},&archive);
+    require(archive.size() > 0 && archive.commit(), "Cannot commit the local board archive");
+
+    const auto cleanup=prelude + QStringLiteral(R"SH(
+install_lock=/run/dcts-board-install.lock
+mkdir "$install_lock" || fail 'Another board installation is active'
+trap 'rmdir "$install_lock"' EXIT
+trap 'exit 2' TERM INT HUP
+(
+ [ ! -L /run/r144_depth ] || fail 'Invalid capture state directory'
+ mkdir -p /run/r144_depth
+ locks;health;quiescent;receivers_gone
+ cd /root
+ [ "$(pwd -P)" = /root ] || fail 'Invalid rollback root'
+)SH") + checkBoard
+        + "current=$( " + listing + ")\n[ \"$current\" = " + shellQuote(snapshot)
+        + " ] || fail 'Rollback directories changed while making the archive'\n"
+        + "checksum=$(" + tar + " | sha256sum | cut -d' ' -f1)\n[ \"$checksum\" = " + shellQuote(sha(archivePath))
+        + " ] || fail 'Local archive differs from board files'\n"
+        + "rm -rf " + quotedPaths.join(' ') + "\nfor path in " + quotedPaths.join(' ')
+        + "; do [ ! -e \"$path\" ] && [ ! -L \"$path\" ] || fail 'Archived rollback still exists'; done\nsync\n)\n";
+    try {
+        connection.execute(cleanup,90000);
+    } catch (const std::exception &error) {
+        throw Error(QString("Archive saved to %1. Board cleanup failed. %2").arg(archivePath,QString::fromUtf8(error.what())));
+    }
+    archives.append(QDir::toNativeSeparators(archivePath));
+    return int(paths.size());
 }
 
 QJsonArray usbRuntimeInspectionSelfTest()
@@ -240,6 +342,13 @@ QJsonArray usbRuntimeInspectionSelfTest()
           && changedCapabilityRejected("model_inference", true)
           && changedCapabilityRejected("photon_enabled", QJsonValue(QJsonValue::Undefined)));
     const auto plan=usbRuntimePlan(fixture,runtime);
+    const auto maintenancePlan=usbRuntimePlan(fixture,runtime,true);
+    check("maintenance_checks_for_unlisted_files_in_managed_directories",
+          !plan.checks.contains("extra=$(find")
+          && maintenancePlan.checks.contains("extra=$(find /root/r144_depth /root/dtof_candidates_20261009 /root/dtof_tuner"));
+    check("maintenance_keeps_camera_backup_and_tuner_persistence",
+          maintenancePlan.checks.contains("-path '/root/r144_depth/rkipc_before_setup.ini'")
+          && maintenancePlan.checks.contains("-path /root/dtof_tuner/persistence -type d -prune"));
     check("usb_complete_runtime_match_accepted",usbRuntimeMatches(fixture,runtime));
     fixture.state="0";
     check("usb_complete_runtime_mismatch_requires_setup",!usbRuntimeMatches(fixture,runtime));

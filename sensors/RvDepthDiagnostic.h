@@ -10,7 +10,7 @@ inline constexpr int PayloadBytes=DepthBytes+2*ReasonBytes;
 // Fixed-capacity reason slots preserve v1 IPC; native16 uses slots 0..255,
 // with the remaining slots explicitly NoMeasurement, never extra ToF samples.
 QByteArray encode(const std::vector<float> &mono,const RvAssistFusion::Result &result,int nativeCount=ReasonBytes);
-bool validPayload(const QByteArray &payload,int depthBytes=DepthBytes);
+bool validPayload(const QByteArray &payload,int depthBytes=DepthBytes,bool allowMissing=false);
 QByteArray monocularDepth(const QByteArray &payload,const QJsonObject &metadata);
 bool matchesPairedNative(const QJsonObject &metadata,const RvTofFrame &native);
 struct Snapshot {

@@ -7,6 +7,7 @@
 // for wire compatibility; the board never supplies a model depth image.
 namespace RvCaptureContract {
 constexpr int NativeHd=14, Native48=24, Native48HighAccuracy=25, Width=256, Height=256, FreshMs=1000;
+constexpr int Native48ExtendedIntegrationK=1200;
 constexpr const char* Protocol="LSG1";
 constexpr const char* PairedProtocol="LSG2";
 constexpr const char* NativeCaptureProtocolV2="native-m48-m16-m8-v2";

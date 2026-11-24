@@ -3,6 +3,11 @@
 <TS version="2.1" language="zh_CN" sourcelanguage="en_US">
   <context>
     <name>DepthMapWidget</name>
+    <message><source>Depth Pro 2-S (ToF G)</source><translation>Depth Pro 2-S（ToF G）</translation></message>
+    <message><source>Depth Pro 2-S (ToF B, reuse)</source><translation>Depth Pro 2-S（ToF B，复用）</translation></message>
+    <message><source>Depth Pro 2-B (ToF G)</source><translation>Depth Pro 2-B（ToF G）</translation></message>
+    <message><source>Depth Pro 2-B (ToF B, reuse)</source><translation>Depth Pro 2-B（ToF B，复用）</translation></message>
+    <message><source>Calibrated 640×480 RGB depth on NVIDIA TensorRT FP16.</source><translation>在 NVIDIA TensorRT FP16 上推理标定后的 640×480 RGB 深度。</translation></message>
     <message><source>Fixed color range</source><translation>固定色标</translation></message>
     <message><source>Dynamic + histogram equalization</source><translation>动态＋直方图均衡</translation></message>
     <message><source>Depth map color mode</source><translation>深度图上色方式</translation></message>
@@ -33,6 +38,10 @@
     <message><source>Clockwise angle (0–359°):</source><translation>顺时针角度（0–359°）：</translation></message>
     <message><source>Rotate both native ToF displays clockwise. UniDepth, raw measurements and saved images keep their orientation.</source><translation>顺时针旋转两档原生 ToF 显示。UniDepth、原始测量和保存图像的方向保持不变。</translation></message>
     <message><source>Board inference</source><translation>板端推理</translation></message>
+    <message><source>Board inference (1200K)</source><translation>板端推理（1200K）</translation></message>
+    <message><source>Ordinary 48×32 ToF with 1200K main integration.</source><translation>48×32 普通 ToF，主积分为 1200K。</translation></message>
+    <message><source>Board inference high accuracy (1200K)</source><translation>板端推理高精度（1200K）</translation></message>
+    <message><source>High-accuracy 48×32 ToF with 1200K main integration.</source><translation>48×32 高精度 ToF，主积分为 1200K。</translation></message>
     <message><source>Board inference high accuracy</source><translation>板端推理高精度</translation></message>
     <message><source>Native 48×32 ToF radial depth; no neural inference.</source><translation>原生 48×32 ToF 径向深度，不执行神经网络推理。</translation></message>
     <message>
@@ -688,8 +697,8 @@
       <translation>H 按 RGB 节奏做全局尺度校正，允许复用配对时间差 100 ms 内最新的 dToF 测量。界面标注复用，不视为新测量；没有有效配对时仅沿用历史尺度。</translation>
     </message>
     <message>
-    <source>Host-assisted depth inference (480×640).</source>
-    <translation>上位机辅助深度推理（480×640）。</translation>
+    <source>Select the imaging scheme for the shared depth and camera session.</source>
+    <translation>选择深度图和原视频共享会话的成像方案。</translation>
   </message>
 </context>
   <context>
@@ -826,6 +835,8 @@
   </context>
   <context>
     <name>RvAssistDepth</name>
+    <message><source>The %1 TensorRT runtime is missing or invalid.</source><translation>%1 的 TensorRT 运行包缺失或无效。</translation></message>
+    <message><source>%1 requires a compatible NVIDIA GPU.</source><translation>%1 需要兼容的 NVIDIA GPU。</translation></message>
     <message>
       <source>Host inference worker identity mismatch</source>
       <translation>上位机推理进程身份校验失败。</translation>
@@ -1218,6 +1229,7 @@ Projected camera-Z %8 m</source>
   </context>
   <context>
     <name>RvSessionController</name>
+    <message><source>The sensor did not confirm 1200K main integration.</source><translation>传感器未确认主积分为 1200K。</translation></message>
     <message><source>Waiting for a new G correction frame...</source><translation>正在等待切换后的 G 校正帧…</translation></message>
     <message><source>Native ToF depth expired</source><translation>原生 ToF 深度已过期</translation></message>
     <message>
@@ -2727,6 +2739,30 @@ New: %2</source>
     <translation>安装板端采集支持…</translation>
   </message>
   <message>
+    <source>Maintain board files</source>
+    <translation>维护板端文件</translation>
+  </message>
+  <message>
+    <source>Check the capture files against the deployment list. Replace changed or extra runtime files and archive older rollback copies on this computer.</source>
+    <translation>按部署清单核对采集文件。发现变更或多余文件时更新板端运行目录，并将旧回滚副本归档到本机。</translation>
+  </message>
+  <message>
+    <source>Board file maintenance is unavailable in offline mode.</source>
+    <translation>离线模式无法维护板端文件。</translation>
+  </message>
+  <message>
+    <source>Board files were updated and verified on %1.</source>
+    <translation>已更新并核验 %1 上的板端文件。</translation>
+  </message>
+  <message>
+    <source>Board files match the deployment list on %1.</source>
+    <translation>%1 上的板端文件符合部署清单。</translation>
+  </message>
+  <message>
+    <source>Archived %1 rollback copies to %2.</source>
+    <translation>已将 %1 份回滚副本归档至 %2。</translation>
+  </message>
+  <message>
     <source>Verified %1. Automatic dToF support is missing. Use Install board capture support to install the required files.</source>
     <translation>已验证 %1。缺少自动 dToF 支持，请点击“安装板端采集支持”补装文件。</translation>
   </message>
@@ -3132,6 +3168,9 @@ Range %6 mm (radial) | SNR %7 | slot %8 | Signal %9 | Noise encoded %10</source>
   </context>
   <context>
     <name>RvPointCloudWidget</name>
+    <message><source>Stop point cloud</source><translation>停止点云</translation></message>
+    <message><source>Resume point cloud</source><translation>恢复点云</translation></message>
+    <message><source>Point cloud stopped</source><translation>点云已停止</translation></message>
     <message><source>monocular depth</source><translation>单目深度</translation></message>
     <message><source>assisted depth</source><translation>辅助深度</translation></message>
     <message>
@@ -3256,7 +3295,120 @@ Range %6 mm (radial) | SNR %7 | slot %8 | Signal %9 | Noise encoded %10</source>
     </message>
   </context>
   <context>
+    <name>MeasurementCaptureDialog</name>
+    <message>
+      <source>Measurement Capture</source>
+      <translation>测量采集</translation>
+    </message>
+    <message>
+      <source>Device</source>
+      <translation>采集设备</translation>
+    </message>
+    <message>
+      <source>Duration</source>
+      <translation>录制时长</translation>
+    </message>
+    <message>
+      <source>Measured distance</source>
+      <translation>实测距离</translation>
+    </message>
+    <message>
+      <source>Scene</source>
+      <translation>场景备注</translation>
+    </message>
+    <message>
+      <source>Output folder</source>
+      <translation>保存目录</translation>
+    </message>
+    <message>
+      <source>Select measurement folder</source>
+      <translation>选择测量数据目录</translation>
+    </message>
+    <message>
+      <source> s</source>
+      <translation> 秒</translation>
+    </message>
+    <message>
+      <source> mm</source>
+      <translation> mm</translation>
+    </message>
+    <message>
+      <source>Unspecified</source>
+      <translation>未填写</translation>
+    </message>
+    <message>
+      <source>Browse…</source>
+      <translation>浏览…</translation>
+    </message>
+    <message>
+      <source>Start recording</source>
+      <translation>开始录制</translation>
+    </message>
+    <message>
+      <source>Stop recording</source>
+      <translation>停止录制</translation>
+    </message>
+    <message>
+      <source>Open folder</source>
+      <translation>打开目录</translation>
+    </message>
+    <message>
+      <source>Hide</source>
+      <translation>隐藏</translation>
+    </message>
+    <message>
+      <source>Uses the imaging mode selected in Depth Map.</source>
+      <translation>录制深度图中选定的 RV1103 成像模式。</translation>
+    </message>
+    <message>
+      <source>Records Gemini 335 native depth at 1280 × 800 and 15 FPS.</source>
+      <translation>录制 Gemini 335 的 1280×800、15 FPS 原生深度。</translation>
+    </message>
+    <message>
+      <source>Finishing recording…</source>
+      <translation>正在结束录制…</translation>
+    </message>
+    <message>
+      <source>Waiting for the first depth frame…</source>
+      <translation>等待首帧深度数据…</translation>
+    </message>
+    <message>
+      <source>Recording · %1 s · %2 frames</source>
+      <translation>录制中 · %1 秒 · %2 帧</translation>
+    </message>
+    <message>
+      <source>Saved %1 frames · %2 s</source>
+      <translation>已保存 %1 帧 · %2 秒</translation>
+    </message>
+    <message>
+      <source>Stopped · %1 frames saved</source>
+      <translation>已停止 · 保存 %1 帧</translation>
+    </message>
+    <message>
+      <source>Recording ended · %1 frames saved
+%2</source>
+      <translation>录制已结束 · 保存 %1 帧
+%2</translation>
+    </message>
+    <message>
+      <source>Ready</source>
+      <translation>就绪</translation>
+    </message>
+    <message>
+      <source>RV1103 depth stream ended during recording</source>
+      <translation>录制期间 RV1103 深度流中断</translation>
+    </message>
+    <message>
+      <source>RV1103 session or imaging mode changed during recording</source>
+      <translation>录制期间 RV1103 会话或成像模式发生变化</translation>
+    </message>
+  </context>
+  <context>
     <name>SensorMainWindow</name>
+    <message>
+      <source>Measurement Capture...</source>
+      <translation>测量采集…</translation>
+    </message>
     <message>
       <source>RV1103 connection</source>
       <translation>RV1103 连接</translation>

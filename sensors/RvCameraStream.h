@@ -68,10 +68,11 @@ public:
  // Decoded H.265 remains in the original camera geometry. Shrink at the same
  // half-pixel centres as the Native 4x preview, then rectify exactly once.
  // This does not rotate the model input or change any ToF coordinates.
- static QImage prepareHd(const QImage& decoded,const Calibration& calibration) {
+ static QImage prepareHd(const QImage& decoded,const Calibration& calibration,const QRect& outputRoi={}) {
   require(decoded.size()==QSize(2304,1296),"HD model input dimensions");
   const auto source=decoded.convertToFormat(QImage::Format_RGB888);
-  if(calibration.sourceWidth==2304)return rectify(source,calibration);
+  if(calibration.sourceWidth==2304)return rectify(source,calibration,outputRoi);
+  require(outputRoi.isNull(),"HD ROI requires a full-resolution calibration map");
   require(calibration.width()==576,"HD model input dimensions");
   QImage small(576,324,QImage::Format_RGB888);
   for(int y=0;y<324;++y) {
@@ -98,14 +99,20 @@ public:
  static QImage rectify(const QImage& raw,const QByteArray& map){
   return rectify(raw,Calibration(map));
  }
- static QImage rectify(const QImage& raw,const Calibration& calibration){
-  const int w=calibration.w,h=calibration.h,n=w*h;
+ static QImage rectify(const QImage& raw,const Calibration& calibration,const QRect& outputRoi={}){
+  const QRect grid(0,0,calibration.w,calibration.h);
+  const QRect roi=outputRoi.isNull()?grid:outputRoi;
+  require(!roi.isEmpty()&&grid.contains(roi),"RGB rectification ROI");
   const int sourceWidth=calibration.sourceWidth;
   require(raw.size()==QSize(sourceWidth,calibration.sourceHeight)&&raw.format()==QImage::Format_RGB888&&raw.bytesPerLine()==sourceWidth*3,"RGB/map layout");
-  QImage out(w,h,QImage::Format_RGB888);auto* dst=out.bits();const auto* src=raw.constBits();
+  QImage out(roi.size(),QImage::Format_RGB888);const auto* src=raw.constBits();
   const int offsets[4]={0,3,sourceWidth*3,(sourceWidth+1)*3};
-  for(int p=0;p<n;++p){const auto& pixel=calibration.pixels[p];
-   for(int c=0;c<3;++c){unsigned sum=0;for(int k=0;k<4;++k)sum+=pixel.weights[k]*src[pixel.offset+offsets[k]+c];dst[p*3+c]=(sum+512)>>10;}}
+  for(int y=0;y<roi.height();++y){
+   auto* dst=out.scanLine(y);const auto* pixel=calibration.pixels.constData()+(roi.y()+y)*grid.width()+roi.x();
+   for(int x=0;x<roi.width();++x,++pixel){
+    for(int c=0;c<3;++c){unsigned sum=0;for(int k=0;k<4;++k)sum+=pixel->weights[k]*src[pixel->offset+offsets[k]+c];dst[x*3+c]=(sum+512)>>10;}
+   }
+  }
   return out;
  }
  static QJsonObject validate(const QByteArray& header,const QByteArray& json,const QByteArray& map) {

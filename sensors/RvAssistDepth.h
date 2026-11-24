@@ -1,5 +1,5 @@
 #pragma once
-#include "RvTofFrame.h"
+#include "RvAssistFusion.h"
 #include <QtCore/QObject>
 #include <QtCore/QProcess>
 #include <QtCore/QTimer>
@@ -26,9 +26,9 @@ public:
     bool setHostModel(const QString &model);
     QString hostModel() const { return m_hostModel; }
     bool setExperiment(const QString &mode);
-    bool splitCorrectionEnabled() const {return m_experiment=="G"&&m_splitCorrection;}
+    bool splitCorrectionEnabled() const {return isUniDepth(m_hostModel)&&m_experiment=="G"&&m_splitCorrection;}
     void setSplitCorrectionEnabled(bool enabled){m_splitCorrection=enabled;}
-    QString experiment() const {return isUniDepth(m_hostModel)?m_experiment:QStringLiteral("A");}
+    QString experiment() const {return m_experiment;}
     static bool validExperiment(const QString &mode) {return RvTofFrame::isHostFusionExperiment(mode);}
     static bool supportsHostModel(const QString &model);
     static bool isUniDepth(const QString &model);
@@ -55,6 +55,7 @@ private:
     void sendLatest();
     void readOutput();
     bool acceptResponse(const QJsonObject &response,const QByteArray &depth,const QByteArray &coverage,QElapsedTimer &responseClock);
+    RvAssistFusion::Result correctDepthPro2(const QByteArray &depth,const Input &current,QJsonObject &metadata,QByteArray &diagnostic);
     void handleTimeout();
     void fail(const QString &reason, bool tryNextBackend = true);
     static QString failureExplanation(const QString &reason);
@@ -73,6 +74,7 @@ private:
     qint64 m_lastHdTofTimestampNs=0;
     QByteArray m_lastHdTofSamples;
     QJsonObject m_lastHdTofContext;
+    RvAssistFusion::ScaleContinuity m_depthPro2Scale;
     QJsonObject m_dropReasons;
     double m_lastGuiPublishMs=0;
     bool m_splitCorrection=false;

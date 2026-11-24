@@ -3,6 +3,8 @@
 /.vs/
 /QtDevelopment.local.props
 /UniDepthRuntime*/
+/DepthPro2Runtime/
+/DepthPro2BRuntime/
 /config/*
 !/config/first-run-settings.ini
 /Depth Ca.*/

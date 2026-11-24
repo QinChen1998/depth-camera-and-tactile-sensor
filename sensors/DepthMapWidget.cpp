@@ -94,8 +94,18 @@ DepthMapWidget::DepthMapWidget(QWidget *parent)
         m_rvModel->addItem(QString(),QLatin1String(RvSessionController::GlobalRgbImagingScheme));
         m_rvModel->addItem(QString(),QLatin1String(RvSessionController::ReuseLatestTofImagingScheme));
     }
+    if(RvAssistDepth::supportsHostModel(QLatin1String(RvCameraView::DepthPro2VgaModel))){
+        m_rvModel->addItem(QString(),QLatin1String(RvSessionController::DepthPro2ImagingScheme));
+        m_rvModel->addItem(QString(),QLatin1String(RvSessionController::DepthPro2ReuseImagingScheme));
+    }
+    if(RvAssistDepth::supportsHostModel(QLatin1String(RvCameraView::DepthPro2BVgaModel))){
+        m_rvModel->addItem(QString(),QLatin1String(RvSessionController::DepthPro2BImagingScheme));
+        m_rvModel->addItem(QString(),QLatin1String(RvSessionController::DepthPro2BReuseImagingScheme));
+    }
     m_rvModel->addItem(QString(),"board_native_tof48");
+    m_rvModel->addItem(QString(),QLatin1String(RvSessionController::Native48ExtendedIntegrationScheme));
     m_rvModel->addItem(QString(),"board_native_tof48_high_accuracy");
+    m_rvModel->addItem(QString(),QLatin1String(RvSessionController::Native48HighAccuracy1200KScheme));
     m_rvModel->setMinimumWidth(0);
     m_rvModel->setSizeAdjustPolicy(QComboBox::AdjustToContents);
     m_rvModel->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Preferred);
@@ -415,11 +425,17 @@ void DepthMapWidget::retranslateUi()
     auto label=[this](const char* id,const QString& text){m_rvModel->setItemText(m_rvModel->findData(id),text);};
     label(RvSessionController::GlobalRgbImagingScheme,tr("Host-assisted inference (G)"));
     label(RvSessionController::ReuseLatestTofImagingScheme,tr("Host-assisted inference (B, reuse ToF)"));
+    label(RvSessionController::DepthPro2ImagingScheme,tr("Depth Pro 2-S (ToF G)"));
+    label(RvSessionController::DepthPro2ReuseImagingScheme,tr("Depth Pro 2-S (ToF B, reuse)"));
+    label(RvSessionController::DepthPro2BImagingScheme,tr("Depth Pro 2-B (ToF G)"));
+    label(RvSessionController::DepthPro2BReuseImagingScheme,tr("Depth Pro 2-B (ToF B, reuse)"));
     label("board_native_tof48",tr("Board inference"));
+    label(RvSessionController::Native48ExtendedIntegrationScheme,tr("Board inference (1200K)"));
     label("board_native_tof48_high_accuracy",tr("Board inference high accuracy"));
+    label(RvSessionController::Native48HighAccuracy1200KScheme,tr("Board inference high accuracy (1200K)"));
     m_depthTabs->setTabText(0,tr("Board depth"));m_depthTabs->setTabText(1,tr("Host assisted depth"));
     m_rvModel->setAccessibleName(tr("Imaging scheme:"));
-    m_rvModel->setToolTip(tr("Host-assisted depth inference (480×640)."));
+    m_rvModel->setToolTip(tr("Select the imaging scheme for the shared depth and camera session."));
     if (m_session) m_session->retranslateState();
     m_sessionControlsKey.clear();syncSessionControls();
 }
@@ -579,7 +595,8 @@ void DepthMapWidget::syncSessionControls()
         QString::number(m_session?m_session->dtofCandidateMode():-1), QString::number(busy), QString::number(m_switchUiActive),
         QString::number(m_session&&m_session->controlledSource()),
         QString::number(m_session?m_session->assistLoadingState():0),
-        m_session?m_session->assistHostModel():QString()};
+        m_session?m_session->assistHostModel():QString(),
+        m_session?m_session->currentImagingScheme():QString()};
     // Frame statistics change much more often than configuration. Keep status
     // current without rebuilding combo-box permissions/tooltips on every frame.
     if(key!=m_sessionControlsKey){
@@ -596,14 +613,26 @@ void DepthMapWidget::syncSessionControls()
     if(auto* items=qobject_cast<QStandardItemModel*>(m_rvModel->model())){
         for(int i=0;i<m_rvModel->count();++i){
             const auto id=m_rvModel->itemData(i).toString();
-            if(id.startsWith("board_native_")){items->item(i)->setEnabled(true);items->item(i)->setToolTip(tr("Native 48×32 ToF radial depth; no neural inference."));}
+            if(id.startsWith("board_native_")){
+                items->item(i)->setEnabled(true);
+                QString tooltip=tr("Native 48×32 ToF radial depth; no neural inference.");
+                if(id==QLatin1String(RvSessionController::Native48ExtendedIntegrationScheme))
+                    tooltip=tr("Ordinary 48×32 ToF with 1200K main integration.");
+                else if(id==QLatin1String(RvSessionController::Native48HighAccuracy1200KScheme))
+                    tooltip=tr("High-accuracy 48×32 ToF with 1200K main integration.");
+                items->item(i)->setToolTip(tooltip);
+            }
             else{
-                const QString model=QLatin1String(RvCameraView::UniDepthVgaNative48);
+                const auto depthPro2Model=RvSessionController::depthPro2ModelForScheme(id);
+                const bool depthPro2=!depthPro2Model.isEmpty();
+                const QString model=depthPro2?depthPro2Model:QString::fromLatin1(RvCameraView::UniDepthVgaNative48);
                 const bool available=RvAssistDepth::hostModelAvailable(model);
                 items->item(i)->setEnabled(offerAssist&&available);
                 QString tooltip=RvAssistDepth::tr("Selected host model runtime is missing; prepare the optional runtime first");
                 if(available){
-                    if(id==QLatin1String(RvSessionController::ReuseLatestTofImagingScheme))
+                    if(depthPro2)
+                        tooltip=tr("Calibrated 640×480 RGB depth on NVIDIA TensorRT FP16.");
+                    else if(id==QLatin1String(RvSessionController::ReuseLatestTofImagingScheme))
                         tooltip=tr("RGB frames can reuse the latest eligible 48×32 ToF measurement within the 200 ms pairing budget.");
                     else tooltip=tr("RGB frames trigger inference. Each fresh 48×32 ToF measurement can update the global scale once.");
                 }

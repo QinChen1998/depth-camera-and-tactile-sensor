@@ -23,6 +23,9 @@ inline const char *portraitRevision(const QString &mode,bool split=false) {
     if(mode=="G"&&split)return SplitCorrectionRevision;
     return mode=="B"?"global_scale_reuse_latest_rgb_portrait_v1":"global_scale_fresh_rgb_portrait_v2";
 }
+inline const char *vgaRevision(const QString &mode) {
+    return mode=="B"?"global_scale_reuse_latest_rgb_vga_v1":"global_scale_fresh_rgb_vga_v1";
+}
 // Native radial admission only, independent of camera-Z and display colour range.
 // Shared by all UniDepth schemes, diagnostics and adopted-point validation.
 inline constexpr double MinimumRadialMetres = .01;
@@ -50,7 +53,7 @@ QJsonValue defaultNativeProjection(const RvTofFrame &tof);
 NativeProjection projectNativePoint(double radius, int nativeId, const Calibration &calibration,
                                     const RvCameraView::Profile &view, const RvTofFrame &tof);
 // An explicit RGB-only estimate has no fabricated native measurement identity.
-Result monocular(const std::vector<float> &monocularZ, const char *reason,QSize size={576,324});
+Result monocular(const std::vector<float> &monocularZ, const char *reason,QSize size={576,324},bool allowMissing=false);
 // H robust scalar fit. Retained consensus is rechecked after outlier rejection.
 Result fuseGlobalScale(const std::vector<float> &monocularZ,const RvTofFrame &tof,
                        const Calibration &calibration,const RvCameraView::Profile &view);
@@ -68,7 +71,7 @@ Result limitTofFieldOfView(Result output,const Calibration &calibration,const Rv
 // One worker/session owns this state. No previous depth image is retained.
 class ScaleContinuity {
 public:
-    Result apply(Result result, qint64 nowMs, qint64 epoch, qint64 generation, qint64 frameId);
+    Result apply(Result result, qint64 nowMs, qint64 epoch, qint64 generation, qint64 frameId,bool allowMissing=false);
     void reset() { *this=ScaleContinuity{}; }
 private:
     bool initialized=false, hasReference=false;

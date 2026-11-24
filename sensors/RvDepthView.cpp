@@ -167,11 +167,11 @@ bool RvDepthView::setDepth(const QByteArray &bytes,const QJsonObject &metadata,c
     const int width=metadata["width"].toInt(),height=metadata["height"].toInt();
     const auto model=metadata["assist_host_model"].toString();
     const auto &view=RvCameraView::outputProfile(model);
-    const bool hostGrid=RvCameraView::isUniDepth(model)&&RvCameraView::validOutputGrid(metadata)
+    const bool hostGrid=RvCameraView::isHostDepth(model)&&RvCameraView::validOutputGrid(metadata)
         &&metadata["depth_K"].toArray()==RvCameraView::intrinsics(view)
         &&metadata["rectify_map_sha256"]==QLatin1String(view.mapSha)
         &&metadata["assist_output_restored_to_calibrated_grid"]==true;
-    if(!(RvCameraView::isUniDepth(model)?hostGrid:((width==144&&height==81)||(width==288&&height==162)
+    if(!(RvCameraView::isHostDepth(model)?hostGrid:((width==144&&height==81)||(width==288&&height==162)
         ||(width==384&&height==256)||(width==576&&height==324)
         ||(radial&&((width==48&&height==32)||(width==128&&height==128)||(width==256&&height==256)))))
         ||bytes.size()!=width*height*4||metadata["depth_unit"]!=(radial?"sensor_radial_m_float32":"camera-Z_m_float32")){
@@ -254,6 +254,7 @@ std::vector<RvDepthView::TofPoint> RvDepthView::projectTofPoints()const
     const auto &cal=RvAssistFusion::calibrationForNativeGrid(fov,frame.columns(),frame.rows());
     if(!cal.valid||frame.sampleCount()!=cal.nativeCount())
         return {};
+    const auto &view=RvCameraView::outputProfile(frame.metadata["assist_host_model"].toString());
     std::array<bool,RvDepthDiagnostic::ReasonBytes> adopted{};
     for(const auto &id:imageOverlay.adopted){
         const int index=id.toInt(-1);
@@ -265,7 +266,7 @@ std::vector<RvDepthView::TofPoint> RvDepthView::projectTofPoints()const
     for(int id=0;id<frame.sampleCount();++id){
         if(!frame.valid(id)||frame.rangeUq2(id)==0)
             continue;
-        const auto point=RvAssistFusion::projectNativePoint(frame.rangeUq2(id)*.00025,id,cal,RvCameraView::Portrait,frame);
+        const auto point=RvAssistFusion::projectNativePoint(frame.rangeUq2(id)*.00025,id,cal,view,frame);
         const auto pixel=point.pixel+QPointF(.5,.5);
         if(point.cameraZ>0&&QRectF(imageOverlay.rgb.rect()).contains(pixel))
             points.push_back({pixel,float(point.cameraZ),adopted[id]});

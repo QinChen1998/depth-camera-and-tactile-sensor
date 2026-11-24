@@ -5,6 +5,7 @@
 #include <QtCore/QSize>
 #include <QtCore/QPointF>
 #include <QtCore/QJsonObject>
+#include <QtCore/QRect>
 #include <QtGui/QImage>
 #include <algorithm>
 #include <vector>
@@ -13,6 +14,14 @@
 // each inference graph, rectification map and projection uses one whole profile.
 namespace RvCameraView {
 inline constexpr const char *UniDepthVgaNative48="unidepth_rgb672_vga_fp16_tof48";
+inline constexpr const char *DepthPro2VgaModel="depthpro2_s_vga_fp16";
+inline constexpr const char *DepthPro2BVgaModel="depthpro2_b_vga_fp16";
+inline constexpr const char *DepthPro2Backend="native-tensorrt-fp16";
+inline constexpr const char *DepthPro2Worker="DctsDepthPro2Worker.exe";
+inline constexpr const char *DepthPro2Engine="depthpro2-s-vga-fp16.engine";
+inline constexpr const char *DepthPro2EngineSha="cd01ebaa9f8376c4c71788cba583e1627eba8fa62c42c4e0ab2e94a24b04bc2c";
+inline constexpr const char *DepthPro2BEngineSha="42c1d06f110a3c0580bfd0c75b083651ed44350e627bdd4e7cc439c1a742e441";
+inline constexpr const char *DepthPro2TensorRt="10.16.1.11";
 inline constexpr const char *LegacyNative16Model="unidepth_rgb672_vga_fp16_tof16";
 inline bool isUniDepthNative48(const QString &model){return model==QLatin1String(UniDepthVgaNative48);}
 inline bool isUniDepthVga(const QString &model){return isUniDepthNative48(model);}
@@ -42,23 +51,66 @@ inline constexpr Profile Rgb672VgaFp16{260.*480/324,
     "93705cb3295dd7476b44911b8a55f5215bf74e8d5eccd27cecdb1b338270a648",
     "fp16-mixed-trial","UniDepthV2-Small","unidepthv2-small-rgb672-vga.onnx",672,504,-1,"rgb672_vga_crop_v1",.0025,.01,true,
     672,504,640,480};
+inline constexpr QRect VgaInputRoi{16,12,640,480};
+inline constexpr char DepthPro2Grid[]="calibrated_vga";
+inline constexpr Profile DepthPro2Vga{
+    Rgb672VgaFp16.focal,RvCalibration::MapSha,
+    "5ccf784840a8d6a8a4360eb8b2bb9f26f887110828d3b3e5fdac26eb0678a393",
+    "5ccf784840a8d6a8a4360eb8b2bb9f26f887110828d3b3e5fdac26eb0678a393",
+    "wide","strongly-typed-fp16",
+    "583c4d630779fd231f969c738733624963ad34bd3c29f9c64088257e3436f97c",
+    "fp16","Depth Pro 2-S",DepthPro2Engine,640,480,-1,DepthPro2Grid,0.,0.,false,
+    640,480,640,480};
+inline constexpr Profile DepthPro2BVga=[] {
+    auto view=DepthPro2Vga;
+    view.sourceSha="39686cc10484668fa4c7d96705aa682ee11344067b5033b28f8e4c82804e6fa8";
+    view.graphSha=view.sourceSha;
+    view.weightsSha="244ff85e0d9bde6e0f985de1c61420abc4c2110265b495c974556225ac2b60ed";
+    view.modelName="Depth Pro 2-B";
+    view.graphFile="depthpro2-b-vga-fp16.engine";
+    return view;
+}();
+struct DepthPro2Runtime {
+    const Profile &view;
+    const char *engineSha,*directory,*overrideKey;
+};
+inline constexpr DepthPro2Runtime DepthPro2SRuntime{
+    DepthPro2Vga,DepthPro2EngineSha,"DepthPro2Runtime","RV_DEPTHPRO2_ROOT"};
+inline constexpr DepthPro2Runtime DepthPro2BRuntime{
+    DepthPro2BVga,DepthPro2BEngineSha,"DepthPro2BRuntime","RV_DEPTHPRO2_B_ROOT"};
+inline const DepthPro2Runtime *depthPro2Runtime(const QString &model){
+    if(model==QLatin1String(DepthPro2VgaModel))return &DepthPro2SRuntime;
+    if(model==QLatin1String(DepthPro2BVgaModel))return &DepthPro2BRuntime;
+    return nullptr;
+}
+inline bool isDepthPro2(const QString &model){return depthPro2Runtime(model)!=nullptr;}
 inline bool isUniDepth(const QString &model){return isUniDepthVga(model);}
-inline bool isHostDepth(const QString &model){return isUniDepthVga(model);}
+inline bool isHostDepth(const QString &model){return isUniDepthVga(model)||isDepthPro2(model);}
 inline bool isWide(const QString &model){return isUniDepthVga(model);}
 inline bool supportsNativeGrid(const QString &model,int columns,int rows){
-    return isUniDepthVga(model)&&columns==nativeColumns(model)&&rows==nativeRows(model);
+    return isHostDepth(model)&&columns==nativeColumns(model)&&rows==nativeRows(model);
 }
 inline const Profile &profile(const QString &model){
-    return Rgb672VgaFp16;
+    const auto *runtime=depthPro2Runtime(model);
+    return runtime?runtime->view:Rgb672VgaFp16;
 }
 // The graph remains 640x480. Its central 360x480 camera is resampled with
 // square pixels to the portrait ToF/RGB overlap, without rotating the sensor.
 inline constexpr char PortraitGrid[]="tof_portrait_crop_v1";
 inline constexpr int PortraitCropX=140,PortraitCropY=0,PortraitCropWidth=360,PortraitCropHeight=480;
 inline constexpr Profile Portrait=[] {auto p=Rgb672VgaFp16;p.focal*=4./3.;p.outputWidth=480;p.outputHeight=640;return p;}();
-inline const Profile &outputProfile(const QString &model){return Portrait;}
+inline const Profile &outputProfile(const QString &model){
+    const auto *runtime=depthPro2Runtime(model);
+    return runtime?runtime->view:Portrait;
+}
 inline bool isPortrait(const QJsonObject &metadata){return metadata["assist_output_grid"]==QLatin1String(PortraitGrid);}
 inline bool validOutputGrid(const QJsonObject &m){
+    if(const auto *runtime=depthPro2Runtime(m["assist_host_model"].toString())){
+        const auto &view=runtime->view;
+        return m["assist_output_grid"]==QLatin1String(DepthPro2Grid)
+            &&m["width"]==view.outputWidth&&m["height"]==view.outputHeight
+            &&m["depth_stride"]==view.outputWidth*int(sizeof(float));
+    }
     return isPortrait(m)&&m["assist_model_depth_size"].toArray()==QJsonArray{Rgb672VgaFp16.outputWidth,Rgb672VgaFp16.outputHeight}
         &&m["assist_model_crop_xywh"].toArray()==QJsonArray{PortraitCropX,PortraitCropY,PortraitCropWidth,PortraitCropHeight}
         &&m["width"]==Portrait.outputWidth&&m["height"]==Portrait.outputHeight;
@@ -68,6 +120,8 @@ inline QPointF inputPixel(QPointF output,const QSize &size){
     return {output.x()+16,output.y()+12};
 }
 inline QImage pairedImage(const QImage &input,const QJsonObject &metadata){
+    if(const auto *runtime=depthPro2Runtime(metadata["assist_host_model"].toString()))
+        return input.size()==runtime->view.inputSize()?input:QImage();
     return isPortrait(metadata)?input.copy(16+PortraitCropX,12+PortraitCropY,PortraitCropWidth,PortraitCropHeight)
         .scaled(Portrait.outputSize(),Qt::IgnoreAspectRatio,Qt::SmoothTransformation):input.copy(16,12,640,480);
 }
@@ -85,4 +139,11 @@ inline std::vector<float> portraitDepth(const std::vector<float> &modelDepth){
     return out;
 }
 inline QJsonArray intrinsics(const Profile &view){return {view.focal,view.focal,view.cx(),view.cy()};}
+inline QJsonObject depthPro2Identity(const QString &model,const DepthPro2Runtime &runtime){
+    const auto &view=runtime.view;
+    return {{"graph_sha256",view.graphSha},{"source_graph_sha256",view.sourceSha},
+        {"weights_sha256",view.weightsSha},{"precision",view.precision},
+        {"conversion",view.conversion},{"host_model",model},
+        {"engine_sha256",runtime.engineSha}};
+}
 }

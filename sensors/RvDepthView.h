@@ -51,7 +51,7 @@ public:
   if(nativeRadial)return QSizeF(grid.height(),grid.width());
   if(radial)return QSizeF(grid);
   if(!imageSourceRect.isEmpty()&&imageSourceRect!=image.rect())return imageSourceRect.size();
-  if(image.size()==QSize(480,640))return image.size();
+  if(image.size()==QSize(480,640)||image.size()==QSize(640,480))return image.size();
   return QSizeF(144,81);
  }
  QRect displayedSourceRect()const{return imageSourceRect;}

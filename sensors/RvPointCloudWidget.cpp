@@ -100,8 +100,8 @@ bool isDepthTransition(const float *depth, int stride, int before, int after)
     return false;
 }
 
-template <typename DepthAt>
-QVector<quint32> meshIndices(const quint32 *grid, int columns, int rows, DepthAt depthAt)
+template <typename DepthAt, typename IsCanceled>
+QVector<quint32> meshIndices(const quint32 *grid, int columns, int rows, DepthAt depthAt, IsCanceled isCanceled)
 {
     QVector<quint32> indices;
     indices.reserve(6 * (columns - 1) * (rows - 1));
@@ -117,6 +117,8 @@ QVector<quint32> meshIndices(const quint32 *grid, int columns, int rows, DepthAt
         }
     };
     for (int row = 0; row < rows - 1; ++row) {
+        if (isCanceled())
+            return {};
         for (int column = 0; column < columns - 1; ++column) {
             const int i = row * columns + column;
             triangle(grid[i], grid[i + columns], grid[i + 1]);
@@ -168,7 +170,7 @@ RvPointCloudWidget::RvPointCloudWidget(RvSessionController *session, QWidget *pa
       m_view(new DockableQuick3DWidget(this, {"pointInstances", "depthInstances", "depthPointDiameter", "renderSettings",
           "meshGeometry", "meshVisible", "cameraTarget", "cameraDistance", "orbitYaw", "orbitPitch"})),
       m_status(new QLabel(this)), m_displayMode(new QComboBox(this)),
-      m_colorMode(new QComboBox(this)),
+      m_colorMode(new QComboBox(this)), m_pause(new QPushButton(this)),
       m_accumulate(new QPushButton(this)), m_reset(new QPushButton(this)),
       m_diameterControls(new QWidget(this)), m_rangeControls(new QWidget(this)), m_colorLegend(new QLabel(this)),
       m_legendMinimum(new QLabel(this)), m_legendMaximum(new QLabel(this)),
@@ -192,15 +194,21 @@ RvPointCloudWidget::RvPointCloudWidget(RvSessionController *session, QWidget *pa
     m_view->setResizeMode(QQuickWidget::SizeRootObjectToView);
     m_view->setClearColor(QColor("#161b22"));
     m_view->setMinimumSize(300, 190);
+    auto viewPolicy = m_view->sizePolicy();
+    viewPolicy.setRetainSizeWhenHidden(true);
+    m_view->setSizePolicy(viewPolicy);
     m_status->setObjectName("rvPointCloudStatus");
     m_status->setWordWrap(true);
     m_displayMode->setObjectName("rvPointCloudDisplayMode");
     m_displayMode->addItems({QString(), QString()});
+    m_pause->setObjectName("rvPointCloudPause");
+    m_pause->setCheckable(true);
     m_accumulate->setObjectName("rvPointCloudAccumulate");
     m_accumulate->setCheckable(true);
     m_reset->setObjectName("rvPointCloudReset");
     auto *toolbar = new QHBoxLayout;
     toolbar->addWidget(m_status, 1);
+    toolbar->addWidget(m_pause);
     toolbar->addWidget(m_displayMode);
     toolbar->addWidget(m_accumulate);
     toolbar->addWidget(m_reset);
@@ -230,12 +238,15 @@ RvPointCloudWidget::RvPointCloudWidget(RvSessionController *session, QWidget *pa
     m_accumulationUpdate.setSingleShot(true);
     m_accumulationUpdate.setInterval(AccumulationUpdateMs);
     connect(&m_accumulationUpdate, &QTimer::timeout, this, &RvPointCloudWidget::presentLatest);
+    connect(m_pause, &QPushButton::toggled, this, &RvPointCloudWidget::setPaused);
     connect(m_accumulate, &QPushButton::toggled, this, &RvPointCloudWidget::setAccumulating);
     connect(m_displayMode, &QComboBox::currentIndexChanged, this, &RvPointCloudWidget::changeDisplayMode);
     connect(m_session, &RvSessionController::tofFrameReady, this, &RvPointCloudWidget::acceptTofFrame);
     connect(m_session, &RvSessionController::assistDepthSnapshotReady, this, &RvPointCloudWidget::acceptAssistedDepth);
     connect(m_session, &RvSessionController::assistDepthStreamCleared, this, &RvPointCloudWidget::clearAssistedDepth);
     connect(m_session, &RvSessionController::monocularDisplayChanged, this, [this] {
+        if (m_pause->isChecked())
+            return;
         m_depthInstances->setTable({});
         publishMesh({});
         m_hasDepthFrame = false;
@@ -388,7 +399,7 @@ void RvPointCloudWidget::updateColorLegend()
 void RvPointCloudWidget::setRenderingActive(bool active)
 {
     m_renderingActive = active;
-    if (!active)
+    if (!active || m_pause->isChecked())
         return;
     if (m_view->source().isEmpty())
         m_view->setSource(QUrl(QStringLiteral("qrc:/qml/RvPointCloudView.qml")));
@@ -396,8 +407,23 @@ void RvPointCloudWidget::setRenderingActive(bool active)
         presentLatest();
 }
 
+void RvPointCloudWidget::setPaused(bool paused)
+{
+    if (paused && m_depthConverting)
+        m_depthConversion.cancel();
+    m_view->setVisible(!paused);
+    if (paused) {
+        clearFrames();
+    } else {
+        setRenderingActive(m_renderingActive);
+        updateStatus();
+    }
+}
+
 void RvPointCloudWidget::acceptTofFrame(const RvTofFrame &frame)
 {
+    if (m_pause->isChecked())
+        return;
     const auto &metadata = frame.metadata;
     const double age = metadata["raw_age_ms"].toDouble(-1);
     if (!capturesNative48(*m_session) || metadata["candidate_mode"] != m_session->dtofCandidateMode()
@@ -420,7 +446,7 @@ void RvPointCloudWidget::acceptTofFrame(const RvTofFrame &frame)
 void RvPointCloudWidget::acceptAssistedDepth(const QByteArray &depth, const QJsonObject &metadata, const QImage &,
                                              const RvTofFrame &, const QByteArray &diagnostic)
 {
-    if (!capturesAssistedDepth(*m_session))
+    if (m_pause->isChecked() || !capturesAssistedDepth(*m_session))
         return;
     const auto model = m_session->assistHostModel();
     const auto &camera = RvCameraView::outputProfile(model);
@@ -489,7 +515,7 @@ void RvPointCloudWidget::clearTofFrame()
 
 void RvPointCloudWidget::presentLatest()
 {
-    if (!m_renderingActive)
+    if (!m_renderingActive || m_pause->isChecked())
         return;
     if (auto *scene = m_view->rootObject()) {
         scene->setProperty("depthPointDiameter", m_diameter->value());
@@ -535,7 +561,8 @@ RvPointCloudWidget::NativeFrame RvPointCloudWidget::projectTofFrame(bool mesh) c
     if (mesh) {
         const auto &points = std::as_const(projected.points);
         projected.indices = meshIndices(grid.data(), Columns, Rows,
-                                        [&](quint32 index) { return -points[index].getPosition().z(); });
+                                        [&](quint32 index) { return -points[index].getPosition().z(); },
+                                        [] { return false; });
     }
     return projected;
 }
@@ -668,7 +695,7 @@ void RvPointCloudWidget::publishMesh(const MeshData &mesh)
 
 void RvPointCloudWidget::startDepthConversion()
 {
-    if (!m_depthDirty || m_depthConverting || !m_renderingActive || !m_view->rootObject())
+    if (!m_depthDirty || m_depthConverting || m_pause->isChecked() || !m_renderingActive || !m_view->rootObject())
         return;
 
     const auto &depth = m_session->monocularDisplay() ? m_latestMonocularDepth : m_latestDepth;
@@ -683,27 +710,31 @@ void RvPointCloudWidget::startDepthConversion()
     const double maximum = m_depthColorMaximum;
     const bool dynamic = m_colorMode->currentIndex() == DynamicColor;
     const bool mesh = m_displayMode->currentIndex() == Mesh;
-    m_depthConversion.setFuture(QtConcurrent::run([depth, camera, minimum, maximum, dynamic, mesh] {
-        return projectDepth(depth, camera, minimum, maximum, dynamic, mesh);
-    }));
+    m_depthConversion.setFuture(QtConcurrent::run(&RvPointCloudWidget::projectDepth, depth, camera,
+                                                  minimum, maximum, dynamic, mesh));
 }
 
 void RvPointCloudWidget::finishDepthConversion()
 {
     m_depthConverting = false;
-    if (m_conversionEpoch == m_depthEpoch) {
-        auto projected = m_depthConversion.result();
-        m_depthInstances->setTable(std::move(projected.points));
-        publishMesh(projected.mesh);
-        m_hasDepthFrame = true;
-        updateStatus();
+    auto future = m_depthConversion.future();
+    if (!future.isCanceled() && future.resultCount() > 0) {
+        auto projected = future.takeResult();
+        if (m_conversionEpoch == m_depthEpoch && !m_pause->isChecked()) {
+            m_depthInstances->setTable(std::move(projected.points));
+            publishMesh(projected.mesh);
+            m_hasDepthFrame = true;
+            updateStatus();
+        }
     }
     startDepthConversion();
 }
 
-RvPointCloudWidget::DepthProjection RvPointCloudWidget::projectDepth(const QByteArray &depth,
+void RvPointCloudWidget::projectDepth(QPromise<DepthProjection> &work, const QByteArray &depth,
     const RvCameraView::Profile &camera, double colorMinimum, double colorMaximum, bool dynamic, bool mesh)
 {
+    if (work.isCanceled())
+        return;
     DepthProjection projected;
     const int columns = camera.outputWidth;
     const int rows = camera.outputHeight;
@@ -718,6 +749,8 @@ RvPointCloudWidget::DepthProjection RvPointCloudWidget::projectDepth(const QByte
     std::optional<PointCloudColorScale::DynamicHistogram> histogram;
     if (dynamic)
         histogram.emplace(cameraZ, [](float z) { return z; });
+    if (work.isCanceled())
+        return;
     QVector<MeshVertex> vertices;
     QVector<quint32> grid;
     char *output = nullptr;
@@ -731,6 +764,8 @@ RvPointCloudWidget::DepthProjection RvPointCloudWidget::projectDepth(const QByte
     const double scale = MillimetresPerMetre / camera.focal;
     Instance point{{1, 0, 0, 0}, {0, 1, 0, 0}, {0, 0, 1, 0}, {}, {}};
     for (int row = 0; row < rows; ++row) {
+        if (work.isCanceled())
+            return;
         const double yScale = (camera.cy() - row) * scale;
         const int bottom = rows - 1 - row;
         for (int column = 0; column < columns; ++column) {
@@ -770,17 +805,21 @@ RvPointCloudWidget::DepthProjection RvPointCloudWidget::projectDepth(const QByte
     if (mesh) {
         const auto &positions = std::as_const(vertices);
         const auto indices = meshIndices(grid.constData(), columns, rows,
-                                         [&](quint32 index) { return -positions[index].position.z(); });
+                                         [&](quint32 index) { return -positions[index].position.z(); },
+                                         [&work] { return work.isCanceled(); });
+        if (work.isCanceled())
+            return;
         projected.mesh = makeMeshData(vertices, indices);
     } else {
         projected.points.resize(output - projected.points.constData());
     }
-    return projected;
+    work.addResult(std::move(projected));
 }
 
 void RvPointCloudWidget::updateStatus()
 {
-    const bool ready = m_view->status() == QQuickWidget::Ready;
+    const bool paused = m_pause->isChecked();
+    const bool ready = !paused && m_view->status() == QQuickWidget::Ready;
     const bool tofAvailable = m_expiry.remainingTime() > 0;
     const bool assisted = capturesAssistedDepth(*m_session);
     if (m_diameterControls->isHidden() == assisted)
@@ -793,10 +832,13 @@ void RvPointCloudWidget::updateStatus()
     const bool showingMesh = triangleCount > 0 || (meshSelected && pointCount == 0);
     m_displayMode->setEnabled(ready && (native || assisted));
     m_accumulate->setEnabled(ready && native);
-    m_diameter->setEnabled(!meshSelected);
+    m_diameter->setEnabled(!paused && !meshSelected);
+    m_pause->setText(paused ? tr("Resume point cloud") : tr("Stop point cloud"));
     m_reset->setEnabled(ready && (pointCount > 0 || triangleCount > 0) && (accumulating || assisted || tofAvailable));
     QString text;
-    if (m_view->status() == QQuickWidget::Error) {
+    if (paused) {
+        text = tr("Point cloud stopped");
+    } else if (m_view->status() == QQuickWidget::Error) {
         text = tr("3D view unavailable");
     } else if (ready && accumulating && !m_accumulatedFrames.empty()) {
         text = (showingMesh ? tr("%1 / %2 frames · %3 triangles") : tr("%1 / %2 frames · %3 points"))

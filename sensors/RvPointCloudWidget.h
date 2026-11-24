@@ -4,6 +4,7 @@
 #include "RvTofFrame.h"
 #include "SceneInstanceBuffer.h"
 #include <QFutureWatcher>
+#include <QPromise>
 #include <QTimer>
 #include <QVector3D>
 #include <QWidget>
@@ -50,6 +51,7 @@ private:
     void acceptTofFrame(const RvTofFrame &frame);
     void acceptAssistedDepth(const QByteArray &depth, const QJsonObject &metadata, const QImage &camera,
                              const RvTofFrame &tof, const QByteArray &diagnostic);
+    void setPaused(bool paused);
     void clearFrames();
     void clearTofFrame();
     void clearAssistedDepth();
@@ -61,8 +63,9 @@ private:
     static MeshData makeMeshData(const QVector<MeshVertex> &vertices, const QVector<quint32> &indices);
     void startDepthConversion();
     void finishDepthConversion();
-    static DepthProjection projectDepth(const QByteArray &depth, const RvCameraView::Profile &camera,
-                                       double colorMinimum, double colorMaximum, bool dynamic, bool mesh);
+    static void projectDepth(QPromise<DepthProjection> &work, const QByteArray &depth,
+                             const RvCameraView::Profile &camera, double colorMinimum, double colorMaximum,
+                             bool dynamic, bool mesh);
     void setAccumulating(bool enabled);
     void appendAccumulatedFrame();
     void clearAccumulatedFrames();
@@ -82,6 +85,7 @@ private:
     QLabel *const m_status;
     QComboBox *const m_displayMode;
     QComboBox *const m_colorMode;
+    QPushButton *const m_pause;
     QPushButton *const m_accumulate;
     QPushButton *const m_reset;
     QWidget *const m_diameterControls;
