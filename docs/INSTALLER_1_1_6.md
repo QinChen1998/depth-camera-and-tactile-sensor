@@ -1,6 +1,6 @@
 # 1.1.6 安装与发布记录
 
-2026-11-06 制作。包含板端 LiteSR 384×256、上位机辅助 640×480 和板端 Tiny NV12 128×80 三项方案；LiteSR 关闭相机，另外两项恢复各自的视频链路。主机推理后端为 ONNX Runtime 1.31.1 / TensorRT-RTX EP。
+本文记录 2026-11-06 的 v1.1.6 交付。该版包含板端 LiteSR 384×256、上位机辅助 640×480 和板端 Tiny NV12 128×80 三项方案。LiteSR 关闭相机，另外两项使用各自的视频链路。主机推理后端为 ONNX Runtime 1.31.1 / TensorRT-RTX EP。现行步骤见 [安装包构建](MODEL_PROTECTION.md#当前安装包)。
 
 ## 安装产物
 
@@ -9,7 +9,7 @@
 - 大小：288612649 字节。
 - SHA256：`0016af4a1ea5dfa46797e35f77c364fcb7fabad37b3c561f6ba4a15ef955f419`。
 - 本地构建目录：`x64/validation/installer_release_1.1.6_20261106/`；安装器与校验文件在其 `delivery/` 下。
-- 源码分支：[backup/release-v1.1.6-20261106](https://github.com/QinChen1998/depth-camera-and-tactile-sensor/tree/backup/release-v1.1.6-20261106)。
+- 源码备份引用为 `backup/release-v1.1.6-20261106`，可按 `x64/validation/branch_cleanup_20261124/removed-branches.bundle` 从 本地归档索引 `archives/README.md` 查询。
 - 安装包发布：[v1.1.6](https://github.com/QinChen1998/depth-camera-and-tactile-sensor/releases/tag/v1.1.6)，沿用内测预发布标记。
 
 主机模型从只读原文件副本重新生成密钥、AES-256-GCM 密文与原生加载 DLL。模型原文件 SHA256 和修改时间不变，加解密逐字节回验通过。LiteSR 和 Tiny 使用原有各自独立的密文及匹配 ARM 程序；交付载荷无明文 ONNX/RKNN/权重、私有密钥头或开发文件。

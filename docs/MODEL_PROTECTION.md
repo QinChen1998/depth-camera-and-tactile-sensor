@@ -1,26 +1,53 @@
-# 模型保护与安装包约定
+# 安装包构建与模型保护
 
-当前本地上位机运行 Depth Pro 2-S 的研究引擎，许可随本机 `DepthPro2Runtime/` 保存。当前安装构建收集 SDK 和板端采集支持。本文其余内容记录退役的 UniDepth 模型保护与历史交付。
+## 当前安装包
 
-用户已于 2026 年 11 月 2 日确认：未来制作客户安装包时采用原生 DLL、AES-256-GCM 加密模型和 ORT 内存加载。目标是防止客户从安装目录直接复制得到可用的明文模型，模型随上位机提供使用。防蒸馏和强对抗内存提取不属于本次目标，设备授权、TPM 或云端服务也不是当前既定前提。
+`tools/installer/build.ps1` 使用 Release 主工程构建一份 `触想工作台.exe`。安装载荷包含 CXWL Depth Camera SDK 2.2.2、F6 原生采集与工程控制 worker、ADB、Qt 6.11.1、FFmpeg、VC++ x64 运行库、VLC 3 x64 的 RTSP/H.265 组件和对应许可。采集载荷按 `implementation.json` 和 `board-import.json` 校验文件及 SHA-256。
+
+构建检查会拒绝暂存目录内的模型运行包、伴随推理程序、模型文件和编译中间产物。Depth Pro 2-S 研究运行包使用 `tools/depthpro2/build.ps1` 独立组装，模型许可随 `DepthPro2Runtime/` 保存。主机推理不可用时，首次实际选档为普通板端档，配置保留 `host_assisted_depth` 偏好。安装版用户配置位于 `%LOCALAPPDATA%/DepthCameraAndTactileSensor/config`。
+
+在 PowerShell 7 中从项目根目录运行。需要 VS 2022 v143、Qt 6.11.1 MSVC x64 及对应 Qt 源码许可、ADB、官方 VLC 3 x64 解包目录、Inno Setup 和简体中文消息文件。SDK ZIP 可以通过 `DCTS_DEPTH_SDK_ZIP` 指定，主工程按固定摘要校验。ADB 默认取 `x64/Release/platform-tools`，可用 `-PlatformTools` 指定位置。构建目录使用 `x64/validation/` 下的新子目录。
+
+```powershell
+$work = Join-Path $PWD ('x64/validation/installer-' + (Get-Date -Format 'yyyyMMdd-HHmmss'))
+$installerTools = Join-Path $PWD 'x64/validation/installer_tools'
+$installerArgs = @{
+    BuildDirectory = $work
+    QtRoot = 'E:/Qt/6.11.1/msvc2022_64'
+    VlcRoot = Join-Path $installerTools 'vlc-3024-verified/vlc-3.0.24'
+    Iscc = Join-Path $installerTools 'InnoSetup/ISCC.exe'
+    ChineseMessages = Join-Path $installerTools 'ChineseSimplified.isl'
+    Version = '1.1.8'
+}
+.\tools\installer\build.ps1 @installerArgs
+.\tools\installer\prepare-sandbox.ps1 -BuildDirectory $work
+```
+
+`-StageOnly` 只生成暂存载荷。使用 `-UseStagedPayload` 复用同一目录时，脚本重新核对成像方案、桌面 EXE 的 SHA-256 及板端采集清单。复用已含 VLC 的载荷时沿用暂存的 VLC 路径。安装程序 `触想工作台-内测版-v<版本>-x64.exe` 及其 `.sha256` 文件均生成在 `delivery/`。
+
+打开 `DctsCleanInstall.wsb` 可在关闭网络和 vGPU 的 Windows Sandbox 中执行离线安装检查，报告写入 `sandbox-results/`。完整检查包含三档菜单、主机推理不可用时的板端默认选档、八组离线专项、原生 worker 自检、普通窗口启动和卸载。`-SmokeOnly` 使用较短的安装、启动、关闭及卸载检查。真实设备验证使用 [测试文档](TESTING.md#实机专项) 中的入口。
+
+## 携带模型的历史交付与保护约定
+
+用户于 2026-11-02 为携带模型的安装包确认了原生 DLL、AES-256-GCM 加密模型和 ORT 内存加载方案。保护目标为防止直接从安装目录复制得到可使用的明文模型。以下记录 UniDepth 的历史集成、验证与权属材料。
 
 ## 历史 UniDepth 集成状态
 
-| 范围 | 当前状态 |
+| 范围 | 当时实现 |
 |---|---|
-| 根目录日常源码和 `START_RELEASE.cmd` | 使用 TensorRT-RTX EP 加载本地明文模型 |
+| 旧版日常构建 | 使用 TensorRT-RTX EP 加载本地明文模型 |
 | 隔离实验 | DLL 解密、内存加载、完整 H worker、Release/Debug 和 UI 离线专项均已验证 |
-| 安装包构建 | 正式安装版要求受保护模型。构建工具在隔离目录生成新密钥、密文和原生 DLL，再编译中文安装器 |
+| 旧版安装构建 | 在隔离目录生成密钥、密文和原生 DLL，再将受保护的 UniDepth 运行包编入中文安装器 |
 
-当前维护入口为 `tools/model_protection/ModelProtectionApi.h`、`ProtectedModel.cpp`、`PackModelCopy.cpp`、`ModelProtection.vcxproj`，主机集成位于 `sensors/RvAssistDepth.cpp`，安装入口为 `tools/installer/build.ps1`。这些已在正常源码中；下文 2026-11-02 的独立 CUDA 实验用于历史追溯，不是当前源码入口。1.1.5 安装版改为携带 `UniDepthRuntimeRgb672VgaFP16RTX/` 的 640×480 加密模型；安装器构建从该运行包的明文副本生成新密钥、密文和 DLL，核对原文件 SHA256 和修改时间不变。开发版原文件继续保留。
+历史保护工具源码保存在 `tools/model_protection/`，包括 `ModelProtectionApi.h`、`ProtectedModel.cpp`、`PackModelCopy.cpp` 和 `ModelProtection.vcxproj`。v1.1.5 的安装构建从 `UniDepthRuntimeRgb672VgaFP16RTX/` 的 640×480 模型副本生成新密钥、密文和 DLL，并核对原始文件的 SHA-256 和修改时间。下文保留更早的独立 CUDA 实验结果。
 
-当前模型按提供方对结构重设计和重新训练的权属声明记录为 `LicenseRef-Proprietary`，使用说明位于模型包的 `licenses/Proprietary-Model-NOTICE.txt`。现有名称、上游/转换字段和哈希用于技术追溯，不应因历史命名自行改写当前权属记录。实际第三方依赖材料保留，见 [许可记录](OPEN_SOURCE_LICENSES.md)。
+历史 UniDepth 模型按提供方的权属声明记录为 `LicenseRef-Proprietary`，对应材料为历史模型包的 `licenses/Proprietary-Model-NOTICE.txt`。本地 Depth Pro 2-S 的权属及当前软件依赖见 [许可记录](OPEN_SOURCE_LICENSES.md)。
 
-## 兼容设备和 INT8 的安装版加载
+## 历史兼容后端和 INT8
 
 2026-11-09 新增 DirectML、通用 ORT CPU、OpenVINO CPU／Intel GPU 和可选混合 INT8，见 [推理设备选择](MULTI_BACKEND_INFERENCE.md)。原图仍使用现有 AES-256-GCM 密文；DirectML／CPU 复用 `DctsCreateProtectedSession`，OpenVINO 使用新增 `DctsCreateProtectedOpenVino`，在 DLL 内认证、解密、核对固定 SHA256 并从内存编译模型，返回编译句柄后清零临时明文。IR 权重由 OpenVINO 自有张量持有，不能引用已清零的临时解密区。
 
-INT8 的 XML／BIN 使用 `DCTOVIR1` 容器封装，独立加密为 `UniDepthRuntimeCompatible/decoder-int8.dctsm`，配套独立生成的加载 DLL。兼容清单的 `int8.model_protection` 记录同一保护方案、ABI、密文、DLL 和明文摘要。安装版强制保护，交付目录排除 `.onnx`、`.ovm` 及明文 IR，不发生明文兜底。原 ONNX、实验 IR 及开发容器只读保留。本节扩展当前加载方案；下文早期 CUDA 实验及“不量化”描述仅适用于当时的原图对照。
+INT8 的 XML／BIN 使用 `DCTOVIR1` 容器封装，独立加密为 `UniDepthRuntimeCompatible/decoder-int8.dctsm`，配套独立生成的加载 DLL。兼容清单的 `int8.model_protection` 记录保护方案、ABI、密文、DLL 和明文摘要。该版安装载荷使用受保护模型，原 ONNX、实验 IR 及开发容器只读保留。下文早期 CUDA 实验使用未量化的原图。
 
 ## 原始权重和本地开发规则
 
@@ -30,7 +57,7 @@ INT8 的 XML／BIN 使用 `DCTOVIR1` 容器封装，独立加密为 `UniDepthRun
 
 当时的开发运行包是 `UniDepthRuntimeRgb672VgaFP16RTX/`。旧 RGB576 原始包已按用户清理范围移至项目外，保持外部原件及 SHA256 清单；下述早期对照属于历史。本地保护实验使用独立模型与源码副本，原始包 28 项文件的 SHA256 和修改时间在实验前后均保持一致。
 
-## 加载设计
+## 历史加载设计
 
 ```mermaid
 flowchart LR
@@ -45,7 +72,7 @@ flowchart LR
     Run --> Fusion[预测逆恢复与 G 全局尺度校正]
 ```
 
-DLL 负责解密和会话创建，返回 ORT 会话，不向调用者提供明文模型缓冲区。当前默认开发版和安装版使用 ORT 1.31.1 TensorRT-RTX；历史 CUDA 构建使用 ORT 1.23.2。DLL 接收主机创建的 session options，保留相应 FP16 设置及预测逆恢复，不更换网络、不量化、不更改模型输入方向或输出网格。临时明文在会话创建完成后清零，不保存临时 ONNX，也不每帧解密或重复创建会话。
+DLL 负责解密并创建 ORT 会话。采用 TensorRT-RTX 的 UniDepth 构建使用 ORT 1.31.1，早期 CUDA 实验使用 ORT 1.23.2。加载保留相应的 FP16 设置及预测逆恢复。会话创建后清零临时明文缓冲区，逐帧推理复用会话。
 
 实验使用 Windows CNG `bcrypt.dll` 实现 AES-256-GCM 和 SHA256，无新增 Python/PyTorch 运行时依赖。模型密文比原始模型增加 96 字节封装头，头部包含版本、长度、随机 nonce、认证标签和原模型 SHA256。GCM 认证覆盖封装元数据及模型内容；解密后再与主机绑定的预期模型 SHA256 比对，防止合法格式但错误身份的模型进入会话。
 
@@ -73,7 +100,7 @@ DLL 负责解密和会话创建，返回 ORT 会话，不向调用者提供明�
 
 ## 已验证的本地实验
 
-早期实验目录为 `x64/validation/model_crypto_trial_20261102/`，包含当时的完整上位机副本。该次实验没有替换当时的日常 EXE；后续正常源码和安装构建已集成保护加载，维护入口见本文开头。
+早期实验目录为 `x64/validation/model_crypto_trial_20261102/`，其中曾保存完整的上位机实验副本。随后 v1.1.5 至 v1.1.7 的 UniDepth 安装构建集成了受保护加载。
 
 | 位置 | 内容 |
 |---|---|
@@ -119,27 +146,4 @@ Release/Debug 各通过 28 个合成场景，其中 19 份有效深度、单目�
 
 8 项失败检查覆盖密文篡改、标签篡改、头部摘要篡改、截断、密文缺失、清单哈希不符、错误模型身份，以及打包工具拒绝覆盖输入副本。拒绝加载测试在旁边存在明文副本时仍不回退。
 
-本次证据可从 [完整汇总](../../dToF/output/litesr_depth_only_20261106_v1/retired_host_assets/x64/validation/model_crypto_trial_20261102/reports/final_summary.json)、[性能明细](../../dToF/output/litesr_depth_only_20261106_v1/retired_host_assets/x64/validation/model_crypto_trial_20261102/reports/performance_full_diagnostic/summary.json)、[Release 一致性](../../dToF/output/litesr_depth_only_20261106_v1/retired_host_assets/x64/validation/model_crypto_trial_20261102/reports/parity_Release/summary.json)、[Debug 一致性](../../dToF/output/litesr_depth_only_20261106_v1/retired_host_assets/x64/validation/model_crypto_trial_20261102/reports/parity_Debug/summary.json) 和 [拒绝测试](../../dToF/output/litesr_depth_only_20261106_v1/retired_host_assets/x64/validation/model_crypto_trial_20261102/reports/rejections.json) 读取。实验位于忽略的目录，清理或迁机后这些链接可能缺失；本文件保留方案、状态和关键结果，缺失的本地报告不能当作新一轮验收证据。
-
-## RV1103 原生采集和 LiteSR
-
-`tools/rv_capture/` 提供 Native48/Native16 测量、H.265 进度及会话预设。板端导入使用纯采集载荷，UniDepth 由主机运行包加载。构建和导入入口见 [板端源码与构建](../tools/rv_capture/README.md)。
-
-## 安装包构建
-
-在 PowerShell 7 中执行，使用 VS 2022 v143、Qt 6.11.1 MSVC x64、匹配的 Qt 源码/许可材料及 Inno Setup 6.7.3。默认读取已部署到 `x64/Release/platform-tools` 的 ADB，也可通过 `-PlatformTools` 指定来源。通过 `-VlcRoot` 指定已校验的 VideoLAN VLC 3 x64 解压目录，托管 H.265 使用其中的 libVLC 和插件。构建目录使用 `x64/validation/` 下的新子目录。
-
-```powershell
-./tools/installer/build.ps1 -BuildDirectory (Join-Path $PWD 'x64/validation/installer_release') -QtRoot E:/Qt/6.11.1/msvc2022_64 -VlcRoot C:/path/to/vlc-3.0.24 -TensorRtRuntime ./UniDepthRuntimeRgb672VgaFP16RTX -CompatibleRuntime ./UniDepthRuntimeCompatible -Version 1.1.8 -Iscc 'C:/path/to/ISCC.exe' -ChineseMessages 'C:/path/to/Languages/ChineseSimplified.isl'
-./tools/installer/prepare-sandbox.ps1 -BuildDirectory (Join-Path $PWD 'x64/validation/installer_release')
-```
-
-复用已暂存载荷时，构建脚本校验成像菜单及两个桌面程序的 SHA256。旧载荷需从当前源码重新暂存。
-
-安装程序命名为 `触想工作台-内测版-v<版本>-x64.exe`，并与 SHA256 校验文件一同保存在构建目录的 `delivery/`。只从该目录选取交付文件。`private_build/` 是内部构建目录，包含明文副本、当次生成的密钥材料和中间产物。安装版固定要求保护清单，安装后的用户配置位于 `%LOCALAPPDATA%/DepthCameraAndTactileSensor/config`。普通开发版继续读本项目独立配置和明文模型包。
-
-安装目录和主程序名可包含中文。上位机推理通过随包的 `DctsInferenceWorker.exe` 启动，优先使用可读的 ASCII 路径或目录别名。别名不可用时，将所需 DLL、程序和加密模型运行文件复制到当前用户的私有 ASCII 临时目录。推理进程退出后清理临时文件和别名。
-
-安装版和默认开发版均使用 ORT 1.31.1 和 TensorRT-RTX EP。安装版自带用户态推理 DLL，主机需要受支持的 Ampere 或更新的 NVIDIA RTX 显卡和兼容 CUDA 12.9 的驱动。显卡、驱动或模型不可用时，上位机显示原因，提示修复上位机运行文件及显卡环境。
-
-打开生成的 `DctsCleanInstall.wsb` 执行离线 Windows Sandbox 验证，结果写入 `sandbox-results/`。TensorRT-RTX 加密加载及上位机深度输出需另在配备兼容 NVIDIA 驱动的主机验证。串口驱动、NVIDIA 驱动和板端服务按实际设备配置。对外分发前核对 Qt Quick 3D、TensorRT-RTX、CUDA 等第三方依赖的授权覆盖。
+历史明细的原文件名为 `reports/final_summary.json`、`reports/performance_full_diagnostic/summary.json`、`reports/parity_Release/summary.json`、`reports/parity_Debug/summary.json` 和 `reports/rejections.json`。这些文件原先在项目外的 `retired_host_assets/` 内，目前该位置不可用。上表保留了已记录的主要结果。

@@ -63,7 +63,9 @@ try {
         $checks["${flag}_assertions"]=$assertions.Count
     }
     $ui=Get-Content -LiteralPath "$logs\port-ui-smoke-test.txt" -Raw
-    foreach($name in 'EXACT_IMAGING_SCHEMES','OTHER_IMAGING_SCHEMES_ABSENT','INFERENCE_DEVICE_IN_SETTINGS'){
+    foreach($name in 'EXACT_IMAGING_SCHEMES','OTHER_IMAGING_SCHEMES_ABSENT',
+        'FIRST_RUN_USES_AVAILABLE_DEFAULT','UNAVAILABLE_HOST_DEFAULTS_TO_ORDINARY_BOARD',
+        'UNAVAILABLE_HOST_MENU_IS_DISABLED_WITH_REASON'){
         Check $name ($ui -match "(?m)^$name PASS\s*$")
     }
     $adb=Join-Path $app 'platform-tools\adb.exe'
@@ -101,7 +103,7 @@ try {
         $prefs=Join-Path $env:LOCALAPPDATA 'DepthCameraAndTactileSensor\config\preferences\DepthCameraAndTactileSensor\DepthCameraAndTactileSensor.ini'
         Check 'preferences_in_local_appdata' (Test-Path -LiteralPath $prefs)
         Check 'first_run_zh_cn' ([bool](Select-String -LiteralPath $prefs -SimpleMatch 'language=zh_CN'))
-        Check 'first_run_host_assist' ([bool](Select-String -LiteralPath $prefs -SimpleMatch 'imagingScheme=host_unidepth_rgb672_vga_fp16_tof48_g'))
+        Check 'first_run_host_assist_preference' ([bool](Select-String -LiteralPath $prefs -Pattern '^imagingScheme=host_assisted_depth$'))
         Check 'config_outside_install_directory' (-not (Test-Path (Join-Path $app 'config')))
         Check 'close_main_window' ($process.CloseMainWindow())
         Check 'ordinary_exit_0' ($process.WaitForExit(30000) -and $process.ExitCode -eq 0)

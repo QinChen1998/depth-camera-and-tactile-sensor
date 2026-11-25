@@ -2,11 +2,11 @@
 
 上位机由 `RvAssistDepth` 管理独立的 Depth Pro 2-S TensorRT worker。应用负责同帧配对、全局尺度校正、诊断和加载错误反馈。
 
-本项目是独立的 Windows x64 传感器上位机，主窗口提供磁触觉、深度图、点云和摄像头原视频。dToF 运行预设由成像方案选择。本文描述当前日常版本的架构。当前保护实现及安装包约定见 [模型保护](MODEL_PROTECTION.md)，维护约束见工作区的 AGENTS.md（仅本地保存）。
+本项目是独立的 Windows x64 传感器上位机，主窗口提供磁触觉、深度图、点云和摄像头原视频。dToF 运行预设由成像方案选择。当前安装构建与历史模型保护见 [安装包与模型保护](MODEL_PROTECTION.md)，维护约束见工作区的 AGENTS.md（仅本地保存）。
 
 ## 产品边界
 
-主窗口提供四个模块，以及设备管理、渲染、语言、停靠和布局预设。已有上位机方案统一迁移到「上位机辅助推理」。
+主窗口提供四个模块，以及设备管理、渲染、语言、停靠和布局预设。「文件 → 测量采集」可记录 RV1103 成像数据，也可使用已安装的 Orbbec SDK v2 采集 Gemini 335 原生深度。已有上位机方案统一迁移到「上位机辅助推理」。
 
 | 显示名称 | 产品入口 ID | 输出 |
 |---|---|---|
@@ -113,7 +113,7 @@ SDK 回调的 RGB 解码时间属于主机单调时钟。ToF 采集时间属于�
 | `assets/camera/` | 标定、几何、校正图及来源信息 |
 | `assets/tactile/`、`models/tactile/` | 磁触觉布局与 PLY 表面 |
 | `archives/cad/tactile/` | 三种触觉的 STEP 原件；由 `models/tactile/surface_layouts.json` 相对定位并记录 SHA256，不参与运行 |
-| `archives/validation/` | 历史构建日志，以及 2026-11-08 验证历史 ZIP、逐文件 SHA256 清单和原路径索引；报告、历史安装包、备份与私有输入在归档中完整保留 |
+| `archives/validation/` | 历史构建日志、验证归档、逐文件 SHA-256 清单和原路径索引 |
 | `SensorResources.qrc`、`Component_depth.qrc`、`Component_tactile.qrc` | 编译进程序的翻译、相机校正图和触觉表面 |
 | `translations/` | TS 源和 lrelease 生成的 QM；QM 随资源编译 |
 | `DepthPro2Runtime/` | 本机 TensorRT FP16 引擎、worker、运行库和许可 |
@@ -122,7 +122,7 @@ SDK 回调的 RGB 解码时间属于主机单调时钟。ToF 采集时间属于�
 | `tools/rv_capture/` | Native16/Native48/SPI/H.265 纯采集源码、协议、部署资源和 F6 构建入口 |
 | `x64/Release/`、`x64/Debug/` | 主程序及 Qt/FFmpeg 部署目录 |
 | `x64/rv_control/<配置>/runtime/` | 原生设备控制 worker、SSH/加密依赖、调参载荷及 `implementation.json` |
-| `x64/validation/` | 当前忽略的测试输出、归档阅读入口及保留的安装工具；2026-11-08 以前的历史材料见 `archives/README.md`，不代表当前验收状态 |
+| `x64/validation/` | 当前测试输出、安装工具和历史路径指引。历史材料按原路径查询 本地归档索引 `archives/README.md` |
 
 新增源码、头文件和资源时同步维护编译、MOC、RCC 和 filters。修改翻译必须运行 lrelease。
 
@@ -130,7 +130,7 @@ SDK 回调的 RGB 解码时间属于主机单调时钟。ToF 采集时间属于�
 
 `RuntimeDiscovery::applicationRoot()` 从 EXE 目录向上查找主工程文件或 `DCTS_APP.json`。安装包在 EXE 目录提供相对运行路径，不需要工程文件或产品声明文件。
 
-EXE 旁的 `runtime-paths.json` 使用相对 EXE 目录的路径；同名环境变量优先。当前主要覆盖项为 `RV_CONTROL_CPP`、`RV_DEPTHPRO2_ROOT`。日常默认指向本项目内部的 worker 和明文模型包，实验启动器只为自身进程覆盖模型根目录。
+EXE 旁的 `runtime-paths.json` 使用相对 EXE 目录的路径。同名环境变量优先。当前主要覆盖项为 `RV_CONTROL_CPP` 和 `RV_DEPTHPRO2_ROOT`。开发版默认查找项目内的原生控制 worker 和本地研究运行包，安装载荷的清单提供随包的控制 worker 相对路径。
 
 `main.cpp` 将设备库定向到 `config/devices.json`，安装版的 `config/` 位于 `%LOCALAPPDATA%/DepthCameraAndTactileSensor/`，开发版位于项目根目录。INI 偏好位于 `config/preferences/DepthCameraAndTactileSensor/`。普通首次启动从资源内的 `first-run-settings.ini` 补齐可移植默认值，初始化后沿用用户配置。旧注册表及旧 INI 的兼容导入由显式 `--import-settings` 入口执行。设备密码由 Windows 凭据管理器管理；拷贝设备 JSON 不会迁移密码，已有 SSH 身份校验也不等于模型许可证绑定。
 
@@ -147,7 +147,7 @@ EXE 旁的 `runtime-paths.json` 使用相对 EXE 目录的路径；同名环境�
 
 离线入口 `tools/run_offline_tests.py` 覆盖 UI、调参、触觉、渲染、融合恢复及 USB 登记。模型专项核对 480×640 输入和输出、F6 网格、0°／180°、B 策略和配对范围。测试命令见 [测试与源码统计](TESTING.md)。
 
-测试报告放入新的 `x64/validation/` 子目录，防止覆盖旧证据。GPU 合成推理属于离线验证，不连接相机或串口；真实设备验证由 `tools/run_live_validation.py` 单独执行，需要针对当前任务的明确授权。README 中的历史实机结果不代表设备当前状态或新改动的实机验收。
+测试报告放入新的 `x64/validation/` 子目录。GPU 合成推理属于离线验证。实机专项按照 [测试文档](TESTING.md#实机专项) 选择程序参数并核对登记设备。
 
 模型保护实验曾遇到沙箱内 QtMsBuild 注册表访问被拒和 VS PDB 服务错误，使用正常工具链权限后构建通过。此类错误应先按工具链访问问题核对，不据此修改模型、标定或传感器参数。
 
@@ -160,4 +160,4 @@ EXE 旁的 `runtime-paths.json` 使用相对 EXE 目录的路径；同名环境�
 安装包提供板端采集与显示，本地研究模型通过独立运行包启用。历史模型保护和构建入口见 [模型保护与安装包约定](MODEL_PROTECTION.md)。
 
 
-2026-11-09 移除 LiteSR 板端推理的范围及本轮验证见 [仅保留上位机辅助推理](HOST_ASSIST_ONLY.md)。
+2026-11-09 移除 LiteSR 板端推理的范围见 [退役板端 LiteSR 推理](HOST_ASSIST_ONLY.md)。

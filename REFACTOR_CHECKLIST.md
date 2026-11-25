@@ -1,6 +1,6 @@
 # 源码精简与归档记录
 
-当前 2026-11-09 后续变更见 [默认标定与原生 ToF 模式](docs/DEFAULT_CALIBRATION_NATIVE_TOF.md)：固定 F6 自动导入，增加普通／高精度 48×32 原生 ToF，移除未引用的 LiteSR 研究头和旧部署二进制。实机和离线结果独立记录。
+本文保留以往源码精简和归档记录。现行成像档位见 [默认标定与原生 ToF 模式](docs/DEFAULT_CALIBRATION_NATIVE_TOF.md)，本地验证数据按 归档索引 `archives/README.md` 查询。
 
 ## 2026-11-10 H 使用 48×32 普通 ToF
 
@@ -13,7 +13,7 @@
 - [ ] 尺度完全稳定仍未达到：新靠近录像有一帧未知、退回后的背景偏差仍约 22%；本轮未实现质量加权局部填充。
 - 结果及边界见 [H 原生 48×32 对照](docs/H_NATIVE48_COMPARISON.md)，证据在 `x64/validation/h_native48_20261110/`；未制作安装包、提交或上传。
 
-## 2026-11-09 仅保留上位机辅助推理
+## 2026-11-09 退役板端 LiteSR 推理
 
 - 移除 LiteSR 普通／高精度入口、专用密文和 ARM 推理、主机轮廓与切换模板；旧设置统一迁移到 H。
 - 原生采集迁入 `tools/rv_capture/`，USB 导入、连接校验、设备管理和安装构建仅依赖采集支持。
@@ -23,7 +23,7 @@
 
 - [x] 彻底移除当前项目的 Tiny 专用实现及部署残留，同步 AGENTS、架构、测试、模型保护和历史说明。
 - [x] 指定安装沙盒输入副本及一套重复 VLC 目录／ZIP 按摘要核对后删除，保留另一套安装工具。
-- [x] 既有 `x64/validation/` 历史材料压缩归档并逐文件校验，原路径及 SHA256 见 [本地归档](archives/README.md)。
+- [x] 既有 `x64/validation/` 历史材料压缩归档并逐文件校验，原路径及 SHA256 见 本地归档 `archives/README.md`。
 - 其余审查候选保留：旧模型绑定头、B 分支、256×256 轮廓实现、编译缓存、IDE 配置、原始模型、当前设备配置及 CAD。
 - 本轮证据使用 `x64/validation/tiny_final_cleanup_20261108/`；构建、离线专项及文件保持结果以该目录 `verification.json` 为准。未连接硬件，不提交或推送。
 
@@ -69,7 +69,7 @@
 
 ## 完成记录
 
-- 最终结果、九份已删除文件、八类待判断清单与验证边界见 [源码精简报告](docs/SOURCE_CLEANUP_REVIEW.md)，完整证据汇总见 [verification-summary.json](../dToF/output/litesr_depth_only_20261106_v1/retired_host_assets/x64/validation/source_cleanup_20261105/verification-summary.json)。
+- 最终结果、九份已删除文件、八类待判断清单与验证边界见 [源码精简报告](docs/SOURCE_CLEANUP_REVIEW.md)。当时的 `verification-summary.json` 原位于 `retired_host_assets/`，该位置当前不可用。
 - 改前第一方代码共 202 份、31,035 有效行；第一轮结束时 196 份、28,582 行，净减少 2,453 行。工程、filters、RCC 与文档入口静态检查通过。
 - 改前 Release/Debug 各八组离线专项通过，按新的独立断言口径各 1,358 项；原生控制 worker 自检 33 项通过。
 - 最初沙箱内调参/USB 失败报告保留，不覆盖；旧基线见 `../dToF/output/litesr_depth_only_20261106_v1/retired_host_assets/x64/validation/source_cleanup_20261105/baseline-summary.json`。旧计数曾将测试名中的 `BYPASS` 及末尾 `RESULT PASS` 计入，已在 `baseline-normalized.json` 用新的断言口径统一重计。
