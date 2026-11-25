@@ -6,6 +6,7 @@
 /DepthPro2Runtime/
 /config/*
 !/config/first-run-settings.ini
+/Log/OrbbecSDK.log.txt
 /Depth Ca.*/
 **/private_build/
 **/Key.h

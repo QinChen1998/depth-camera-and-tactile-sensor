@@ -1,6 +1,6 @@
 # Windows SDK 同步及接口整理
 
-目标 PR 为 `fix/SDK Sync and Interface Cleanup`，目标分支为 `main`。
+本文记录 Windows SDK 2.2.2 接入、Depth Pro 2-S 单模型和相关验证。[GitHub PR #3](https://github.com/QinChen1998/depth-camera-and-tactile-sensor/pull/3) 已合并到 `main` 的 `9e2c055`。当前操作入口见 [测试文档](docs/TESTING.md)。
 
 - [x] 确认原工作区在 `main`，初始 HEAD 为 `4aba887`。已有未跟踪的 `Log/`。
 - [x] 核对 GitHub `main` 同为 `4aba887`，已创建 `fix/sdk-sync-and-interface-cleanup` 分支。

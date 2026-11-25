@@ -1,10 +1,6 @@
-# 公开源码备份范围
+# 公开源码与安装载荷
 
-2026-11-10 按用户明确要求，仅将 GUI 减载与显示性能优化的脱敏源码、测试及文档提交至 `main`。本次不创建安装包、标签或 Release；已有 v1.1.7 安装包保留其原内容。模型权重和精度保持，实机对照及回归范围见 [测试记录](TESTING.md#gui-减载与实机延迟对照2026-11-10)。本地设备原件、其他未关联改动及私有运行材料继续保留在本地。
-
-公开仓库为 [QinChen1998/depth-camera-and-tactile-sensor](https://github.com/QinChen1998/depth-camera-and-tactile-sensor)。2026-11-09 按用户本次明确要求，当前脱敏源码更新到 `main`；对应 v1.1.7 发布包含 UniDepth 多后端选择、混合 INT8、当前 F6 标定与原生 ToF 两档、USB 接入修复和旧板端模型退役。安装与验证见 [v1.1.7 记录](INSTALLER_1_1_7.md)。
-
-历史 v1.1.6 源码保留在 `backup/release-v1.1.6-20261106`；已有安装包位于 [v1.1.6 Release](https://github.com/QinChen1998/depth-camera-and-tactile-sensor/releases/tag/v1.1.6)，不包含本次后续源码改动。
+公开仓库为 [QinChen1998/depth-camera-and-tactile-sensor](https://github.com/QinChen1998/depth-camera-and-tactile-sensor)。`main` 通过 Pull Request 合并。Windows SDK 2.2.2 接入及当前主机推理变更见 [SDK 同步记录](../SDK_SYNC_CHECKLIST.md)。
 
 沿用此前公开备份范围，上传主机源码、工程文件、显示资源、测试、安装与部署脚本及公开技术文档。仓库原有 LICENSE、第三方声明与 ONNX Runtime 头文件许可保持。
 
@@ -15,4 +11,11 @@
 - 新增板端私有 runtime/common 实现及其原始 CAD、历史实验和构建资料。
 - 本机解包的 VLC 运行目录、安装版许可副本、依赖与 SDK 压缩包。源码内原有 LICENSE、第三方许可和来源声明继续保留。
 
-公开版本中的真实设备序列号、公钥和预登记 known_hosts 经过脱敏；本地源码和实际运行资源保留原值。公开安装程序从脱敏源码重新构建，并扫描交付载荷中的已知设备身份。公开备份没有完整的授权模型、板端运行材料和开发机工具链，构建时需另行提供这些本地依赖。2026-11-08 本地开发版已彻底移除 Tiny；当前安装构建仅收集主机 H 及原生采集支持，原生 ToF 两档不需要推理模型。历史 v1.1.6 安装包保留当时的三模型资源。验证历史及私有构建资料仍只在本地保留，不上传。源文件排除规则不会删改安装载荷。
+公开版本对设备序列号、公钥和预登记 known_hosts 进行脱敏。本地源码和运行资源保留原值。公开安装程序使用脱敏源码构建，并检查交付载荷中的已知设备身份。构建所需的 SDK ZIP、配套板端文件及工具链由开发环境提供。
+
+当前安装构建收集 Windows SDK、F6 原生采集支持和桌面依赖。Depth Pro 2-S 使用单独的本地研究运行包。安装器和 SHA-256 文件的生成及校验步骤见 [当前安装包](MODEL_PROTECTION.md#当前安装包)。
+
+## 历史发布
+
+- v1.1.6 安装包保留当时的三模型版本。源码备份引用 `backup/release-v1.1.6-20261106` 记录于 `x64/validation/branch_cleanup_20261124/removed-branches.bundle`，可以按原路径从 本地归档索引 `archives/README.md` 查询。安装包见 [v1.1.6 Release](https://github.com/QinChen1998/depth-camera-and-tactile-sensor/releases/tag/v1.1.6)。
+- v1.1.7 发布于 2026-11-09，包含当时的 UniDepth 多后端、可选混合 INT8、F6 原生 ToF 和 USB 接入修复。2026-11-10 的脱敏源码提交包含 GUI 减载优化，v1.1.7 Release 保留该版本原始产物。见 [v1.1.7 发布记录](INSTALLER_1_1_7.md) 和 [历史性能验证](TESTING.md#gui-减载与实机延迟对照2026-11-10)。

@@ -1,8 +1,8 @@
 # 三模型接入、LiteSR 纯深度与上位机清理
 
-> 历史记录：2026-11-09 当前产品已移除全部 LiteSR 板端推理，仅保留上位机 H。本文的旧入口、源码路径、资源及实测结果对应当时版本；当前说明见 [仅保留上位机辅助推理](HOST_ASSIST_ONLY.md)。
+> 本文记录退役前的三模型版本。2026-11-09 的移除过程见 [退役板端 LiteSR 推理](HOST_ASSIST_ONLY.md)，现行档位见 [默认标定与原生 ToF 模式](DEFAULT_CALIBRATION_NATIVE_TOF.md)。
 
-2026-11-08 当前开发版已移除 Tiny，保留 LiteSR 普通／高精度和主机 H 三项入口。见 [Tiny 退役记录](TINY_NV12_INTEGRATION.md) 和 [LiteSR 高精度记录](LITESR384_HIGH_ACCURACY.md)。用户取消本轮实机采集；下文全部为 2026-11-06 历史基线，其菜单、准备步骤和性能数据不适用于当前版本。
+2026-11-08 移除 Tiny 后，当时的开发版保留 LiteSR 普通／高精度和主机 H。见 [Tiny 退役记录](TINY_NV12_INTEGRATION.md) 和 [LiteSR 高精度记录](LITESR384_HIGH_ACCURACY.md)。下文的菜单、准备步骤和性能数据对应 2026-11-06 的历史基线。
 
 更新：2026-11-06。本轮修改上位机及其配套板端导入资源；后续已制作包含三项方案的 v1.1.6 安装包，见 [安装记录](INSTALLER_1_1_6.md)。**清理仅限 `E:/WORK/Depth Camera and Tactile Sensor`；`E:/WORK/dToF`、`E:/WORK/RV1103-1106` 的研究模型、权重、训练与实验记录均保留。**
 
@@ -27,7 +27,7 @@ LiteSR 384 密文和权重未改，保留原径向米制、同帧原生 D/I、�
 
 不需要用户单独挑选模型文件。交付准备入口为 `tools/rv_control/build.ps1`、`tools/rv_control/bootstrap/install.sh`、`tools/litesr_board/protected/payload/dtof-switch.sh` 和 `litesr_gui.sh`，对应载荷位于 `tools/litesr_board/protected384/payload/`、`tools/litesr_board/native/payload/`、`tools/tiny_nv12_board/payload/`。Release/Debug 原生 worker 的 `implementation.json` 分别列出全部依赖和 SHA256。
 
-[已部署板端文件清单](../../dToF/output/litesr_depth_only_20261106_v1/board/prepared_files/manifest.json)保留开发板上实际生效的 9 份文件，供核对与恢复。新设备应使用上面的导入流程，让程序绑定自己的序列号和标定；不要直接复制开发板的 control/session 脚本。
+已部署板端文件清单 `../../dToF/output/litesr_depth_only_20261106_v1/board/prepared_files/manifest.json`保留开发板上实际生效的 9 份文件，供核对与恢复。新设备应使用上面的导入流程，让程序绑定自己的序列号和标定；不要直接复制开发板的 control/session 脚本。
 
 ## 本轮验证
 
@@ -38,12 +38,12 @@ LiteSR 384 密文和权重未改，保留原径向米制、同帧原生 D/I、�
 - Tiny 两段颜色逐像素检查共 58 份，颜色不符 0；RGB/深度裁剪比例均正确。正常停采、无迟到结果；长期参数与文件不变，相机格式/裁剪恢复全幅 NV12。最后主机模式读回 M16/F1、66 ms、short100、格式1，设备空闲无故障。
 - 最终板端审计 **439 项**通过；40 份原文件中仅 control/session/launcher/native 四份按预期更新，每份有精确 SHA256 备份。现有板上历史模型原件保持，未把上位机清理范围扩大到板端研究资产。
 
-[完整机器汇总](../../dToF/output/litesr_depth_only_20261106_v1/final_summary.json)、[实机报告](../../dToF/output/litesr_depth_only_20261106_v1/live_v1/report.json)、[进程监测](../../dToF/output/litesr_depth_only_20261106_v1/live_v1/camera_ownership.json)、[最终审计](../../dToF/output/litesr_depth_only_20261106_v1/audit_final_v2/report.json)。早期失败记录保留：诊断仍按 576 尺寸导致回归失败，已改为当前 640×480 并验证保存/回放/篡改拒绝；安装占位符和审计枚举/模板比较问题均已修正，最终报告以上述链接为准。
+完整机器汇总 `../../dToF/output/litesr_depth_only_20261106_v1/final_summary.json`、实机报告 `../../dToF/output/litesr_depth_only_20261106_v1/live_v1/report.json`、进程监测 `../../dToF/output/litesr_depth_only_20261106_v1/live_v1/camera_ownership.json`、最终审计 `../../dToF/output/litesr_depth_only_20261106_v1/audit_final_v2/report.json`。早期失败记录保留：诊断仍按 576 尺寸导致回归失败，已改为当前 640×480 并验证保存/回放/篡改拒绝；安装占位符和审计枚举/模板比较问题均已修正，最终报告以上述链接为准。
 
 当前实机为 `REDACTED_DEVICE_SERIAL`。**尚未拿到另一台全新 RV1103 做现场验收**；首次导入资源和迁移已通过离线专项，现有板已完成实际导入与切换。沿用固定实采标定：Tiny 原图 ROI `(560,0,1248,1296)`→80×128，径向 range 经 M/R/t/K/D 转 camera-Z；未重训、重标定或改变投影。物理精度和全量程 INT8 原有缺口保持，不以切换通过代替精度验收。
 
 ## 清理与运行
 
-从上位机移出旧 RGB576、LiteSR 256/128、旧 512 网络源码、旧部署副本及包含旧模型的历史交付/备份，共 **59 个目标、18,933 个文件、17,389,542,218 字节**。移动前后逐文件 SHA256 一致；清理清单与原件在 历史项目外归档路径 `../../dToF/output/litesr_depth_only_20261106_v1/retired_host_assets/`（当前路径未找到） 和 [移动回执](../../dToF/output/litesr_depth_only_20261106_v1/retirement_result.json)。当前 640×480、LiteSR 384、Tiny 和磁触觉资源保留。dToF 原模型目录和原训练产物没有移除。
+从上位机移出旧 RGB576、LiteSR 256/128、旧 512 网络源码、旧部署副本及包含旧模型的历史交付/备份，共 **59 个目标、18,933 个文件、17,389,542,218 字节**。移动前后逐文件 SHA256 一致；清理清单与原件在 历史项目外归档路径 `../../dToF/output/litesr_depth_only_20261106_v1/retired_host_assets/`（当前路径未找到） 和 移动回执 `../../dToF/output/litesr_depth_only_20261106_v1/retirement_result.json`。当前 640×480、LiteSR 384、Tiny 和磁触觉资源保留。dToF 原模型目录和原训练产物没有移除。
 
-历史 1.1.3/1.1.4/1.1.5 安装程序原字节保留在项目外归档。当前开发入口为 [START_RELEASE.cmd](../START_RELEASE.cmd) / [Release 主程序](../x64/Release/触想工作台.exe)，三模型安装版为 v1.1.6。
+历史 1.1.3/1.1.4/1.1.5 安装程序原字节保留在项目外归档。当前开发入口为 [START_RELEASE.cmd](../START_RELEASE.cmd) / Release 主程序 `x64/Release/触想工作台.exe`，三模型安装版为 v1.1.6。

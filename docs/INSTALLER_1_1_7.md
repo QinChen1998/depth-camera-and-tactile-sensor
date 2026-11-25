@@ -1,6 +1,6 @@
 # v1.1.7 安装与发布记录
 
-2026-11-09，当前 UniDepth 多后端版本。源码按本次用户要求更新到 `main`，安装包及 SHA256 对应 [v1.1.7 Release](https://github.com/QinChen1998/depth-camera-and-tactile-sensor/releases/tag/v1.1.7)。历史 v1.1.6 保留原文件。
+本文记录 2026-11-09 的 UniDepth 多后端交付。当时脱敏源码更新到 `main`，安装包及 SHA-256 见 [v1.1.7 Release](https://github.com/QinChen1998/depth-camera-and-tactile-sensor/releases/tag/v1.1.7)。现行步骤见 [安装包构建](MODEL_PROTECTION.md#当前安装包)。
 
 ## 交付内容
 
@@ -8,7 +8,7 @@
 
 安装器包含 TensorRT-RTX、DirectML、OpenVINO CPU／Intel GPU、通用 ORT CPU 的原生库，以及 Qt、VC++、视频、ADB、原生采集支持和许可材料。不需要用户安装 Python、Conda、PyTorch、CUDA Toolkit 或 OpenVINO SDK。显卡驱动仍由系统／硬件厂商提供；驱动或算子不满足要求时不显示对应 GPU 选项。
 
-仅使用当前 RGB672／640×480 UniDepth。原模型没有覆盖或修改；decoder 混合 INT8 是独立模型。两个模型分别通过 AES-256-GCM 和原生 DLL 内存加载保护，交付目录不含明文 ONNX／IR、开发密钥头文件或 Python。完整契约见 [模型保护](MODEL_PROTECTION.md)。
+该版使用 RGB672／640×480 UniDepth，decoder 混合 INT8 是独立模型。两个模型分别通过 AES-256-GCM 和原生 DLL 内存加载保护。历史实现见 [UniDepth 模型保护](MODEL_PROTECTION.md#历史-unidepth-集成状态)。
 
 同时包含当前 F6 标定、48×32 原生 ToF 普通／高精度两档、USB 自动接入修复和旧 LiteSR／Tiny 入口退役。这两档原生 ToF 直接输出传感器测量，不使用神经网络。当前模式与标定见 [对应说明](DEFAULT_CALIBRATION_NATIVE_TOF.md)。
 

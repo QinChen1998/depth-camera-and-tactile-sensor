@@ -13,6 +13,7 @@ This project retains the provenance and license material belonging to its sensor
 | CXWL Depth Camera SDK for Windows x64, 2.2.2 | The supplied Windows ZIP. The app dynamically links `CxwlDepthSdk.dll` and includes the vendor product license and third-party notices in `cxwl-depth-sdk/`. |
 | Adapted CXWL SDK Qt Viewer examples | The MIT notice in `third_party/cxwl-depth-sdk-example/LICENSE` applies to the adapted capture client, device manager and point-cloud canvas. |
 | Android SDK Platform-Tools (USB enrollment) | External ADB runtime in `platform-tools/` alongside the executable, with the distribution's `NOTICE.txt` and `source.properties` |
+| Orbbec SDK v2 (Gemini 335 measurement) | Uses the separately installed Windows SDK and its own license materials |
 
 Retired UniDepth model, ONNX Runtime, DirectML and OpenVINO notices remain with their historical runtime copies. The desktop installer stages SDK capture components. The local Depth Pro 2-S engine is subject to the Apple research model license.
 
@@ -20,7 +21,7 @@ USB enrollment also provisions the pinned dToF inspection/engineering runtime wh
 
 The SPI driver build helper `tools/rv_control/prepare_spi_driver.py` copies the local vendor source into an isolated build directory and retains its notices and source SHA256 manifest. The wrapper adds explicit software ray-table selection and an atomic per-generation calibration receipt, preserving the independently read sensor FOV. It does not modify vendor originals, model weights, sensor EEPROM or saved settings. The product driver accepts the informational bits `0x08` and `0x10` individually and together under `observe-0x08`.
 
-The installer runtime manifest preserves the SHA256 identities of the model notice and bundled third-party materials. Before external delivery, confirm the packaged NVIDIA binaries against the [TensorRT for RTX agreement](https://docs.nvidia.com/deeplearning/tensorrt-rtx/latest/reference/sla.html) and [CUDA 12.9 redistribution terms](https://docs.nvidia.com/cuda/archive/12.9.1/eula/index.html). The board camera stack and standard C/C++ runtime come from the firmware.
+The local Depth Pro 2-S research runtime manifest records the SHA-256 identities of its engine, worker, bundled libraries and model license. Installer license and provenance files are collected with the SDK, Qt, VLC, ADB and board tooling. The board camera stack and standard C/C++ runtime come from the firmware.
 
 The former experimental LiteSR port and its RKNN/OpenSSL payload were retired from the product on 2026-11-12.
 

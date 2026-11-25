@@ -1,8 +1,8 @@
-# UniDepth 推理设备选择
+# UniDepth 多后端历史记录
 
-本文记录退役的 UniDepth 多后端实现和历史安装包。运行示例使用当时版本的应用和模型包。
+本文记录 v1.1.7 时期的 UniDepth 多后端实现和安装包。运行示例使用当时版本的应用和模型包。当前 Depth Pro 2-S 的验证见 [主机推理与离线回放](TESTING.md#主机推理与离线回放)，当前安装构建见 [安装包说明](MODEL_PROTECTION.md#当前安装包)。
 
-推理设备支持当前 RGB672 UniDepth。启动时由独立进程枚举硬件、检查运行条件并显示候选。枚举最多运行 5 秒，超时使用已检测到的候选。实际执行推理时由当前设备加载并校验模型。
+当时的「推理设备」设置支持 RGB672 UniDepth。启动时由独立进程枚举硬件、检查运行条件并显示候选。枚举最多运行 5 秒，超时使用已检测到的候选。执行推理时由选定后端加载并校验模型。
 
 启动时按设备身份恢复可用的已保存选项。默认优先顺序为 TensorRT-RTX、DirectML、OpenVINO GPU、OpenVINO CPU、ONNX Runtime CPU。混合 INT8 由用户手动选择。
 
@@ -39,13 +39,14 @@ TensorRT-RTX 候选检查 CUDA 驱动和架构。DirectML 候选来自支持 D3D
 
 两个模型均通过 AES-256-GCM 和原生加载 DLL 保护。原图用于 TensorRT、DirectML、ORT CPU 和 OpenVINO；INT8 XML／BIN 先封装再加密。OpenVINO 加载 DLL 认证并核对模型身份后在内存中编译，返回编译模型句柄并清零临时明文。交付目录不携带明文 ONNX、IR 或 Python 环境。详细约定见 [模型保护](MODEL_PROTECTION.md) 和 [依赖许可](OPEN_SOURCE_LICENSES.md)。
 
-## 构建与验证入口
+## 历史构建与验证入口
 
-`tools/prepare_compatible_runtime.py` 从指定、已固定版本的 wheel 目录收集原生 DLL、许可证和 C 头文件，并生成文件摘要清单；转换输入只读，不覆盖完成的输出。正式安装由 `tools/installer/build.ps1` 对两个模型的副本分别生成新密钥、密文和 DLL。
+`tools/prepare_compatible_runtime.py` 从指定版本的 wheel 目录收集原生 DLL、许可证和 C 头文件，并生成文件摘要清单。v1.1.7 的安装构建对两个模型的副本分别生成新密钥、密文和 DLL。以下命令需要恢复历史版本的对应运行包或安装目录。
 
 ```powershell
-./tools/test_inference_backends.ps1 -Executable x64/Release/触想工作台.exe -Output x64/validation/my_check/native -Ui
-./tools/test_inference_backends.ps1 -Executable <安装版目录>/触想工作台.exe -Output x64/validation/my_check/protected -Ui -Protected
+$legacyExe = Read-Host 'v1.1.7 安装版触想工作台.exe 的绝对路径'
+$run = Join-Path $PWD ('x64/validation/unidepth-offline-' + (Get-Date -Format 'yyyyMMdd-HHmmss'))
+.\tools\test_inference_backends.ps1 -Executable $legacyExe -Output $run -Ui -Protected
 ```
 
 这套专项使用实际模型检测、默认和手动选择、GPU 失效的 CPU 回退、各可用后端的完整父进程／worker 深度输出与设置截图。报告写入新的目录，PATH 仅保留被测程序和 Windows，强制 `RV_TEST_OFFLINE_ONLY=1`。通用八组离线回归仍由 `tools/run_offline_tests.py` 运行。
@@ -71,7 +72,10 @@ TensorRT-RTX 候选检查 CUDA 驱动和架构。DirectML 候选来自支持 D3D
 有明确实机授权时，可通过下列入口复现。它使用临时上位机配置，不改写设备长期参数；`ConfigSource` 需要本机已登记且已保存登录的设备配置。实际成像会启动板端采集，不属于离线专项。
 
 ```powershell
-./tools/test_live_inference_backends.ps1 -Executable x64/Release/触想工作台.exe -ConfigSource config -Output x64/validation/my_live_check -AllowLiveDevice
+$legacyExe = Read-Host 'v1.1.7 程序的绝对路径'
+$legacyConfig = Read-Host '该历史版本匹配的已登记设备配置目录'
+$run = Join-Path $PWD ('x64/validation/unidepth-live-' + (Get-Date -Format 'yyyyMMdd-HHmmss'))
+.\tools\test_live_inference_backends.ps1 -Executable $legacyExe -ConfigSource $legacyConfig -Output $run -AllowLiveDevice
 ```
 
 其默认测试本机五条路径；其他机器须以设置检测成功的设备 ID 传入 `-Backends`。Intel GPU 和 AMD GPU 仍待相应实机验收。

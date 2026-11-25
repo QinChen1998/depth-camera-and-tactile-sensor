@@ -1,6 +1,6 @@
 # 第二轮源码精简（2026-11-05）
 
-用户确认按建议执行第一轮列出的第 1–7 类，第 8 类 IDE 文件不处理。本轮已完成，以开始时的工作区为基线，保留期间并行出现的触觉状态行布局修复及测试，没有回退其他工作。进度见 [清单](../REFACTOR_CHECKLIST.md)，证据见 [验证汇总](../../dToF/output/litesr_depth_only_20261106_v1/retired_host_assets/x64/validation/source_cleanup_phase2_20261105/verification-summary.json)。
+用户确认执行第一轮列出的第 1–7 类。本轮以当时的工作区为基线，保留并行出现的触觉状态行布局修复及测试。进度见 [清单](../REFACTOR_CHECKLIST.md)。`verification-summary.json` 等原始明细曾保存在项目外的 `retired_host_assets/`，该位置当前不可用。
 
 ## 执行范围与行为
 
@@ -28,11 +28,11 @@
 
 `tools/litesr_board/native/runtime/Contour512.h` 是冻结板端采集源码的内部编译依赖，继续保留；它不恢复主机 512 方案。
 
-板端 28 份副本的原路径与唯一来源见 [移动对应表](../../dToF/output/litesr_depth_only_20261106_v1/retired_host_assets/x64/validation/source_cleanup_phase2_20261105/board-source-moves.json)。新增公共目录 `tools/litesr_board/common/`，现有根目录 `Contour.h`、`ContourGrid.inc` 复用为唯一来源。历史四个构建目标对应本节记录。现行入口见 [原生采集与构建](../tools/rv_capture/README.md)。
+板端 28 份副本的原路径与唯一来源曾记录在 `board-source-moves.json`。当时新增公共目录 `tools/litesr_board/common/`，复用 `Contour.h` 和 `ContourGrid.inc`。现行入口见 [原生采集与构建](../tools/rv_capture/README.md)。
 
-三份 STEP 的原/新路径与哈希见 [CAD 移动记录](../../dToF/output/litesr_depth_only_20261106_v1/retired_host_assets/x64/validation/source_cleanup_phase2_20261105/cad-moves.json)。来源入口为 [CAD 说明](../archives/cad/tactile/README.md) 和 [布局来源索引](../models/tactile/surface_layouts.json)，目录相对 JSON 所在目录解析。
+三份 STEP 的移动曾记录在 `cad-moves.json`。现有文件和哈希见 CAD 说明 `archives/cad/tactile/README.md` 和 [布局来源索引](../models/tactile/surface_layouts.json)，目录相对 JSON 所在位置解析。
 
-历史日志 ZIP 和每份被删产物的原路径、大小、时间、SHA256 见 [归档索引](../archives/README.md)。过时安装程序包括 1.0.0 的两个构建、1.1.0、1.1.1、1.1.2 以及两份被最终 1.1.3 取代的早期构建。被删文件都是历史输出，原始模型和构建私有输入不在删除范围内。
+历史日志 ZIP 和每份被删产物的原路径、大小、时间、SHA256 见 归档索引 `archives/README.md`。过时安装程序包括 1.0.0 的两个构建、1.1.0、1.1.1、1.1.2 以及两份被最终 1.1.3 取代的早期构建。被删文件都是历史输出，原始模型和构建私有输入不在删除范围内。
 
 ## 验证及代码规模
 
@@ -46,7 +46,7 @@
 | 构建和维护脚本 | 29 | 2,266 |
 | 合计 | 167 | 25,240 |
 
-口径为第一方源码的物理非空、非纯注释行，包含测试和脚本，排除模型、第三方依赖、资源、生成文件及 `x64/archives`。不将这个数值解释为每行代码都可从产品界面到达。统计与入口检查见 [最终清单](../../dToF/output/litesr_depth_only_20261106_v1/retired_host_assets/x64/validation/source_cleanup_phase2_20261105/inventory-final.json)，复现命令见 [测试文档](TESTING.md)。
+口径为第一方源码的物理非空、非纯注释行，包含测试和脚本，排除模型、第三方依赖、资源、生成文件及 `x64/` 内产物。当时的最终清单文件名为 `inventory-final.json`，当前检查命令见 [测试文档](TESTING.md#有效代码行数与入口检查)。
 
 | 验证 | 最终结果 |
 |---|---|
@@ -65,6 +65,6 @@
 
 板端八个程序已完成重建及一致性验证，当前载荷无需替换；本轮没有重新部署或运行硬件，不新增实机精度、吞吐或安装包交付结论。16 份模型/板端文件及 3 份配置的 SHA256、大小、修改时间保持。收尾观察到用户偏好 `config/preferences/DepthCameraAndTactileSensor/DepthCameraAndTactileSensor.ini` 于 15:15 更新，已保留当前内容，没有执行编辑或回滚；本任务离线专项使用隔离设置目录。最终指纹记录明确保留这一差异，不将 20 项都报告为未变。
 
-完整逐文件修改、删除和新增记录见 [文件清单](../../dToF/output/litesr_depth_only_20261106_v1/retired_host_assets/x64/validation/source_cleanup_phase2_20261105/changed-files.json)，文本差异见 [源码补丁](../../dToF/output/litesr_depth_only_20261106_v1/retired_host_assets/x64/validation/source_cleanup_phase2_20261105/source-changes.patch)。共移除 38 个旧代码路径并新增 9 个公共代码/构建路径，净减 29 份；CAD 归档及文档不计入代码文件数。清单也记录工作区同期的两份触觉文件差异，标记为 `concurrent_change_preserved`，不归为本次精简修改。
+当时的逐文件清单为 `changed-files.json`，文本补丁为 `source-changes.patch`。共移除 38 个旧代码路径并新增 9 个公共代码或构建路径，净减 29 份。统计排除了 CAD 和文档。清单将同期两份触觉文件标记为 `concurrent_change_preserved`。
 
 第一轮脱敏 GitHub 备份及两轮本地源码快照保留。本轮没有再次提交或公开推送，也没有修改移植来源项目。
