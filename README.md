@@ -3,8 +3,8 @@
 触想工作台是独立的 Windows x64 传感器上位机，由 `Dexterous Hand Visualization` 移植。主窗口提供磁触觉、深度图、原视频和点云。
 
 - 磁触觉传感器：串口采集、三维力显示、曲线和显示设置。
-- 深度图提供 **上位机辅助推理**、**板端推理**和**板端推理高精度**。上位机方案使用 Depth Pro 2-S 和复用 ToF 的 B 策略，两个板端档显示 SDK 的 48×32 米制径向深度及有效测点。
-- 摄像头原视频与深度共用 CXWL Depth Camera SDK 2.2.2 的成像会话，视频为 2304×1296 H.265。
+- 深度图通过 SDK 提供 **上位机辅助推理**、**板端推理**和**板端推理高精度**，另提供 **原生 ToF 8×8 普通／高精度**和 **原生 ToF 16×16 普通／高精度**。上位机方案使用 Depth Pro 2-S 和复用 ToF 的 B 策略，板端档按各自网格显示米制径向深度。
+- 摄像头原视频与深度共用 CXWL Depth Camera SDK 3.1.0（ABI v3）的 USB 直连成像会话，视频为 2304×1296 H.265。
 - 点云可从「视图 → 点云」或「深度图」旁的标签页打开。480×640 上位机辅助深度和 48×32 原生 ToF 均支持点状与网格，按相机 Z 共用 Jet 色标。默认「固定 Z 色标」使用 0.01–3 m，可在点云下方调整范围。切换到「动态＋直方图均衡」后，颜色按单帧深度分布映射。上位机辅助点径默认 2.4 px。点状与网格使用当前帧。左键拖动旋转，中键拖动平移，滚轮手动缩放。帧刷新和切档时保留视角，点击「重置视角」可恢复默认。
 主窗口由成像方案自动选择 dToF 模式。工程调参使用专项工具。默认标定和 USB 接入见 [默认标定与原生 ToF 模式](docs/DEFAULT_CALIBRATION_NATIVE_TOF.md)。
 
@@ -15,7 +15,7 @@
 | 本地 AGENTS.md（不上传） | 新窗口阅读顺序、维护约束、原始权重和交付目录规则 |
 | [项目架构](docs/ARCHITECTURE.md) | 模块与进程边界、RGB/dToF 数据链路、目录、配置、构建和验证入口 |
 | [安装包构建与模型保护](docs/MODEL_PROTECTION.md) | 当前安装命令、载荷、沙盒验证与历史 UniDepth 保护记录 |
-| [模型权属及第三方材料](docs/OPEN_SOURCE_LICENSES.md) | SDK、Qt、FFmpeg、SSH 等依赖材料及本地 Depth Pro 2-S 模型声明 |
+| [模型权属及第三方材料](docs/OPEN_SOURCE_LICENSES.md) | SDK、Qt、FFmpeg 等依赖材料及本地 Depth Pro 2-S 模型声明 |
 | [测试与源码统计](docs/TESTING.md) | 当前离线、模型、实机及源码检查命令 |
 | [公开源码说明](docs/SOURCE_DISTRIBUTION.md) | 源码发布范围与历史版本 |
 | 本地归档索引 `archives/README.md` | 历史报告按原 `x64/validation/...` 路径查询和恢复 |
@@ -31,6 +31,21 @@
 上位机复用最新的合格 ToF 测量，配对时间差与时钟裕量合计最多 200 ms。无合格配对时，当前会话可沿用最近可靠尺度。点击「仅显示单目深度」可同时查看深度图和点云在 ToF 校正前的同帧结果。普通保存使用校正后的米制深度。
 
 「显示 ToF 测点」标记同帧原生测点，白圈表示参与校正的点。「ToF / RGB 对照」在配对 RGB 上显示测点。「录制诊断（10秒）」保存配对 RGB、原生 ToF、单目预测、筛点原因及最终深度。
+
+### 原生 8×8 和 16×16 ToF
+
+用设备管理登记 RV1103 后，在深度图中选择原生 ToF 档位。四档通过 SDK 与 48×32 档共用成像会话，显示原生径向深度和摄像头原视频。深度图按 SDK 原始测区显示，每个测区对应一个色块。原生点云和 RV1103 的批量测量录制使用 48×32 ToF。
+
+| 深度图方案 | TMF8829 驱动预设 | 厂商预设最大测距 |
+|---|---|---:|
+| 原生 ToF 8×8 普通 | `-d 0` | 5.7 m |
+| 原生 ToF 8×8 高精度 | `-d 2` | 5.7 m |
+| 原生 ToF 16×16 普通 | `-d 5` | 5.7 m |
+| 原生 ToF 16×16 高精度 | `-d 6` | 1.4 m |
+
+最大测距按厂商数据表第 25 页表 6 的逐档预设记录。器件标称最小探测距离是 10 mm，测试目标为 200 × 260 mm、反射率 18% 的灰卡。300 mm 以内的数据表精度指标适用于高精度或双模式。实际有效距离取决于反射率、环境光、测区位置、积分和整机光学条件。 [TMF8829 数据表](https://look.ams-osram.com/m/4215c1ea1a30e283/original/TMF8829-Time-of-flight-sensor.pdf)
+
+8×8 高精度的表 6 数值为 5.7 m。同一份数据表在 §8.2.37 通用描述里给出高性能算法约 1.4 m 的上限。用于整机指标时，需验证 8×8 高精度在目标场景下的实际探测距离。 [TMF8829 数据表 §8.2.37](https://look.ams-osram.com/m/4215c1ea1a30e283/original/TMF8829-Time-of-flight-sensor.pdf)
 
 ## 测量采集
 
@@ -60,11 +75,11 @@
 
 ### RV1103 设备管理
 
-使用 USB 数据线连接 RV1103，从「设置 → 设备管理」点击「USB 一键连接」。SDK 检查 ADB、RNDIS、设备身份和板端文件，按需登记设备或更新配套采集服务。已登记且配套文件匹配的设备可以自动开始当前成像方案。深度图、点云和原视频共用采集会话。
+正常版和客户版均通过 USB 数据线连接预装 USB 直连设备服务的 RV1103。相机在 USB RNDIS 网卡上的地址固定为 `172.32.0.93/16`。首次配置网卡可按 SDK 说明运行 `Script/configure_cxwl_depth_camera_usb.ps1`，再从「设置 → 设备管理」点击「USB 一键连接」。已有旧版档案的设备也需完成设备服务登记。深度图、点云和原视频共用采集会话。参见 [CXWL Windows SDK 3.1.0](https://github.com/QinChen1998/Cxwl-Depth-Camera-SDK/releases/tag/v3.1.0)。
 
-设备列表可以切换或移除登记设备，并检查板端文件、恢复设备和检查矫正网格。主机推理的 0°／180° 输入方向可在列表下方调整。重标双绿矫正网格时，停止采集，将 SC3336 对准均匀照明的哑光白面。点击「检查矫正网格」，核对状态后确认计算。SDK 采集 21 帧 Bayer RAW，计算本机 Gr／Gb 的 17×17 网格，经 ISP 试加载和读回后更新设备。
+设备列表可以切换或移除登记设备。具备设备授权时，可经 SDK 检查板端文件或执行恢复。正常版可调整主机推理的 0°／180° 输入方向。SC3336 双绿校正使用 SDK 提供的独立校正工具。
 
-板端普通和高精度分别请求 SDK 的普通与高精度模式。SDK 2.2.2 的两档默认主积分为 1200K，旧版出厂 600K 参数由 SDK 升级流程迁移。SDK 继续尊重工程调参保存的自定义参数。测量报告在获得传感器实读值时记录该值。
+板端普通和高精度分别请求 SDK 的两个 48×32 模式。配套固件管理传感器参数，测量报告在获得传感器实读值时记录该值。
 
 上位机使用 SDK 的视频解码时间和 ToF 回传时延估计在同一主机时钟配对。配对时间差与时钟裕量合计上限仍为 200 ms。诊断保留所用的时间来源、同代次 ToF 质量图、筛点原因和最终米制深度。
 
@@ -76,14 +91,17 @@
 
 ## 开发
 
-VS 2022 v143，Windows SDK 10.0.22621.0，Qt 6.11.1 MSVC x64，QtMsBuild。直接打开根目录同名 `.sln` 并选择 x64 配置即可构建。工程用系统自带的 Windows PowerShell 校验 `CXWLDepthSDK-2.2.2-win64.zip` 的 SHA-256、解包并部署所需文件。其他开发机可用 `DCTS_DEPTH_SDK_ZIP` 指定该 ZIP 的路径。也可运行下面的命令。
+VS 2022 v143，Windows SDK 10.0.22621.0，Qt 6.11.1 MSVC x64，QtMsBuild。首次构建时，将 `DCTS_DEPTH_SDK_DIR` 指向官方 Windows x64 SDK 3.1.0 的解包目录。工程校验 SDK 清单和所需文件的 SHA-256。可以直接打开根目录同名 `.sln` 并选择 x64 配置，或使用以下命令。
 
 ```powershell
 ./tools/build_desktop.ps1 -Configuration Release -QtRoot E:/Qt/6.11.1/msvc2022_64
 ./tools/build_desktop.ps1 -Configuration Debug -QtRoot E:/Qt/6.11.1/msvc2022_64
+./tools/build_desktop.ps1 -Edition Customer -Configuration Release -QtRoot E:/Qt/6.11.1/msvc2022_64
 ```
 
-构建默认同时重建配套的原生 RV worker 并更新其依赖 SHA-256 清单。产物位于 `x64/<配置>/触想工作台.exe`。当前 Windows SDK 和 Visual Studio 构建验证见 [SDK 同步记录](SDK_SYNC_CHECKLIST.md)。
+构建部署动态链接的 SDK、Qt、FFmpeg 及运行依赖。产物位于 `x64/<配置>/触想工作台.exe`。参见 [SDK 同步记录](SDK_SYNC_CHECKLIST.md)。
+
+`-Edition Customer` 生成 `x64/Customer/<配置>/触想工作台.exe`。客户版启用磁触觉、RGB 原视频、设备管理、48×32 普通及高精度 ToF、板端点云、深度保存和测量采集。两种版本的档位和测量菜单由 [产品配置](DCTS_APP.json) 定义。
 
 离线专项统一使用 `tools/run_offline_tests.py`，涵盖 UI、触觉、调参、恢复及 USB 登记八组。脚本隔离配置和临时目录，缺报告、零断言或 FAIL 均判失败。新版模型专项检查 480×640 张量、0°／180°输入、同帧输出与 B 策略。详细命令与有效代码行数口径见 [测试与源码统计](docs/TESTING.md)。
 
@@ -91,7 +109,9 @@ VS 2022 v143，Windows SDK 10.0.22621.0，Qt 6.11.1 MSVC x64，QtMsBuild。直�
 
 ## 安装包
 
-当前安装包包含 SDK、原生采集支持、界面及视频运行库。安装器和 SHA-256 文件生成在构建目录的 `delivery/`。本地研究所用的 Depth Pro 2-S 运行包单独组装。构建与沙盒验证见 [安装包构建](docs/MODEL_PROTECTION.md#当前安装包)。
+当前安装包包含 USB 直连 SDK、界面及视频运行库。安装器和 SHA-256 文件生成在构建目录的 `delivery/`。本地研究所用的 Depth Pro 2-S 运行包单独组装。构建和安装验证见 [安装包构建](docs/MODEL_PROTECTION.md#当前安装包)。
+
+构建客户安装包时，对同一入口使用 `./tools/installer/build.ps1 -Edition Customer @installerArgs`。
 
 ## 历史验证
 

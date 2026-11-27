@@ -1,63 +1,38 @@
 #include "RvTunerController.h"
 #include "RvSessionController.h"
-#include "../RuntimeDiscovery.h"
-#include <QtCore/QJsonDocument>
 #include <QtCore/QUuid>
-#include <QtCore/QFileInfo>
 #include <QtNetwork/QNetworkProxy>
 
 RvTunerController::RvTunerController(RvSessionController *session):QObject(session),m_session(session){
     setObjectName("rvTunerController");m_deadline.setSingleShot(true);m_deadline.setInterval(95000);
-    connect(&m_deadline,&QTimer::timeout,this,[this]{if(m_process)m_process->kill();else if(m_testPending)completed(m_operation,property("operation").toString(),{},tr("Device operation timed out; ownership and fault evidence are retained."));});
+    connect(&m_deadline,&QTimer::timeout,this,[this]{if(m_testPending)completed(m_operation,property("operation").toString(),{},tr("Device operation timed out; ownership and fault evidence are retained."));});
     m_heartbeat.setInterval(10000);connect(&m_heartbeat,&QTimer::timeout,this,[this]{if(m_state==Running&&!pending())launch("heartbeat",request());});
     m_expiry.setSingleShot(true);connect(&m_expiry,&QTimer::timeout,this,[this]{fail(tr("No fresh complete measurement; stopping the experiment."));});
 }
-RvTunerController::~RvTunerController(){m_destroying=true;++m_operation;clearReceiver({});m_heartbeat.stop();m_deadline.stop();if(m_process){m_process->disconnect(this);m_process->kill();}/* Board lease expires on an abnormal process exit; it never resumes Native. */}
+RvTunerController::~RvTunerController(){m_destroying=true;++m_operation;clearReceiver({});m_heartbeat.stop();m_deadline.stop();}
 bool RvTunerController::exclusive() const{return m_session->m_tunerExclusive;}
 void RvTunerController::setState(State state,const QString &detail){m_state=state;m_detail=detail;emit changed();if(exclusive())m_session->setState(tr("dToF Parameter Tuning"),detail);}
 QJsonObject RvTunerController::request() const{
     auto r=m_session->m_captureOwner;r["shared_receiving"]=!m_session->userStopped();r["token"]=m_token;r["old_token"]=m_oldToken;r["snapshot"]=m_info["snapshot"];r["boot_id"]=m_info["boot_id"];r["settings"]=m_applied;return r;
 }
 void RvTunerController::launch(const QString &action,QJsonObject req){
-    if(pending())return;
+    if(pending()||!m_testTransport)return;
     const auto operation=++m_operation;setProperty("operation",action);
-    if(m_testTransport){m_testPending=true;m_testTransport(action,req,operation);emit changed();return;}
-    try {
-        RvDeviceStore store(m_session->deviceStorePath());
-        const auto selected=store.byId(m_deviceId);
-        // A read/edit in Device Manager cannot redirect an owned STOP to another board.
-        if(store.revision()!=m_revision||selected.host!=m_host)throw std::runtime_error("Trusted device registry changed; restore its identity before stopping. The experiment lease will expire safely.");
-        auto *p=new QProcess(this);m_process=p;p->setObjectName("rvTunerControlProcess");
-        p->setProgram(m_worker);p->setArguments({"--tuner",action,"--device-store",m_session->deviceStorePath(),"--device-revision",m_revision,"--device-id",m_deviceId});
-        p->setProcessEnvironment(RuntimeDiscovery::nativeWorkerEnvironment(m_worker));p->setWorkingDirectory(QFileInfo(m_worker).absolutePath());
-        connect(p,&QProcess::started,this,[p,req]{p->write(QJsonDocument(req).toJson(QJsonDocument::Compact));p->closeWriteChannel();});
-        connect(p,&QProcess::errorOccurred,this,[this,p,operation,action](QProcess::ProcessError error){if(error==QProcess::FailedToStart&&m_process==p){m_process=nullptr;p->deleteLater();completed(operation,action,{},p->errorString());}});
-        connect(p,&QProcess::finished,this,[this,p,operation,action](int code,QProcess::ExitStatus exit){
-            if(m_process!=p)return;m_process=nullptr;
-            const auto bytes=p->readAllStandardOutput(),errors=p->readAllStandardError();p->deleteLater();
-            QJsonParseError parse;const auto doc=QJsonDocument::fromJson(bytes,&parse);
-            QString problem;
-            if(code||exit!=QProcess::NormalExit)problem=QString::fromUtf8(errors).trimmed();
-            else if(parse.error!=QJsonParseError::NoError||!doc.isObject())problem=tr("Malformed device operation receipt.");
-            else if(doc.object()["device_registry_revision"]!=m_revision||doc.object()["trusted_device"].toObject()["id"]!=m_deviceId)problem=tr("Device identity changed; operation receipt rejected.");
-            if((code||exit!=QProcess::NormalExit)&&problem.isEmpty())problem=tr("Device operation failed or timed out; check device logs.");
-            completed(operation,action,doc.object(),problem);
-        });
-        p->start();m_deadline.start();emit changed();
-    }catch(const std::exception &e){completed(operation,action,{},QString::fromUtf8(e.what()));}
+    m_testPending=true;m_testTransport(action,req,operation);emit changed();
 }
 void RvTunerController::read(){
     if(exclusive()||pending())return;
+    if(!m_testTransport||qEnvironmentVariable("RV_TEST_OFFLINE_ONLY")!="1"){setState(Fault,tr("Live tuning is not available through this SDK."));return;}
     try{
         RvDeviceStore store(m_session->deviceStorePath());const auto device=store.byId(m_session->deviceProfile().id);
         if(!device.ready())throw std::runtime_error("Select and verify a trusted RV device in Device Manager");
-        const auto runtime=RuntimeDiscovery::rvControlForLaunch();if(runtime.executable.isEmpty())throw std::runtime_error(runtime.error.toStdString());
-        m_worker=runtime.executable;m_deviceId=device.id;m_revision=store.revision();m_host=device.host;
+        m_deviceId=device.id;m_revision=store.revision();m_host=device.host;
         m_cancel=false;m_readOnly=true;m_sessionEpoch=m_session->presentationEpoch();setState(Reading,tr("Reading current native capture settings..."));launch("inspect",request());
     }catch(const std::exception &e){setState(Fault,QString::fromUtf8(e.what()));}
 }
 void RvTunerController::start(const RvTuner::Settings &s){
     if(exclusive()||pending()||m_state==Preflight||m_state==Handover)return;
+    if(!m_testTransport||qEnvironmentVariable("RV_TEST_OFFLINE_ONLY")!="1"){setState(Fault,tr("Live tuning is not available through this SDK."));return;}
     try{
         s.validate(); // Capacity errors must precede all handover effects.
         if(m_session->usesDepthSdk()&&!m_session->userStopped())
@@ -66,8 +41,7 @@ void RvTunerController::start(const RvTuner::Settings &s){
         if(!m_session->controlledSource())throw std::runtime_error("Select the trusted RV device source before tuning");
         RvDeviceStore store(m_session->deviceStorePath());const auto device=store.byId(m_session->deviceProfile().id);
         if(!device.ready())throw std::runtime_error("Select and verify a trusted RV device in Device Manager");
-        const auto runtime=RuntimeDiscovery::rvControlForLaunch();if(runtime.executable.isEmpty())throw std::runtime_error(runtime.error.toStdString());
-        m_worker=runtime.executable;m_deviceId=device.id;m_revision=store.revision();m_host=device.host;
+        m_deviceId=device.id;m_revision=store.revision();m_host=device.host;
         m_requested=s;m_cancel=false;m_readOnly=false;m_sessionEpoch=m_session->presentationEpoch();
         setState(Preflight,tr("Checking parameters, installed runtime, device identity and actual capture owner..."));launch("inspect",request());
     }catch(const std::exception &e){setState(Fault,QString::fromUtf8(e.what()));}

@@ -1,6 +1,12 @@
 # Windows SDK 同步及接口整理
 
-本文记录 Windows SDK 2.2.2 接入、Depth Pro 2-S 单模型和相关验证。[GitHub PR #3](https://github.com/QinChen1998/depth-camera-and-tactile-sensor/pull/3) 已合并到 `main` 的 `9e2c055`。当前操作入口见 [测试文档](docs/TESTING.md)。
+## Windows SDK 3.1.0
+
+正常版和客户版共用 SDK 3.1.0（ABI v3），通过 USB RNDIS 和 CX2 访问设备服务。构建固定校验官方 Windows x64 SDK 的 `sdk-manifest.json` SHA-256 `a88713c5063b1083d9d9ce88dd525b2f8c5f66a69960f5a7e9708a5d2feca6ae`。接入和验证见 [SDK 发布页](https://github.com/QinChen1998/Cxwl-Depth-Camera-SDK/releases/tag/v3.1.0)、[项目说明](README.md#rv1103-设备管理) 和 [测试文档](docs/TESTING.md)。
+
+## 历史版本
+
+以下记录 Windows SDK 2.2.2 接入、Depth Pro 2-S 单模型和当时的验证。[GitHub PR #3](https://github.com/QinChen1998/depth-camera-and-tactile-sensor/pull/3) 已合并到 `main` 的 `9e2c055`。
 
 - [x] 确认原工作区在 `main`，初始 HEAD 为 `4aba887`。已有未跟踪的 `Log/`。
 - [x] 核对 GitHub `main` 同为 `4aba887`，已创建 `fix/sdk-sync-and-interface-cleanup` 分支。

@@ -13,8 +13,12 @@
 | 上位机辅助推理 | `host_assisted_depth` | Depth Pro 2-S 480×640 竖幅米制相机 Z，复用最新合格 48×32 ToF 测量 |
 | 板端推理 | `board_native_tof48_1200k` | 48×32 普通原生 ToF |
 | 板端推理高精度 | `board_native_tof48_high_accuracy_1200k` | 48×32 高精度原生 ToF |
+| 原生 ToF 8×8 普通 | `board_native_tof8` | TMF8829 普通预设原生径向深度 |
+| 原生 ToF 8×8 高精度 | `board_native_tof8_high_accuracy` | TMF8829 高精度预设原生径向深度 |
+| 原生 ToF 16×16 普通 | `board_native_tof16` | TMF8829 普通预设原生径向深度 |
+| 原生 ToF 16×16 高精度 | `board_native_tof16_high_accuracy` | TMF8829 高精度预设原生径向深度 |
 
-成像方案声明见 `DCTS_APP.json`。板端两档沿用 SDK 出厂 1200K 默认值。旧成像方案和旧录制的模型身份用于设置迁移及诊断回放。
+成像方案声明见 `DCTS_APP.json`。Qt 将这份配置编入 EXE，`DctsEdition` 选择正常版或客户版。每版的首个档位用于首次启动和迁移超出范围的旧设置。菜单和会话选择使用相同的档位清单。客户版的编译设置禁用主机推理、诊断入口和模型发现。板端两档沿用 SDK 出厂 1200K 默认值。旧成像方案和旧录制的模型身份用于设置迁移及诊断回放。
 
 移植来源 `E:/WORK/Dexterous Hand Visualization` 只读。当前工程的源码、模型包、RV worker、资源和配置均独立；日常运行不依赖该来源项目目录。
 
@@ -54,13 +58,13 @@ flowchart TD
 | `sensors/RvDepthView.*`、`DepthMapWidget.*`、`RtspCameraPage.*` | 深度与视频显示、悬停数值、显示设置和快照 |
 | `sensors/RvPointCloudWidget.*`、`RvPointCloudCanvas.*` | 辅助深度和原生 ToF 反投影、点云显示和视角操作 |
 | `sensors/RvDeviceStore.*`、`RvDeviceManagerDialog.*` | 受信任设备档案、固定默认标定和输入方向 |
-| `sensors/RvTunerController.*`、`RvTunerWidget.*`、`RvTunerProtocol.*` | 独占调参、异步操作、停止、长期参数保存 |
-| `RvControlWorker.cpp`、`RvControlProtocol.*` | 原生 libssh2/OpenSSL 控制、身份校验与板端服务操作 |
+| `sensors/RvTunerController.*`、`RvTunerWidget.*`、`RvTunerProtocol.*` | 历史调参的离线协议、独占和停止回归 |
+| `RvControlWorker.cpp`、`RvControlProtocol.*` | 历史独立工具源码 |
 | `RuntimeDiscovery.*` | 应用根目录、运行时覆盖路径、worker 清单和依赖校验 |
 
 点云与深度图共享成像会话。板端档订阅 `tofFrameReady`，通过 F6 GEO2 射线和相机平移得到原生测点的 XYZ。上位机辅助推理档订阅 `assistDepthSnapshotReady`，用 480×640 相机 Z 和对应内参逐像素反投影。后台一次转换一帧，转换期间保留最新待处理帧。Qt Widgets 视口用深度缓冲绘制彩色点与三角网格，上位机点径按屏幕像素设置，Z 色标使用点云自己的设置。两种数据源都使用 X 向右、Y 向上、前方为负 Z 的场景坐标。停采、切档或过期时清空数据并保留视角。
 
-`DctsDepthPro2Worker.exe` 通过二进制 IPC 接收 RGB，检查引擎指纹及张量布局。 `RuntimeDiscovery::NativeWorkerResult` 返回原生 `RvControlWorker.exe` 的路径和校验错误。各子进程单独配置 DLL 搜索路径。
+`DctsDepthPro2Worker.exe` 通过二进制 IPC 接收 RGB，检查引擎指纹及张量布局。主机推理子进程单独配置 DLL 搜索路径。
 
 原生档显示径向测量，保留原始索引和有效位。工程调参保留独占和长期保存。
 
@@ -88,21 +92,23 @@ RGB 与 ToF 的软件配对总预算为 200 ms。复用还核对原始测量的�
 
 ## SDK 采集与板端准入
 
-设备枚举、USB 登记、选定设备、连接、停采、修复和双绿网格调用 SDK 2.2.2 的公开 C ABI。自动发现将 SDK 的 USB 检查 ID 传给连接请求，停止会撤销待执行的确认。成像共用一个 SDK 会话。
+设备枚举、USB 登记、选定设备、连接、停采和受管维护调用 SDK 3.1.0 的公开 C ABI v3。SDK 在相机的 USB RNDIS 网卡上与 CX2 设备服务通信，固定地址为 `172.32.0.93/16`。自动发现将 SDK 的 USB 检查 ID 传给连接请求，停止会撤销待执行的确认。两种软件版本的成像均共用一个 SDK 会话。
 
-普通和高精度板端档请求 mode24 和 mode25。两档沿用 SDK 的 1200K 出厂默认值和原有的工程调参保留策略。原生深度通过扩展回调取得径向米制数据、SNR 和有效图，重建测量采集和点云需要的同帧距离码。SDK 将缺测径向距离置零。使用本项目已有的 F6 射线和 RGB 校正表进行点云投影与模型校正。
+普通和高精度板端档请求 mode24 和 mode25，传感器设置由配套设备服务管理。原生深度通过扩展回调取得径向米制数据、SNR 和有效图，重建测量采集和点云需要的同帧距离码。SDK 将缺测径向距离置零。使用本项目已有的 F6 射线和 RGB 校正表进行点云投影与模型校正。
 
 SDK 回调的 RGB 解码时间属于主机单调时钟。ToF 采集时间属于板端单调时钟。主机从 ToF 请求往返和板端帧龄估计 ToF 在主机时钟的区间，再选择同代次的合格测量。诊断保留 SDK 配对来源。这个时间窗口用于软件融合，RGB 曝光同步需要单独的实测依据。
 
+8×8 和 16×16 普通、高精度档对应 SDK 模式 3–6 和板端 mode30–33。SDK 在同一会话中发布 RGB、原生尺寸的径向米制深度及同帧质量图。工作台核对档位、尺寸和采集代次，从各行的行跨度读取数据。
+
 ## 显示和数值契约
 
-原视频底栏的画面旋转联动原视频与深度图。两个原生 ToF 档位另有独立的“输入角度”按钮，默认额外顺时针 90°，允许 0–359°并保存；该角度只改变画布呈现，模型输入、标定、原生数组与保存均使用原网格。`RvDepthView` 仅对启用原生角度的画布做任意角度适配与悬停逆变换。
+原视频底栏的画面旋转联动原视频与深度图。原生 ToF 档位有独立的「输入角度」按钮，默认额外顺时针 90°，可保存 0–359°。画布按原始测区以最近邻放大。悬停根据显示变换反查原始测区，模型输入、标定、米制数组和保存使用原网格。
 
 深度图底栏默认使用「固定色标」，范围为 0.01–11 m，最小值须小于最大值，点击「应用」生效。「动态＋直方图均衡」复用点云的逐帧 Jet 着色算法，用于深度图预览。深度图和点云各自保存上色方式。保存的深度图使用固定色标和校正后的米制数据。
 
 `RvDepthView::presentationImage()` 可以使用经过同帧验证的预测补充 dToF 几何视场外的显示。深度图的「仅显示单目深度」让深度图和点云同时选用同帧 `mono_reasons_v1` 中的未校正预测。`snapshotImage()`、`depthAt()`、浮点数组和普通保存使用校正后的米制数组和掩码。
 
-原视频和深度的启停与重连调用同一个设备会话。自动启动要求受信任设备、原生采集程序和所选会话预设通过校验。USB 首次部署及修复校验同次启动身份、标定、驱动摘要、采集占用和原生采集能力，并保留原厂启动配置与回滚。工程调参控制器继续负责独占、异步停止和退出等待。
+原视频和深度的启停与重连调用同一个设备会话。自动启动要求受信任设备和所选会话预设通过校验。首次 USB 登记由 SDK 校验相机身份。受管采集文件的检查、修复和恢复按设备服务权限执行。SC3336 校正使用 SDK 提供的独立工具。
 
 ## 目录和资源
 
@@ -121,18 +127,19 @@ SDK 回调的 RGB 解码时间属于主机单调时钟。ToF 采集时间属于�
 | `tools/`、`tests/` | 构建、原生依赖准备、离线和实机验证入口 |
 | `tools/rv_capture/` | Native16/Native48/SPI/H.265 纯采集源码、协议、部署资源和 F6 构建入口 |
 | `x64/Release/`、`x64/Debug/` | 主程序及 Qt/FFmpeg 部署目录 |
-| `x64/rv_control/<配置>/runtime/` | 原生设备控制 worker、SSH/加密依赖、调参载荷及 `implementation.json` |
 | `x64/validation/` | 当前测试输出、安装工具和历史路径指引。历史材料按原路径查询 本地归档索引 `archives/README.md` |
 
 新增源码、头文件和资源时同步维护编译、MOC、RCC 和 filters。修改翻译必须运行 lrelease。
 
 ## 配置和运行时定位
 
-`RuntimeDiscovery::applicationRoot()` 从 EXE 目录向上查找主工程文件或 `DCTS_APP.json`。安装包在 EXE 目录提供相对运行路径，不需要工程文件或产品声明文件。
+`RuntimeDiscovery::applicationRoot()` 从 EXE 目录向上查找主工程文件或 `DCTS_APP.json`。安装包在 EXE 目录提供 SDK 及运行依赖，产品声明编入程序资源。
 
-EXE 旁的 `runtime-paths.json` 使用相对 EXE 目录的路径。同名环境变量优先。当前主要覆盖项为 `RV_CONTROL_CPP` 和 `RV_DEPTHPRO2_ROOT`。开发版默认查找项目内的原生控制 worker 和本地研究运行包，安装载荷的清单提供随包的控制 worker 相对路径。
+客户版安装和桌面构建共用 `%LOCALAPPDATA%/DepthCameraAndTactileSensorCustomer/config`，注册设备和偏好保存在该目录。
 
-`main.cpp` 将设备库定向到 `config/devices.json`，安装版的 `config/` 位于 `%LOCALAPPDATA%/DepthCameraAndTactileSensor/`，开发版位于项目根目录。INI 偏好位于 `config/preferences/DepthCameraAndTactileSensor/`。普通首次启动从资源内的 `first-run-settings.ini` 补齐可移植默认值，初始化后沿用用户配置。旧注册表及旧 INI 的兼容导入由显式 `--import-settings` 入口执行。设备密码由 Windows 凭据管理器管理；拷贝设备 JSON 不会迁移密码，已有 SSH 身份校验也不等于模型许可证绑定。
+正常开发版可用 `RV_DEPTHPRO2_ROOT` 指定本地研究运行包。SDK 动态库位于 EXE 目录，SDK 的解码器和许可位于 `cxwl-depth-sdk/`。
+
+`main.cpp` 将设备库定向到 `config/devices.json`，正常版安装包的 `config/` 位于 `%LOCALAPPDATA%/DepthCameraAndTactileSensor/`，正常开发版位于项目根目录。INI 偏好位于 `config/preferences/DepthCameraAndTactileSensor/`。首次启动从资源内的 `first-run-settings.ini` 补齐可移植默认值，后续沿用用户配置。旧注册表及旧 INI 的兼容导入使用 `--import-settings`。SDK 将设备服务登记凭据保存在 Windows 凭据管理器。复制设备 JSON 后，换电脑应重新通过 USB 登记。正常版保存的推理方向按相机 USB 序列号迁移。
 
 ## 构建和验证
 

@@ -1,5 +1,6 @@
 #include "RvAssistRecoveryTests.h"
 #include "../sensors/DepthSdkClient.h"
+#include "../sensors/RvDtofCandidates.h"
 #include "../sensors/RvAssistFusion.h"
 #include "../sensors/RvCameraView.h"
 #include "../sensors/RvDepthDiagnostic.h"
@@ -19,8 +20,10 @@
 namespace {
 using namespace RvAssistFusion;
 
-bool sdkNativeMeasurementContract() {
-    constexpr int columns = 48, rows = 32, stride = 52;
+bool sdkNativeMeasurementContract(uint32_t sdkMode) {
+    const auto boardMode = RvDtofCandidates::modeForSdkMode(sdkMode);
+    const auto grid = RvDtofCandidates::nativeDepthGrid(boardMode);
+    const auto columns = uint32_t(grid.width()), rows = uint32_t(grid.height()), stride = columns + 4;
     QByteArray depth(columns * rows * 4, 0), valid(stride * rows, 0), snr(stride * rows, 0);
     const auto setRange = [&](int index, quint16 code) {
         const float metres = float(code) * .00025f;
@@ -37,18 +40,21 @@ bool sdkNativeMeasurementContract() {
     CxwlDepthFrameEx frame{};
     frame.size = sizeof(frame);
     frame.frame.size = sizeof(frame.frame);
+    frame.frame.mode = sdkMode;
+    frame.frame.image = {depth.constData(), quint64(depth.size()), columns, rows, columns * 4, CXWL_DEPTH_PIXEL_F32_LE};
     frame.frame.sequence = 11;
     frame.frame.session_epoch = 3;
     frame.frame.timestamp_ns = 1'000'000'000;
     frame.frame.capture_generation_utf8 = generation.constData();
     frame.snr = {snr.constData(), quint64(snr.size()), columns, rows, stride, CXWL_DEPTH_PIXEL_U8};
     frame.valid_mask = {valid.constData(), quint64(valid.size()), columns, rows, stride, CXWL_DEPTH_PIXEL_U8};
-    const QJsonObject metadata{{"work_mode", "dtof_candidate"}, {"protocol", "LSG2"}, {"candidate_mode", 24},
+    const QJsonObject metadata{{"work_mode", "dtof_candidate"}, {"protocol", "LSG2"}, {"candidate_mode", boardMode},
         {"engine", RvCaptureContract::NativeEngine}, {"model_sha256", ""}, {"capture_only", true},
         {"depth_present", false}, {"photon_enabled", false}, {"boot_id", "11111111-2222-3333-4444-555555555555"},
         {"generation", 3}, {"source_generation", QString::fromLatin1(generation)}, {"frame_id", 11},
         {"tof_sequence", 11}, {"tof_timestamp_ns", 1'000'000'000}, {"tof_reused", false},
-        {"dtof_width", columns}, {"dtof_height", rows}, {"dtof_bytes", depth.size()},
+        {"dtof_width", grid.width()}, {"dtof_height", grid.height()}, {"dtof_bytes", depth.size()},
+        {"dtof_fov_correction", RvCalibration::Fov},
         {"dtof_format", "range_uq2_u16le_snr_u8_valid_u8"}, {"dtof_range_unit", "0.25_mm"},
         {"dtof_source", "tmf8829_ipc_first_peak"}, {"dtof_coordinate", "sensor_radial_native"}};
     const auto native = DepthSdkFrames::nativeMeasurement(frame, depth, metadata);
@@ -97,7 +103,10 @@ int runRvAssistRecoveryTests(const QString &path){
     QFile report(path);if(!report.open(QIODevice::WriteOnly|QIODevice::Text))return 3;
     QTextStream out(&report);bool all=true;
     const auto check=[&](const QString &name,bool ok){out<<name<<' '<<(ok?"PASS":"FAIL")<<Qt::endl;all&=ok;};
-    check("SDK_NATIVE_MEASUREMENT_RETAINS_CODES_QUALITY_AND_IDENTITY", sdkNativeMeasurementContract());
+    for (const auto mode : {CXWL_DEPTH_BOARD, CXWL_DEPTH_BOARD_HIGH_ACCURACY, CXWL_DEPTH_BOARD_8X8,
+                            CXWL_DEPTH_BOARD_8X8_HIGH_ACCURACY, CXWL_DEPTH_BOARD_16X16, CXWL_DEPTH_BOARD_16X16_HIGH_ACCURACY}) {
+        check(QString("SDK_MODE_%1_RETAINS_CODES_QUALITY_AND_IDENTITY").arg(int(mode)), sdkNativeMeasurementContract(mode));
+    }
     {
         const auto &view=RvCameraView::Portrait;
         const auto &cal=calibrationForFov(6);

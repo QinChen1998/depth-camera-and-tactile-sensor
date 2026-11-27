@@ -6,6 +6,8 @@
 // Shared by the board programs, SSH worker and desktop stream receiver.
 namespace RvCaptureContract {
 constexpr int NativeHd=14, Native48=24, Native48HighAccuracy=25;
+// Native grids reported by the Windows SDK.
+constexpr int Native8=30, Native8HighAccuracy=31, Native16=32, Native16HighAccuracy=33;
 constexpr int FreshMs=1000;
 // These LSG receipt fields are independent of the native measurement grid.
 constexpr int ReceiptWidth=256, ReceiptHeight=256;

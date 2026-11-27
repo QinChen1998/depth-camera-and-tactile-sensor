@@ -113,7 +113,7 @@ MeasurementCaptureDialog::MeasurementCaptureDialog(RvSessionController *session,
     connect(m_directory, &QLineEdit::textChanged, this, &MeasurementCaptureDialog::refresh);
     connect(m_session, &RvSessionController::tofFrameReady, this, &MeasurementCaptureDialog::acceptNative);
     connect(m_session, &RvSessionController::assistDepthSnapshotReady, this, &MeasurementCaptureDialog::acceptAssist);
-    connect(m_session, &RvSessionController::dtofCandidateSelectionChanged, this, &MeasurementCaptureDialog::checkRvSession);
+    connect(m_session, &RvSessionController::dtofCandidateSelectionChanged, this, [this] { checkRvSession(); refresh(); });
     connect(m_session, &RvSessionController::stateChanged, this, &MeasurementCaptureDialog::checkRvSession);
     connect(m_session, &RvSessionController::depthStreamCleared, this, [this] {
         if (m_job && m_rv && !m_assisted && m_bound)
@@ -152,7 +152,7 @@ void MeasurementCaptureDialog::stopRecording()
 
 void MeasurementCaptureDialog::startRecording()
 {
-    if (m_job)
+    if (m_job || (m_source->currentData() == "rv1103" && m_session->lowResolutionTofSelected()))
         return;
     const DepthMeasurement::Options options{m_directory->text().trimmed(), m_source->currentData().toString(),
                                             m_scene->text().trimmed(), m_duration->value(), m_distance->value()};
@@ -261,12 +261,15 @@ void MeasurementCaptureDialog::refresh()
                         static_cast<QWidget *>(m_distance), static_cast<QWidget *>(m_scene),
                         static_cast<QWidget *>(m_directory), static_cast<QWidget *>(m_browse)})
         field->setEnabled(!active);
-    m_start->setEnabled(!active && !m_directory->text().trimmed().isEmpty());
+    const bool rv = m_source->currentData() == "rv1103";
+    const bool requires48 = rv && m_session->lowResolutionTofSelected();
+    m_start->setEnabled(!active && !requires48 && !m_directory->text().trimmed().isEmpty());
     m_stop->setEnabled(active && !m_job->stopping.load());
     m_open->setEnabled(!active && !m_last.directory.isEmpty());
     m_directory->setToolTip(m_directory->text());
-    m_hint->setText(m_source->currentData() == "rv1103"
-        ? tr("Uses the imaging mode selected in Depth Map.")
+    m_hint->setText(rv
+        ? (requires48 ? tr("Select a 48×32 ToF scheme for RV1103 measurement recording.")
+                       : tr("Uses the imaging mode selected in Depth Map."))
         : tr("Records Gemini 335 native depth at 1280 × 800 and 15 FPS."));
     m_progress->setRange(0, m_seconds * 1000);
     const auto elapsedMs = active ? m_job->elapsedMs.load() : m_last.spanNs / 1'000'000;

@@ -1,4 +1,5 @@
 #include "SensorMainWindow.h"
+#include "AppEdition.h"
 #include "LanguageManager.h"
 #include "RenderingSettings.h"
 #include "TactileDockWidget.h"
@@ -86,11 +87,6 @@ SensorMainWindow::SensorMainWindow(LanguageManager *language, QWidget *parent)
             if (sdk->stopRevision() == revision) offerUsbSetup(status);
         });
     });
-    connect(sdk, &DepthSdkClient::usbStatusChanged, this, [this](const QJsonObject &status) {
-        if (!m_closing && !(m_devices && m_devices->operationPending())
-            && status["state"] == "enrolled" && status["rgb_lsc_offer"].toBool())
-            showDeviceManager()->offerUsbRgbLsc();
-    });
     connect(sdk, &DepthSdkClient::captureError, this, [this, sdk](const QString &reason, const QJsonObject &usb) {
         if (m_closing) return;
         if (reason == "usb_setup_failed")
@@ -127,21 +123,23 @@ SensorMainWindow::SensorMainWindow(LanguageManager *language, QWidget *parent)
     });
 
     m_file=menuBar()->addMenu(QString());m_file->setObjectName("fileMenu");
-    m_measurementAction = m_file->addAction(QString());
-    m_measurementAction->setObjectName("measurementCaptureAction");
-    connect(m_measurementAction, &QAction::triggered, this, [this] {
-        if (!m_measurement) {
-            m_measurement = new MeasurementCaptureDialog(m_session, this);
-            connect(m_measurement, &MeasurementCaptureDialog::recordingFinished, this, [this] {
-                if (m_closing)
-                    QTimer::singleShot(0, this, &QWidget::close);
-            });
-        }
-        m_measurement->show();
-        m_measurement->raise();
-        m_measurement->activateWindow();
-    });
-    m_file->addSeparator();
+    if (AppEdition::measurementCaptureEnabled()) {
+        m_measurementAction = m_file->addAction(QString());
+        m_measurementAction->setObjectName("measurementCaptureAction");
+        connect(m_measurementAction, &QAction::triggered, this, [this] {
+            if (!m_measurement) {
+                m_measurement = new MeasurementCaptureDialog(m_session, this);
+                connect(m_measurement, &MeasurementCaptureDialog::recordingFinished, this, [this] {
+                    if (m_closing)
+                        QTimer::singleShot(0, this, &QWidget::close);
+                });
+            }
+            m_measurement->show();
+            m_measurement->raise();
+            m_measurement->activateWindow();
+        });
+        m_file->addSeparator();
+    }
     m_exit=m_file->addAction(QString());connect(m_exit,&QAction::triggered,this,&QWidget::close);
     m_view=menuBar()->addMenu(QString());m_view->setObjectName("viewMenu");
     for(auto *dock:m_docks)m_view->addAction(dock->toggleViewAction());
@@ -195,7 +193,7 @@ void SensorMainWindow::showAbout()
     auto *logo = new QLabel(dialog);
     logo->setPixmap(windowIcon().pixmap(QSize(112, 112), dialog->devicePixelRatioF()));
     auto *name = new QLabel(QApplication::applicationDisplayName(), dialog);
-    auto *version = new QLabel(QStringLiteral("v%1 · 内测版").arg(QApplication::applicationVersion()), dialog);
+    auto *version = new QLabel(QStringLiteral("v%1 · %2").arg(QApplication::applicationVersion(), AppEdition::label()), dialog);
 
     auto *layout = new QVBoxLayout(dialog);
     layout->setContentsMargins(32, 24, 32, 24);
@@ -336,12 +334,12 @@ void SensorMainWindow::changeEvent(QEvent *event)
 
 void SensorMainWindow::retranslate()
 {
-    setWindowTitle(QApplication::applicationDisplayName() + QStringLiteral("（内测版）"));
+    setWindowTitle(QApplication::applicationDisplayName() + QStringLiteral("（%1）").arg(AppEdition::label()));
     m_tactile->setWindowTitle(tr("Magnetic tactile sensors"));m_depthDock->setWindowTitle(tr("Depth Map"));
     m_pointCloudDock->setWindowTitle(tr("Point Cloud"));
     m_cameraDock->setWindowTitle(tr("Camera raw video"));
     m_file->setTitle(tr("File"));m_exit->setText(tr("Exit"));m_view->setTitle(tr("View"));
-    m_measurementAction->setText(tr("Measurement Capture..."));
+    if (m_measurementAction) m_measurementAction->setText(tr("Measurement Capture..."));
     m_reset->setText(tr("Reset layout"));m_presets->setTitle(tr("Layout Presets"));
     m_savePreset->setText(tr("Save layout..."));m_deletePreset->setText(tr("Delete layout..."));
     m_settings->setTitle(tr("Settings"));m_deviceAction->setText(tr("Device Manager..."));

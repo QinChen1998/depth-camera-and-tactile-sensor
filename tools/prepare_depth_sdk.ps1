@@ -1,71 +1,86 @@
 param(
     [Parameter(Mandatory = $true)][string]$SdkRoot,
-    [string]$Archive = $env:DCTS_DEPTH_SDK_ZIP,
+    [string]$SourceDirectory = $env:DCTS_DEPTH_SDK_DIR,
     [string]$DeployDirectory = ''
 )
 
 $ErrorActionPreference = 'Stop'
-$package = 'CXWLDepthSDK-2.2.2-win64'
-$archiveHash = '306f30cefdcf0f289574d7a1361fa7bc041fd8d8ebba0148c5570dd6eed5ccab'
-$manifestHash = 'dae235c981fa63bc33b80c07dc8912dc945534ac2ea0af46dc97cb1265ac53ec'
+$package = 'Cxwl-Depth-Camera-SDK-v3.1.0-windows-x64'
+$manifestHash = 'a88713c5063b1083d9d9ce88dd525b2f8c5f66a69960f5a7e9708a5d2feca6ae'
+$SdkRoot = [IO.Path]::GetFullPath($SdkRoot)
 $manifestPath = Join-Path $SdkRoot 'sdk-manifest.json'
-
-if (!(Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
-    if (!$Archive) { $Archive = "F:/Work/CXWL Depth Camera SDK/release/$package.zip" }
-    if (!(Test-Path -LiteralPath $Archive -PathType Leaf)) {
-        throw "Set DCTS_DEPTH_SDK_ZIP to the Windows $package.zip release package."
-    }
-    if ((Get-FileHash -LiteralPath $Archive -Algorithm SHA256).Hash -ne $archiveHash) {
-        throw "The Windows depth SDK ZIP does not match the pinned $package release."
+$prepareLocalCopy = !(Test-Path -LiteralPath $manifestPath -PathType Leaf)
+$inputRoot = $SdkRoot
+if ($prepareLocalCopy) {
+    if (!$SourceDirectory) { throw "Set DCTS_DEPTH_SDK_DIR to the unpacked Windows $package package." }
+    $inputRoot = [IO.Path]::GetFullPath($SourceDirectory)
+    if (!(Test-Path -LiteralPath (Join-Path $inputRoot 'sdk-manifest.json') -PathType Leaf)) {
+        throw "Set DCTS_DEPTH_SDK_DIR to the unpacked Windows $package package."
     }
     if ((Split-Path $SdkRoot -Leaf) -ne $package) {
-        throw "An unpacked SDK root must contain sdk-manifest.json. An automatic extraction root must end in $package."
-    }
-    $SdkRoot = [IO.Path]::GetFullPath($SdkRoot)
-    $parent = Split-Path $SdkRoot -Parent
-    $temporary = Join-Path $parent ('.extract-' + [guid]::NewGuid().ToString('N'))
-    try {
-        Expand-Archive -LiteralPath $Archive -DestinationPath $temporary
-        try {
-            [IO.Directory]::Move((Join-Path $temporary $package), $SdkRoot)
-        } catch [IO.IOException] {
-            if (!(Test-Path -LiteralPath $manifestPath -PathType Leaf)) { throw }
-        }
-    } finally {
-        if (Test-Path -LiteralPath $temporary) {
-            $staged = Get-Item -LiteralPath $temporary -Force
-            if ($staged.FullName -ne $temporary -or ($staged.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
-                throw 'Unexpected SDK extraction directory.'
-            }
-            Remove-Item -LiteralPath $staged.FullName -Recurse -Force
-        }
+        throw "A local SDK preparation root must end in $package."
     }
 }
-if ((Get-FileHash -LiteralPath $manifestPath -Algorithm SHA256).Hash -ne $manifestHash) {
-    throw 'The unpacked Windows depth SDK manifest does not match version 2.2.2.'
+$inputManifest = Join-Path $inputRoot 'sdk-manifest.json'
+if ((Get-FileHash -LiteralPath $inputManifest -Algorithm SHA256).Hash -ne $manifestHash) {
+    throw "The unpacked Windows depth SDK manifest does not match $package."
 }
 
-$manifest = Get-Content -LiteralPath $manifestPath -Raw -Encoding UTF8 | ConvertFrom-Json
+$manifest = Get-Content -LiteralPath $inputManifest -Raw -Encoding UTF8 | ConvertFrom-Json
+if ($manifest.sdk_version -ne '3.1.0' -or $manifest.abi_version -ne 3 -or $manifest.platform -ne 'windows-x64') {
+    throw 'The SDK package is not Windows x64 3.1.0 / ABI v3.'
+}
 $ffmpegFiles = @('avcodec-61.dll', 'avformat-61.dll', 'avutil-59.dll', 'swresample-5.dll', 'swscale-8.dll')
 $appFiles = @('CxwlDepthSdk.dll') + $ffmpegFiles
 $sdkFiles = @('SDK/include/DepthSdk.h', 'SDK/include/DepthSdkVersion.h', 'SDK/lib/CxwlDepthSdk.lib')
 $sdkFiles += $appFiles | ForEach-Object { "SDK/bin/$_" }
-if ($DeployDirectory) {
+if ($prepareLocalCopy -or $DeployDirectory) {
     $sdkFiles += $manifest.sha256.PSObject.Properties.Name | Where-Object {
-        $_ -match '^(SDK/bin/(rv_control/|platform-tools/|runtime-paths\.json$)|Licenses/|LICENSE$)'
+        $_ -match '^(SDK/bin/(networkinformation/|tls/)|Licenses/|LICENSE$)'
     }
 }
 
 foreach ($relative in $sdkFiles) {
-    $source = Join-Path $SdkRoot $relative
+    $source = Join-Path $inputRoot $relative
     if (!(Test-Path -LiteralPath $source -PathType Leaf) -or
         (Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash -ne $manifest.sha256.$relative) {
         throw "SDK input is missing or has changed: $relative"
     }
 }
 
+if ($prepareLocalCopy) {
+    $parent = Split-Path $SdkRoot -Parent
+    $temporary = Join-Path $parent ('.stage-' + [guid]::NewGuid().ToString('N'))
+    try {
+        foreach ($relative in @('sdk-manifest.json') + $sdkFiles) {
+            $target = Join-Path $temporary $relative
+            New-Item -ItemType Directory -Force -Path (Split-Path $target -Parent) | Out-Null
+            Copy-Item -LiteralPath (Join-Path $inputRoot $relative) -Destination $target
+        }
+        try {
+            [IO.Directory]::Move($temporary, $SdkRoot)
+        } catch [IO.IOException] {
+            if (!(Test-Path -LiteralPath $manifestPath -PathType Leaf) -or
+                (Get-FileHash -LiteralPath $manifestPath -Algorithm SHA256).Hash -ne $manifestHash) { throw }
+        }
+    } finally {
+        if (Test-Path -LiteralPath $temporary) {
+            $staged = Get-Item -LiteralPath $temporary -Force
+            if ($staged.FullName -ne $temporary -or
+                !$staged.FullName.StartsWith($parent + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase) -or
+                ($staged.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+                throw 'Unexpected SDK staging directory.'
+            }
+            Remove-Item -LiteralPath $staged.FullName -Recurse -Force
+        }
+    }
+}
+
 if ($DeployDirectory) {
     New-Item -ItemType Directory -Force -Path $DeployDirectory | Out-Null
+    $sdkRuntime = Join-Path $DeployDirectory 'cxwl-depth-sdk'
+    New-Item -ItemType Directory -Force -Path $sdkRuntime | Out-Null
+    Copy-Item -LiteralPath $manifestPath -Destination $sdkRuntime -Force
     foreach ($relative in $sdkFiles) {
         $source = Join-Path $SdkRoot $relative
         $name = Split-Path $relative -Leaf
@@ -73,11 +88,13 @@ if ($DeployDirectory) {
             Copy-Item -LiteralPath $source -Destination (Join-Path $DeployDirectory $name) -Force
             if ($ffmpegFiles -notcontains $name) { continue }
         }
-        $target = if ($relative.StartsWith('SDK/bin/')) {
-            # The SDK loads FFmpeg by absolute path inside its runtime directory.
-            Join-Path $DeployDirectory ('cxwl-depth-sdk/' + $relative.Substring('SDK/bin/'.Length))
+        $target = if ($relative -match '^SDK/bin/(networkinformation|tls)/') {
+            Join-Path $DeployDirectory $relative.Substring('SDK/bin/'.Length)
+        } elseif ($relative.StartsWith('SDK/bin/')) {
+            # The SDK resolves FFmpeg relative to the directory passed to the API.
+            Join-Path $sdkRuntime $relative.Substring('SDK/bin/'.Length)
         } elseif ($relative.StartsWith('Licenses/') -or $relative -eq 'LICENSE') {
-            Join-Path $DeployDirectory ('cxwl-depth-sdk/' + $relative)
+            Join-Path $sdkRuntime $relative
         } else { continue }
         New-Item -ItemType Directory -Force -Path (Split-Path $target -Parent) | Out-Null
         Copy-Item -LiteralPath $source -Destination $target -Force

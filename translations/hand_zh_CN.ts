@@ -719,6 +719,9 @@
     <message><source>Select how the depth map is generated.</source><translation>选择深度图的生成方式。</translation></message>
     <message><source>Board inference</source><translation>板端推理</translation></message>
     <message><source>Board inference high accuracy</source><translation>板端推理高精度</translation></message>
+    <message><source>%1×%1 ToF standard</source><translation>原生 ToF %1×%1 普通</translation></message>
+    <message><source>%1×%1 ToF high accuracy</source><translation>原生 ToF %1×%1 高精度</translation></message>
+    <message><source>Native %1×%1 ToF radial depth and RGB video.</source><translation>原生 %1×%1 ToF 径向深度和 RGB 原视频。</translation></message>
     <message><source>Depth Pro 2-S uses 480×640 RGB and the latest eligible ToF measurement.</source><translation>Depth Pro 2-S 使用 480×640 RGB 和最新的合格 ToF 测量。</translation></message>
   </context>
   <context>
@@ -1250,6 +1253,8 @@ Projected camera-Z %8 m</source>
   </context>
   <context>
     <name>RvSessionController</name>
+    <message><source>Waiting for native ToF depth...</source><translation>正在等待原生 ToF 深度…</translation></message>
+    <message><source>Native %1×%1 ToF depth</source><translation>原生 %1×%1 ToF 深度</translation></message>
     <message><source>The sensor did not confirm 1200K main integration.</source><translation>传感器未确认主积分为 1200K。</translation></message>
     <message><source>Waiting for a new G correction frame...</source><translation>正在等待切换后的 G 校正帧…</translation></message>
     <message><source>Native ToF depth expired</source><translation>原生 ToF 深度已过期</translation></message>
@@ -1510,8 +1515,8 @@ Projected camera-Z %8 m</source>
       <translation>H.265 视频与上位机推理</translation>
     </message>
     <message>
-      <source>H.265 video and native 48x32 ToF</source>
-      <translation>H.265 视频与 48×32 原生 ToF</translation>
+      <source>H.265 video and native %1×%2 ToF</source>
+      <translation>H.265 视频与 %1×%2 原生 ToF</translation>
     </message>
     <message>
       <source>RV1103 | %1 | %2×%3 | compute %4 ms</source>
@@ -3450,6 +3455,7 @@ Range %6 mm (radial) | SNR %7 | slot %8 | Signal %9 | Noise encoded %10</source>
       <source>Uses the imaging mode selected in Depth Map.</source>
       <translation>录制深度图中选定的 RV1103 成像模式。</translation>
     </message>
+    <message><source>Select a 48×32 ToF scheme for RV1103 measurement recording.</source><translation>录制 RV1103 测量数据时，请选择使用 48×32 ToF 的成像档位。</translation></message>
     <message>
       <source>Records Gemini 335 native depth at 1280 × 800 and 15 FPS.</source>
       <translation>录制 Gemini 335 的 1280×800、15 FPS 原生深度。</translation>

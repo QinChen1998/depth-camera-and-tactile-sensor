@@ -1,4 +1,5 @@
 #include "RvSessionController.h"
+#include "../AppEdition.h"
 #include "DepthSdkClient.h"
 #include "RvAssistDepth.h"
 #include "RvAssistFusion.h"
@@ -8,10 +9,6 @@
 #include <QSettings>
 #include <cmath>
 #include <limits>
-#ifdef Q_OS_WIN
-#include <qt_windows.h>
-#include <wincred.h>
-#endif
 
 namespace {
 bool sdkGeneration(const QString &value)
@@ -22,29 +19,7 @@ bool sdkGeneration(const QString &value)
 
 QString orientationKey(const RvDeviceProfile &device)
 {
-    return "depth/sdkInputRotation/" + device.fingerprint();
-}
-
-void migrateCredential(const RvDeviceProfile &device)
-{
-#ifdef Q_OS_WIN
-    const auto oldTarget = device.credentialTarget().toStdWString();
-    auto newTarget = ("CXWL Depth Camera/" + device.serial + "/" + device.fingerprint().mid(7)
-                      + "/" + device.username).toStdWString();
-    PCREDENTIALW entry = nullptr;
-    if (CredReadW(newTarget.c_str(), CRED_TYPE_GENERIC, 0, &entry)) {
-        CredFree(entry);
-        return;
-    }
-    if (!CredReadW(oldTarget.c_str(), CRED_TYPE_GENERIC, 0, &entry)) return;
-    CREDENTIALW migrated = *entry;
-    migrated.TargetName = newTarget.data();
-    CredWriteW(&migrated, 0);
-    if (entry->CredentialBlob) SecureZeroMemory(entry->CredentialBlob, entry->CredentialBlobSize);
-    CredFree(entry);
-#else
-    Q_UNUSED(device);
-#endif
+    return "depth/sdkUsbInputRotation/" + device.serial;
 }
 
 struct SdkPair {
@@ -103,8 +78,10 @@ void RvSessionController::initializeDepthSdk()
             QSettings settings;
             for (const auto &profile : store.profiles()) {
                 const auto key = orientationKey(profile);
-                if (!settings.contains(key)) settings.setValue(key, effectiveHostInputRotation(profile));
-                migrateCredential(profile);
+                if (!settings.contains(key)) {
+                    const auto previous = "depth/sdkInputRotation/" + profile.fingerprint();
+                    settings.setValue(key, settings.value(previous, effectiveHostInputRotation(profile)));
+                }
             }
             settings.sync();
         } catch (const std::exception &ex) {
@@ -112,8 +89,7 @@ void RvSessionController::initializeDepthSdk()
         }
     }
     m_sdk = new DepthSdkClient(m_deviceStorePath, this);
-    m_sdk->setMode(m_dtofMode == RvDtofCandidates::Native48HighAccuracy
-        ? CXWL_DEPTH_BOARD_HIGH_ACCURACY : CXWL_DEPTH_BOARD);
+    if (const auto mode = RvDtofCandidates::sdkMode(m_dtofMode)) m_sdk->setMode(mode);
     connect(m_sdk, &DepthSdkClient::deviceChanged, this, &RvSessionController::loadSdkDevice);
     connect(m_sdk, &DepthSdkClient::stateChanged, this, &RvSessionController::updateSdkState);
     connect(m_sdk, &DepthSdkClient::depthFrameReady, this, &RvSessionController::acceptSdkDepth);
@@ -145,7 +121,13 @@ void RvSessionController::loadSdkDevice()
         if (m_device.json() == active.json() && m_assist->inputRotationDegrees() == active.inputRotation) return;
         resetSdkPresentation(tr("Device changed"));
         m_device = std::move(active);
-        m_streamUrl = m_device.streamUrl(true);
+        QUrl direct;
+        if (!m_device.serviceInstance.isEmpty()) {
+            direct.setScheme(QStringLiteral("cx2"));
+            direct.setHost(m_device.host);
+            direct.setPort(8943);
+        }
+        m_streamUrl = direct.toString();
         if (!m_device.id.isEmpty()) m_assist->setInputRotationDegrees(m_device.inputRotation);
         emit deviceChanged();
         emit configurationChanged();
@@ -157,7 +139,7 @@ void RvSessionController::loadSdkDevice()
 
 void RvSessionController::setSdkInputRotation(int degrees)
 {
-    if (!usesDepthSdk() || m_device.id.isEmpty() || !userStopped() || busy()
+    if (AppEdition::Customer || !usesDepthSdk() || m_device.id.isEmpty() || !userStopped() || busy()
         || (degrees != 0 && degrees != 180)) return;
     QSettings().setValue(orientationKey(m_device), degrees);
     loadSdkDevice();
@@ -181,9 +163,10 @@ void RvSessionController::updateSdkState()
     } else if (m_sdk->stopping()) setState(tr("Stopping"), m_sdk->captureStatusText());
     else if (m_userStopped) setState(tr("Stopped"), tr("Camera is not started"));
     else if (m_sdk->recovering()) setState(tr("Connecting"), tr("Recovering the SDK capture session..."));
-    else if (status == DepthSdkClient::CaptureStatus::Running)
-        setState(tr("Playing"), tr("H.265 video and native 48x32 ToF"));
-    else setState(tr("Connecting"), m_sdk->captureStatusText());
+    else if (status == DepthSdkClient::CaptureStatus::Running) {
+        const auto grid = RvDtofCandidates::nativeDepthGrid(m_dtofMode);
+        setState(tr("Playing"), tr("H.265 video and native %1×%2 ToF").arg(grid.width()).arg(grid.height()));
+    } else setState(tr("Connecting"), m_sdk->captureStatusText());
     updateState();
 }
 
@@ -199,7 +182,8 @@ void RvSessionController::resetSdkPresentation(const QString &reason)
 
 bool RvSessionController::acceptSdkIdentity(const QString &generation, quint64 epoch)
 {
-    if (!usesDepthSdk() || m_userStopped || m_sdk->stopping() || !sdkGeneration(generation)) return false;
+    if (!usesDepthSdk() || m_userStopped || m_sdk->stopping()
+        || !sdkGeneration(generation)) return false;
     if (m_sdkGeneration != generation || m_sdkEpoch != epoch) {
         resetSdkPresentation(tr("Waiting for the current SDK capture generation..."));
         m_sdkGeneration = generation;
@@ -212,8 +196,11 @@ bool RvSessionController::acceptSdkIdentity(const QString &generation, quint64 e
 void RvSessionController::acceptSdkDepth(const QByteArray &depth, QJsonObject metadata, const RvTofFrame &native)
 {
     const auto generation = metadata["source_generation"].toString();
-    if (metadata["candidate_mode"] != m_dtofMode || metadata["width"] != 48 || metadata["height"] != 32
-        || metadata["dtof_fov_correction"] != RvCalibration::Fov || depth.size() != 48 * 32 * 4
+    const auto grid = RvDtofCandidates::nativeDepthGrid(m_dtofMode);
+    if (grid.isEmpty() || metadata["candidate_mode"] != m_dtofMode
+        || metadata["width"] != grid.width() || metadata["height"] != grid.height()
+        || metadata["sensor_mode"] != RvDtofCandidates::nativeSensorMode(m_dtofMode)
+        || metadata["dtof_fov_correction"] != RvCalibration::Fov || depth.size() != grid.width() * grid.height() * 4
         || !acceptSdkIdentity(generation, quint64(metadata["generation"].toInteger()))) return;
     const auto boot = metadata["boot_id"].toString();
     if (boot.isEmpty() || (!m_sdkBoot.isEmpty() && boot != m_sdkBoot)) return;
@@ -255,6 +242,7 @@ void RvSessionController::acceptSdkVideo(const QImage &image, quint64 sequence, 
     const auto model = assistHostModel();
     const auto &view = RvCameraView::profile(model);
     QJsonObject source{{"source_protocol", "HDA1"}, {"source_transport", "cxwl_depth_sdk"},
+        {"sdk_version", CXWL_DEPTH_VERSION}, {"device_transport", "cx2_usb"},
         {"source_rgb_width", image.width()}, {"source_rgb_height", image.height()},
         {"rgb_width", view.inputWidth}, {"rgb_height", view.inputHeight}, {"model", "Native"},
         {"camera_coordinate_frame", "calibrated_reference"}, {"camera_mount_rotation_degrees", m_device.cameraMountRotation},

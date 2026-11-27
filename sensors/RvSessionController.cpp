@@ -1,4 +1,5 @@
 #include "RvSessionController.h"
+#include "../AppEdition.h"
 #include "DepthSdkClient.h"
 #include "RvTunerController.h"
 #include "../RuntimeDiscovery.h"
@@ -353,15 +354,21 @@ RvSessionController::RvSessionController(QObject *parent,const QString &deviceSt
     m_streamUrl = m_device.streamUrl();
     // Retired persisted model names never re-enable old inference.
     m_config.model = QStringLiteral("Native");
-    const auto *preset=nativeDepthPreset(settings.value("depth/imagingScheme").toString());
-    settings.setValue("depth/imagingScheme", QLatin1String(preset ? preset->id : HostAssistImagingScheme));
-    if (!preset && !hostInferencePreflightError().isEmpty())
+    auto storedScheme = settings.value("depth/imagingScheme").toString();
+    if (const auto *migration = nativeDepthPreset(storedScheme))
+        storedScheme = QLatin1String(migration->id);
+    if (!AppEdition::imagingSchemes().contains(storedScheme))
+        storedScheme = AppEdition::imagingSchemes().constFirst();
+    settings.setValue("depth/imagingScheme", storedScheme);
+    const auto *preset=nativeDepthPreset(storedScheme);
+    const auto *sensorPreset=RvDtofCandidates::sensorDepthPreset(storedScheme);
+    if (!sensorPreset && !preset && !hostInferencePreflightError().isEmpty())
         preset = &NativeDepthPresets[0];
     for(const auto *key:{"depth/hostModel","depth/uniDepthExperiment","depth/boardLiteSrHostContourEnabled",
                          "depth/boardLiteSrHostHoleMode","depth/boardLiteSrHostOutliers"})settings.remove(key);
     m_config.cameraWidth=2304;
-    m_hostAssistSelected=!preset;
-    m_dtofMode=preset?preset->mode:RvDtofCandidates::Native48;
+    m_hostAssistSelected=!AppEdition::Customer&&!sensorPreset&&!preset;
+    m_dtofMode=sensorPreset?sensorPreset->mode:preset?preset->mode:RvDtofCandidates::Native48;
     m_native48ExtendedIntegration=preset!=nullptr;
     m_dtofOptions=nativeCaptureOptions(m_dtofSettings);
 
@@ -817,7 +824,7 @@ void RvSessionController::setAssistDepthEnabled(bool enabled)
 
 bool RvSessionController::setDtofCandidate(int mode,const RvDtofCandidates::Settings& settings)
 {
-    if(m_imagingSwitchActive)return false;
+    if(AppEdition::Customer||m_imagingSwitchActive)return false;
     return applyDtofCandidate(mode,settings);
 }
 
@@ -835,14 +842,13 @@ bool RvSessionController::applyDtofCandidate(int mode,const RvDtofCandidates::Se
     m_hostAssistSelected=false;
     setAssistDepthEnabled(false);
     emit dtofCandidateSelectionChanged();
-    if(!m_userStopped)submitConfiguration(m_config,true,true);
-    else{emit configurationChanged();}
+    emit configurationChanged();
     return true;
 }
 
 void RvSessionController::setDepthModel(const QString &model)
 {
-    if (m_destroying || busy() || m_imagingSwitchActive) return;
+    if (AppEdition::Customer || m_destroying || busy() || m_imagingSwitchActive) return;
     Configuration candidate = m_config;
     if (candidate.model != model) {
         candidate.depthWidth = 144; candidate.location = "none"; candidate.method = "none";
@@ -858,16 +864,17 @@ void RvSessionController::setDepthModel(const QString &model)
     const bool freshSameModel = model == m_config.model && !m_userStopped && (m_nv12 || m_managedRtsp)
         && m_lastFrameClock.isValid() && m_lastFrameClock.elapsed() <= 3000 && property("rvModel").toString() == model;
     if (freshSameModel) { emit configurationChanged(); return; }
-    submitConfiguration(candidate, false, true);
+    rejectConfiguration();
 }
 
 bool RvSessionController::selectNativeDepth(const char *scheme, int mode, const RvDtofCandidates::Settings &settings,
                                           bool rememberSelection)
 {
-    const bool alreadySelected = m_dtofMode == mode && !m_hostAssistSelected && m_native48ExtendedIntegration;
+    const bool extendedIntegration = mode == RvDtofCandidates::Native48 || mode == RvDtofCandidates::Native48HighAccuracy;
+    const bool alreadySelected = m_dtofMode == mode && !m_hostAssistSelected
+        && m_native48ExtendedIntegration == extendedIntegration;
     const bool sdk = usesDepthSdk();
-    if (!alreadySelected && sdk && !m_sdk->setMode(mode == RvDtofCandidates::Native48HighAccuracy
-        ? CXWL_DEPTH_BOARD_HIGH_ACCURACY : CXWL_DEPTH_BOARD)) {
+    if (!alreadySelected && m_sdk && !m_sdk->setMode(RvDtofCandidates::sdkMode(mode))) {
         emit configurationChanged();
         return false;
     }
@@ -882,13 +889,13 @@ bool RvSessionController::selectNativeDepth(const char *scheme, int mode, const 
     m_dtofOptions = nativeCaptureOptions(settings);
     m_dtofSettings = settings;
     m_dtofReceipt = {};
-    m_native48ExtendedIntegration = true;
+    m_native48ExtendedIntegration = extendedIntegration;
     m_config = withCameraWidth(2304);
-    m_streamUrl = m_device.streamUrl();
+    if (!sdk) m_streamUrl = m_device.streamUrl();
     emit dtofCandidateSelectionChanged();
     if (sdk) resetSdkPresentation(tr("Waiting for SDK depth frames..."));
-    if (!sdk && !m_userStopped) submitConfiguration(m_config, true, true);
-    else { emit configurationChanged(); updateState(); }
+    emit configurationChanged();
+    updateState();
     return true;
 }
 
@@ -901,8 +908,15 @@ bool RvSessionController::fallBackToBoardDepth()
 void RvSessionController::selectImagingScheme(const QString& scheme,const RvDtofCandidates::Settings& settings)
 {
     const auto *preset=nativeDepthPreset(scheme);
-    if(!preset&&scheme!=QLatin1String(HostAssistImagingScheme))return;
+    const auto *sensorPreset=RvDtofCandidates::sensorDepthPreset(scheme);
+    const auto canonical = preset ? QString(QLatin1String(preset->id)) : scheme;
+    if (!AppEdition::imagingSchemes().contains(canonical)
+        || (!sensorPreset && !preset && (AppEdition::Customer || scheme != QLatin1String(HostAssistImagingScheme)))) return;
     if(m_destroying||busy()||automaticConnecting()||m_imagingSwitchActive||!controlledSource())return;
+    if (sensorPreset) {
+        selectNativeDepth(sensorPreset->id, sensorPreset->mode, settings, true);
+        return;
+    }
     if(preset){
         selectNativeDepth(preset->id, preset->mode, settings, true);
         return;
@@ -917,7 +931,7 @@ void RvSessionController::selectImagingScheme(const QString& scheme,const RvDtof
 
     const bool sdk = usesDepthSdk();
     const bool boardRestart = !sdk || m_dtofMode != RvDtofCandidates::Native48;
-    if (sdk && !m_sdk->setMode(CXWL_DEPTH_BOARD)) {
+    if (m_sdk && !m_sdk->setMode(CXWL_DEPTH_BOARD)) {
         emit configurationChanged();
         return;
     }
@@ -930,16 +944,13 @@ void RvSessionController::selectImagingScheme(const QString& scheme,const RvDtof
     m_dtofSettings = settings;
     m_dtofReceipt = {};
     m_config = withCameraWidth(2304);
-    m_streamUrl = m_device.streamUrl();
+    if (!sdk) m_streamUrl = m_device.streamUrl();
     m_assist->setEnabled(false);
     m_assist->setEnabled(true);
     if (sdk) resetSdkPresentation(tr("Waiting for the selected host depth frames..."));
     emit dtofCandidateSelectionChanged();
-    if (!sdk && !m_userStopped) submitConfiguration(m_config, true, true);
-    else {
-        emit configurationChanged();
-        updateState();
-    }
+    emit configurationChanged();
+    updateState();
 }
 
 QString RvSessionController::currentImagingScheme() const
@@ -1000,7 +1011,7 @@ void RvSessionController::setDepthWidth(int width)
 {
     if (m_destroying || busy() || m_imagingSwitchActive) return;
     if (!canSelectDepthWidth(width)) { rejectConfiguration(); return; }
-    submitConfiguration(withDepthWidth(width), false, false);
+    rejectConfiguration();
 }
 
 void RvSessionController::setDepthLocation(const QString &location)
@@ -1008,7 +1019,7 @@ void RvSessionController::setDepthLocation(const QString &location)
     if (m_destroying || busy() || m_imagingSwitchActive) return;
     if (!canSelectDepthLocation(location)) { rejectConfiguration(); return; }
     Configuration candidate = m_config; candidate.location = location;
-    submitConfiguration(candidate, false, false);
+    rejectConfiguration();
 }
 
 void RvSessionController::setDepthMethod(const QString &method)
@@ -1016,7 +1027,7 @@ void RvSessionController::setDepthMethod(const QString &method)
     if (m_destroying || busy() || m_imagingSwitchActive) return;
     if (!canSelectDepthMethod(method)) { rejectConfiguration(); return; }
     Configuration candidate = m_config; candidate.method = method;
-    submitConfiguration(candidate, false, false);
+    rejectConfiguration();
 }
 
 void RvSessionController::rejectConfiguration()
@@ -1039,111 +1050,7 @@ void RvSessionController::setDepthConfiguration(int width, const QString &locati
         rejectConfiguration();
         return;
     }
-    submitConfiguration(candidate, false, false);
-}
-
-void RvSessionController::submitConfiguration(const Configuration &candidate, bool previewChange, bool modelChange,
-                                            bool startAfter, bool reconnecting, bool automatic,const QString &expectedBoot)
-{
-    if (busy() || m_previewControl->state() != QProcess::NotRunning) return;
-    const bool recoveringCandidate=reconnecting&&m_dtofMode>=0;
-    const auto priorOwner=m_captureOwner;
-    if(recoveringCandidate&&(priorOwner["owner_generation"].toString().isEmpty()||priorOwner["owner_boot"].toString().isEmpty())){
-        failPreviewControl(tr("The previous board capture identity is unavailable. Reconnect from Device Manager."));
-        return;
-    }
-    if (!validConfiguration(candidate)) { rejectConfiguration(); return; }
-    const QUrl address(m_streamUrl.trimmed());
-    if (!isControlledSource(address,m_device.host)) { rejectConfiguration(); return; }
-    const auto worker = RuntimeDiscovery::rvControlForLaunch();
-    if (!worker.ok()) { failPreviewControl(worker.error); return; }
-    const QString root = QFileInfo(worker.executable).absolutePath();
-    if (candidate.cameraWidth==2304&&!prepareManagedVlc()) {
-        failPreviewControl(tr("VLC 3 with H.265 support is required for the managed camera")); return;
-    }
-    m_transitioning = true;
-    const auto transition = qScopeGuard([this] { m_transitioning = false; updateState(); });
-    m_config = candidate;
-    if(candidate.cameraWidth!=576&&candidate.cameraWidth!=2304)setAssistDepthEnabled(false);
-    m_depthConfigError.clear();
-    if (startAfter) m_userStopped = false;
-    if (!reconnecting) { m_reconnectAttempt = 0; m_nextReconnectDelayMs = 1000; m_lastReconnectReason.clear(); m_recoveryDisplayTimer.stop(); }
-    m_controlPending = true; m_waitingForSelectedFrame = false; m_controlTimedOut = false;
-    const bool expectsReception=startAfter||reconnecting||!m_userStopped;
-    const auto receptionAuthorized = [this, expectsReception] {
-        if(m_controlPending&&(!expectsReception||!m_userStopped))return true;
-        // Stop arrived in a synchronous notification before a retry command
-        // was launched. Revoke this local transaction without touching board.
-        m_controlPending = false;
-        m_controlTimeout.stop(); m_switchFrameTimeout.stop();
-        m_waitingForSelectedFrame = false;
-        m_expectedDepthMetadata = {}; m_expectedCameraStatus = {};
-        setProperty("rvMode", "stopped");
-        setState(tr("Stopped"), tr("Camera is not started"));
-        return false;
-    };
-    if(startAfter&&!reconnecting&&assistDepthEnabled()&&m_assist->failed()){
-        m_assist->setEnabled(false);m_assist->setEnabled(true);
-    }
-    if(startAfter&&!automatic&&!m_imagingSwitchActive&&hostHdAssist()&&assistDepthEnabled())
-        beginImagingSwitch(currentImagingScheme(),true);
-    if(!receptionAuthorized())return;
-    // Revoke old callbacks immediately, but keep the old LSG2 receiver polling
-    // until the coordinator has stopped its owner. Disconnecting first races
-    // the board's normal session cleanup against the next candidate command.
-    m_reconnectTimer.stop(); stopVlc(true); m_player->stop(); m_player->setSource(QUrl());
-    if (!receptionAuthorized()) return;
-    m_expectedDepthMetadata = QJsonObject(); m_expectedCameraStatus = QJsonObject(); m_switchFrameTimeout.stop();
-    m_requestedModel = modelChange ? candidate.model : QString();
-    m_requestedPreviewWidth = previewChange ? candidate.cameraWidth : 0;
-    m_requestedDepthWidth = candidate.depthWidth; m_requestedLocation = candidate.location; m_requestedMethod = candidate.method;
-    emit configurationChanged();
-    if (!receptionAuthorized()) return;
-    updateState();
-    if (!receptionAuthorized()) return;
-    emit streamCleared();
-    if (!receptionAuthorized()) return;
-    const auto connectingDetail = automatic ? tr("Starting camera and depth capture...")
-        : reconnecting ? tr("Automatically restoring camera and depth...") : tr("Switching work mode...");
-    setProperty("rvMode", "switching"); emit depthStreamCleared(connectingDetail);
-    if (!receptionAuthorized()) return;
-    setState(tr("Connecting"), connectingDetail);
-    if (!receptionAuthorized()) return;
-    QStringList args = {QString::number(candidate.cameraWidth), "--host", address.host(),
-        "--depth-width", QString::number(candidate.depthWidth), "--location", candidate.location, "--method", candidate.method};
-    if (!previewChange) args.append("--keep-preview");
-    if (modelChange) { args.append("--model"); args.append(candidate.model); }
-    if(m_dtofMode>=0){
-        m_dtofToken=QUuid::createUuid().toString(QUuid::Id128);m_dtofReceipt={};
-        args={"--dtof",QString::number(m_dtofMode),m_dtofToken,m_dtofOptions};
-        if(hostHdAssist())args<<"--host-model"<<assistHostModel();
-        if(m_native48ExtendedIntegration)args<<"--native48-1200k";
-    }
-    // Explicit Start may recover any fault after ownership checks. Background
-    // recovery must pass the board's structural-fault classifier and rate cap.
-    if (automatic) {
-        args.append("--automatic-start");
-        if(!expectedBoot.isEmpty())args<<"--expected-boot"<<expectedBoot;
-    }
-    else if (startAfter && !reconnecting) args.append("--recover-fault");
-    else if (reconnecting) {
-        args.append("--recover-stream-fault");
-        if(recoveringCandidate)args<<"--expected-boot"<<priorOwner["owner_boot"].toString()
-            <<"--previous-generation"<<priorOwner["owner_generation"].toString();
-    }
-    try {
-        RvDeviceStore store(m_deviceStorePath);const auto selected=store.byId(m_device.id);
-        if(recoveringCandidate&&(store.revision()!=m_deviceRevision||selected.json()!=m_device.json()))
-            throw std::runtime_error("Device registry or trusted profile changed before stream recovery");
-        if(!m_deviceError.isEmpty() || !selected.ready())throw std::runtime_error("Select a configured trusted device in Settings > Device Manager");
-        m_device=selected;m_deviceRevision=store.revision();
-        args<<"--device-store"<<m_deviceStorePath<<"--device-revision"<<m_deviceRevision<<"--device-id"<<m_device.id;
-    }catch(const std::exception &e){failPreviewControl(QString::fromUtf8(e.what()));return;}
-    m_previewControl->setProcessEnvironment(RuntimeDiscovery::nativeWorkerEnvironment(worker.executable));
-    m_previewControl->setWorkingDirectory(root);
-    m_previewControl->setProgram(worker.executable); m_previewControl->setArguments(args);
-    if (!receptionAuthorized()) return;
-    m_previewControl->start(); m_controlTimeout.start();
+    rejectConfiguration();
 }
 
 void RvSessionController::setConfiguration(int cameraWidth, const QString &model, int depthWidth,
@@ -1157,7 +1064,7 @@ void RvSessionController::setConfiguration(int cameraWidth, const QString &model
     candidate.location = location;
     candidate.method = method;
     if (!controlledSource() || !validConfiguration(candidate)) { rejectConfiguration(); return; }
-    submitConfiguration(candidate, true, true);
+    rejectConfiguration();
 }
 
 void RvSessionController::syncConfiguration(const QJsonObject &metadata)
@@ -1238,7 +1145,8 @@ void RvSessionController::start()
         if (stopRevision == m_stopRevision) m_sdk->start();
         return;
     }
-    if (!automaticConnecting()) startImaging(false);
+    if (qEnvironmentVariable("RV_TEST_OFFLINE_ONLY") == "1"
+        && !lowResolutionTofSelected() && !automaticConnecting()) startImaging();
 }
 
 void RvSessionController::setAutomaticConnectionStage(AutomaticConnectionStage stage)
@@ -1255,17 +1163,9 @@ bool RvSessionController::automaticStartAllowed(const QString &deviceId) const
         && m_autoStartAttemptedDevice!=deviceId;
 }
 
-void RvSessionController::startAutomatically(bool verifiedUsbAttachment,const QString &expectedBoot)
+void RvSessionController::startAutomatically(bool, const QString &)
 {
-    if (usesDepthSdk()) { start(); return; }
-    if (qEnvironmentVariable("RV_TEST_OFFLINE_ONLY") == "1" || !m_userStopped || busy()
-        || m_dtofMode < 0 || !controlledSource() || !m_device.ready()
-        || (!verifiedUsbAttachment && m_autoStartAttemptedDevice == m_device.id)) return;
-    const auto revision = m_stopRevision;
-    setAutomaticConnectionStage(AutomaticConnectionStage::StartingCapture);
-    if (revision != m_stopRevision) return;
-    startImaging(true,expectedBoot);
-    if (m_userStopped) setAutomaticConnectionStage(AutomaticConnectionStage::Idle);
+    if (usesDepthSdk()) start();
 }
 
 void RvSessionController::deviceUnreachable(const QString &deviceId)
@@ -1273,11 +1173,11 @@ void RvSessionController::deviceUnreachable(const QString &deviceId)
     if (m_autoStartAttemptedDevice == deviceId) m_autoStartAttemptedDevice.clear();
 }
 
-void RvSessionController::startImaging(bool automatic,const QString &expectedBoot)
+void RvSessionController::startImaging()
 {
     if (m_destroying) return;
     if (m_device.id.isEmpty() && m_deviceError.isEmpty()) {
-        if (!automatic) setState(tr("Stopped"),tr("Connect a device using USB one-click connection in Device Manager."));
+        setState(tr("Stopped"),tr("Connect a device using USB one-click connection in Device Manager."));
         return;
     }
     if(m_tunerExclusive){setState(tr("dToF Parameter Tuning"),tr("RV1103 is owned by dToF tuning. Stop it before starting shared imaging."));return;}
@@ -1297,11 +1197,8 @@ void RvSessionController::startImaging(bool automatic,const QString &expectedBoo
         setState(tr("Error"), tr("Enter a valid nv12:// or rtsp:// address"));
         return;
     }
-    // Start re-confirms the selected board mode, including an app restart whose
-    // saved address is RTSP while the board has rebooted into default fusion.
-    if(isControlledSource(source,m_device.host)){
-        m_autoStartAttemptedDevice = m_device.id;
-        submitConfiguration(m_config,true,true,true,false,automatic,expectedBoot);
+    if (isControlledSource(source,m_device.host)) {
+        failPreviewControl(tr("USB connection is unavailable in offline mode."));
         return;
     }
     m_expectedDepthMetadata=QJsonObject();m_expectedCameraStatus=QJsonObject();
@@ -1356,12 +1253,8 @@ void RvSessionController::reconnectNow()
 
 void RvSessionController::retryConnection()
 {
-    if (m_destroying || m_userStopped || busy()) return;
-    // Re-confirm every managed reconnect. The coordinator permits only a
-    // classified stream fault to reset, after clean exit and within its budget;
-    // a new boot/generation cannot reuse an old receipt or frame counter.
-    if (controlledSource()) submitConfiguration(m_config, true, true, false, true);
-    else beginConnection(false);
+    if (!usesDepthSdk() && !m_destroying && !m_userStopped && !busy() && !controlledSource())
+        beginConnection(false);
 }
 
 void RvSessionController::beginConnection(bool resetAttempts)

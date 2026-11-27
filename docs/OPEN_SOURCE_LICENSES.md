@@ -5,23 +5,21 @@ This project retains the provenance and license material belonging to its sensor
 | Component | Local material |
 |---|---|
 | Depth Pro 2-S local research runtime | `DepthPro2Runtime/Apple-Model-LICENSE.txt` and `runtime.json`. The runtime contains the local TensorRT plan and NVIDIA runtime libraries. |
-| Native RV worker, libssh2 and OpenSSL | `tools/rv_control/upstream.lock.json`, `x64/rv_control/<Configuration>/runtime/licenses/`, `implementation.json` |
+| Historical native RV worker, libssh2 and OpenSSL | `tools/rv_control/upstream.lock.json`, `x64/rv_control/<Configuration>/runtime/licenses/`, `implementation.json` |
 | dToF tuner payload | `tools/dtof_tuner/payload/LICENSE-MIT.TXT`, `provenance.json`; the same files are hashed in the deployed worker manifest |
-| VideoLAN VLC 3 managed RTSP/H.265 runtime | Installed `licenses/VLC/` contains the license, authors and matching release source location |
 | FFmpeg 7.1.3 headers and provenance | `third_party/ffmpeg_7_1_3/` |
 | Qt 6.11.1 Widgets, multimedia and serial runtime | `windeployqt` collects the required DLLs and plugins. The installer includes the corresponding notices and SBOM files. |
-| CXWL Depth Camera SDK for Windows x64, 2.2.2 | The supplied Windows ZIP. The app dynamically links `CxwlDepthSdk.dll` and includes the vendor product license and third-party notices in `cxwl-depth-sdk/`. |
+| CXWL Depth Camera SDK for Windows x64, 3.1.0 | The app dynamically links `CxwlDepthSdk.dll`. The Windows runtime, product license and third-party notices come from the official SDK package. |
 | Adapted CXWL SDK Qt Viewer examples | The MIT notice in `third_party/cxwl-depth-sdk-example/LICENSE` applies to the adapted capture client, device manager and point-cloud canvas. |
-| Android SDK Platform-Tools (USB enrollment) | External ADB runtime in `platform-tools/` alongside the executable, with the distribution's `NOTICE.txt` and `source.properties` |
 | Orbbec SDK v2 (Gemini 335 measurement) | Uses the separately installed Windows SDK and its own license materials |
 
 Retired UniDepth model, ONNX Runtime, DirectML and OpenVINO notices remain with their historical runtime copies. The desktop installer stages SDK capture components. The local Depth Pro 2-S engine is subject to the Apple research model license.
 
-USB enrollment also provisions the pinned dToF inspection/engineering runtime when it is absent and the verified board is idle, including its MIT license and provenance file. Existing matching runtime assets and their original provenance records are retained. The main window offers host-assisted inference and two native 48x32 ToF modes. Provisioning the inspection tools preserves saved sensor settings.
+USB enrollment uses the camera's preinstalled device service through SDK 3.1.0. The SDK product license and third-party notices travel with the dynamically linked Windows runtime in `cxwl-depth-sdk/`.
 
 The SPI driver build helper `tools/rv_control/prepare_spi_driver.py` copies the local vendor source into an isolated build directory and retains its notices and source SHA256 manifest. The wrapper adds explicit software ray-table selection and an atomic per-generation calibration receipt, preserving the independently read sensor FOV. It does not modify vendor originals, model weights, sensor EEPROM or saved settings. The product driver accepts the informational bits `0x08` and `0x10` individually and together under `observe-0x08`.
 
-The local Depth Pro 2-S research runtime manifest records the SHA-256 identities of its engine, worker, bundled libraries and model license. Installer license and provenance files are collected with the SDK, Qt, VLC, ADB and board tooling. The board camera stack and standard C/C++ runtime come from the firmware.
+The local Depth Pro 2-S research runtime manifest records the SHA-256 identities of its engine, worker, bundled libraries and model license. The installer collects notices for the SDK, Qt, FFmpeg and Visual C++ runtime. The board camera stack and standard C/C++ runtime come from the firmware.
 
 The former experimental LiteSR port and its RKNN/OpenSSL payload were retired from the product on 2026-11-12.
 

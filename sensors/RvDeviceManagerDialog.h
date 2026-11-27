@@ -5,7 +5,6 @@
 
 class QLabel;
 class QListWidget;
-class QProgressBar;
 class QPushButton;
 class DepthSdkClient;
 class RvSessionController;
@@ -19,7 +18,6 @@ public:
     void connectViaUsb(quint64 checkId = 0);
     bool operationPending() const;
     void finishUsbEnrollment(bool added);
-    void offerUsbRgbLsc();
 
 protected:
     void reject() override;
@@ -30,7 +28,6 @@ protected:
 private:
     friend int runPortSmokeTests(class SensorMainWindow &, const QString &);
     enum class BoardOperation { None, RepairForStart, Maintenance, Recovery };
-    enum class GridOperation { None, Checking, Confirming, Calibrating };
     QString selectedId() const;
     bool canManageSavedDevice() const;
     void refresh(const QString &id);
@@ -39,9 +36,6 @@ private:
     void selectDevice();
     void removeDevice();
     void checkBoardFiles();
-    void checkRgbLsc();
-    bool confirmRgbLsc(bool fromUsb);
-    void updateRgbLscOperation(const QJsonObject &status);
     void runBoardOperation(BoardOperation operation, const QString &id);
     void updateBoardOperation(const QJsonObject &status);
     void updateUsbOperation(const QJsonObject &status);
@@ -54,16 +48,12 @@ private:
     QPushButton *const m_select;
     QPushButton *const m_remove;
     QPushButton *const m_maintain;
-    QPushButton *const m_grid;
     QPushButton *const m_recover;
-    QComboBox *const m_rotation;
-    QProgressBar *const m_gridProgress;
+    QComboBox *m_rotation = nullptr;
     QLabel *const m_status;
     bool m_registryReady = false;
     bool m_usbPending = false;
     BoardOperation m_operation = BoardOperation::None;
-    GridOperation m_gridOperation = GridOperation::None;
-    QString m_gridDevice;
     QString m_operationDevice;
     quint64 m_operationStopRevision = 0;
 };

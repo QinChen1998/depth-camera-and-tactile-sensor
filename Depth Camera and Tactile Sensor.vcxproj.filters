@@ -2,6 +2,8 @@
 <Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003" ToolsVersion="4.0">
   <ItemGroup>
     <ClCompile Include="main.cpp"/>
+    <ClCompile Include="AppEdition.cpp"/>
+    <ClInclude Include="AppEdition.h"/>
     <ClCompile Include="SensorMainWindow.cpp"/>
     <ClCompile Include="RuntimeDiscovery.cpp"/>
     <ClCompile Include="tests\PortSmokeTests.cpp"/>
@@ -27,7 +29,6 @@
     <ClCompile Include="sensors\RvDepthView.cpp"/>
     <ClCompile Include="sensors\RvDeviceManagerDialog.cpp"/>
     <ClCompile Include="sensors\RvDeviceStore.cpp"/>
-    <ClCompile Include="sensors\RvUsbEnrollment.cpp"/>
     <ClCompile Include="sensors\RvImportDiagnostics.cpp"/>
     <ClCompile Include="sensors\RvDtofBoardStream.cpp"/>
     <ClCompile Include="sensors\RvDtofCandidates.cpp"/>
@@ -82,7 +83,6 @@
     <QtMoc Include="sensors\RvDeviceManagerDialog.h"/>
     <ClInclude Include="sensors\RvDeviceStore.h"/>
     <ClInclude Include="sensors\RvCalibration.h" />
-    <ClInclude Include="sensors\RvUsbEnrollment.h"/>
     <ClInclude Include="sensors\RvImportDiagnostics.h"/>
     <ClInclude Include="sensors\RvDtofBoardStream.h"/>
     <ClInclude Include="sensors\RvDtofCandidates.h"/>

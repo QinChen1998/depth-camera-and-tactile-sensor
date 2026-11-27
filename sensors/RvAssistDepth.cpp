@@ -1,4 +1,5 @@
 #include "RvAssistDepth.h"
+#include "../AppEdition.h"
 #include "RvCameraView.h"
 #include "RvDepthDiagnostic.h"
 #include "../RuntimeDiscovery.h"
@@ -185,6 +186,7 @@ RvAssistDepth::~RvAssistDepth()
 
 bool RvAssistDepth::hostModelAvailable(const QString &model)
 {
+    if (AppEdition::Customer) return false;
     const auto *runtime = RvCameraView::depthPro2Runtime(model);
     if (!runtime) return false;
     const QDir root(RuntimeDiscovery::rvAssistModelRoot(model));
@@ -216,7 +218,7 @@ void RvAssistDepth::setInputRotationDegrees(int degrees) {
 }
 
 void RvAssistDepth::setEnabled(bool enabled) {
-    if(m_destroying||m_enabled==enabled)return;
+    if((AppEdition::Customer&&enabled)||m_destroying||m_enabled==enabled)return;
     m_enabled=enabled;m_failed=false;
     if(!enabled)cancel(tr("Host assisted depth is disabled"));
     // Launch only when a selected, paired frame is received, never on startup.

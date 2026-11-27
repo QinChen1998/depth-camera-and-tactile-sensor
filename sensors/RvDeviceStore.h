@@ -8,6 +8,7 @@
 // A session takes a value snapshot; editing the store cannot change an in-flight command.
 struct RvDeviceProfile {
     QString id, name, host, serial, publicKey, username = QStringLiteral("root");
+    QString serviceInstance;
     QString calibration=QLatin1String(RvCalibration::Id), lastConnected;
     int sshPort = 22, inputRotation = -1, cameraMountRotation = 0;
     bool legacyCoordinator = true;

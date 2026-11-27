@@ -3,7 +3,8 @@ https://doc.qt.io/qt-6.11/licensing.html
 https://download.qt.io/archive/qt/6.11/6.11.1/single/
 The desktop uses the Qt Widgets renderer. See qt-sbom for component-specific licensing.
 
-CXWL Depth Camera SDK 2.2.2 is dynamically linked. The SDK product license and SDK runtime notices are in cxwl-depth-sdk.
+CXWL Depth Camera SDK 3.1.0 is dynamically linked. Its product license is in cxwl-depth-sdk/LICENSE.
+The SDK's bundled H.265 decoder and other third-party notices are documented in cxwl-depth-sdk/Licenses.
 
 FFmpeg (FFmpeg developers)
 https://doc.qt.io/qt-6.11/qtmultimedia-attribution-ffmpeg.html
@@ -11,6 +12,3 @@ https://git.ffmpeg.org/ffmpeg.git
 https://code.qt.io/cgit/qt/qtmultimedia.git/tree/coin?h=v6.11.1
 
 Microsoft Visual C++ x64 runtime is deployed application-locally.
-ADB attribution and version are in platform-tools.
-libssh2, OpenSSL and board tooling notices are in rv_control.
-VLC H.265/RTSP libraries, copyright and release source information are in licenses/VLC.

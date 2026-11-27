@@ -34,6 +34,7 @@ class DepthSdkClient;
 class SensorMainWindow;
 class LanguageManager;
 struct RtspVlcBackend;
+namespace RvTuner { struct Frame; }
 
 // One RV device session, independent of either display widget. All public calls
 // and signals run on its owner thread; decoding keeps only a bounded mailbox.
@@ -77,6 +78,7 @@ public:
     static constexpr char Native48ExtendedIntegrationScheme[]="board_native_tof48_1200k";
     static constexpr char Native48HighAccuracy1200KScheme[]="board_native_tof48_high_accuracy_1200k";
     bool native48ExtendedIntegration() const { return m_native48ExtendedIntegration; }
+    bool lowResolutionTofSelected() const { return RvDtofCandidates::sensorDepthPreset(m_dtofMode) != nullptr; }
     bool monocularDisplay() const {return m_monocularDisplay;}
     void setMonocularDisplay(bool enabled);
     QString assistExperiment() const;
@@ -174,9 +176,7 @@ private:
     void setAutomaticConnectionStage(AutomaticConnectionStage stage);
     bool selectNativeDepth(const char *scheme, int mode, const RvDtofCandidates::Settings &settings, bool rememberSelection);
     bool fallBackToBoardDepth();
-    void startImaging(bool automatic,const QString &expectedBoot = QString());
-    void submitConfiguration(const Configuration &candidate, bool previewChange, bool modelChange,
-                             bool startAfter = false, bool reconnecting = false, bool automatic = false,const QString &expectedBoot = QString());
+    void startImaging();
     void syncConfiguration(const QJsonObject &metadata);
     void updateState();
     void rejectConfiguration();
@@ -212,7 +212,6 @@ private:
     void acceptSdkDepth(const QByteArray &depth, QJsonObject metadata, const RvTofFrame &native);
     void acceptSdkVideo(const QImage &image, quint64 sequence, qint64 decodedNs,
                         quint64 epoch, const QString &generation);
-
     Configuration m_config;
     RvDeviceProfile m_device;
     DepthSdkClient *m_sdk = nullptr;
