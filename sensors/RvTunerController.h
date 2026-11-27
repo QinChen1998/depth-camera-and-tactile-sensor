@@ -17,7 +17,7 @@ public:
     ~RvTunerController() override;
     State state() const{return m_state;}
     bool exclusive() const;
-    bool pending() const{return m_process||m_testPending;}
+    bool pending() const{return m_testPending;}
     bool shutdownPending() const{return pending()||exclusive();}
     QString detail() const{return m_detail;}
     QJsonObject savedSettings() const{return m_saved;}
@@ -45,9 +45,9 @@ private:
     void fail(const QString &);
     QJsonObject request() const;
     RvSessionController *m_session;
-    State m_state=Idle;QString m_detail,m_token,m_oldToken,m_revision,m_deviceId,m_worker,m_host;
+    State m_state=Idle;QString m_detail,m_token,m_oldToken,m_revision,m_deviceId,m_host;
     QJsonObject m_info,m_saved,m_applied;RvTuner::Settings m_requested;
-    QPointer<QProcess> m_process;QPointer<QTcpSocket> m_socket;
+    QPointer<QTcpSocket> m_socket;
     QTimer m_deadline,m_heartbeat,m_expiry;
     QElapsedTimer m_rateClock;int m_received=0;double m_fps=0;
     QElapsedTimer m_boardClock;quint64 m_boardNow=0;

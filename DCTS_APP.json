@@ -1,5 +1,6 @@
 {
   "application": "DepthCameraAndTactileSensor",
+  "version": "1.2.0",
   "schema": 1,
   "modules": [
     "tactile",
@@ -9,7 +10,19 @@
   "imaging_schemes": [
     "host_assisted_depth",
     "board_native_tof48_1200k",
-    "board_native_tof48_high_accuracy_1200k"
+    "board_native_tof48_high_accuracy_1200k",
+    "board_native_tof8",
+    "board_native_tof8_high_accuracy",
+    "board_native_tof16",
+    "board_native_tof16_high_accuracy"
   ],
-  "host_assist_correction": "B"
+  "host_assist_correction": "B",
+  "measurement_capture": true,
+  "customer": {
+    "imaging_schemes": [
+      "board_native_tof48_1200k",
+      "board_native_tof48_high_accuracy_1200k"
+    ],
+    "measurement_capture": true
+  }
 }

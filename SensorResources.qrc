@@ -6,6 +6,7 @@
     <file alias="hand_zh_CN.qm">translations/hand_zh_CN.qm</file>
   </qresource>
   <qresource prefix="/config">
+    <file>DCTS_APP.json</file>
     <file alias="first-run-settings.ini">config/first-run-settings.ini</file>
   </qresource>
 </RCC>

@@ -1,10 +1,9 @@
 param(
     [Parameter(Mandatory)][string]$BuildDirectory,
+    [ValidateSet('Normal','Customer')][string]$Edition='Normal',
     [string]$QtRoot='',
     [string]$MSBuild='',
-    [string]$PlatformTools='',
-    [string]$VlcRoot='',
-    [string]$Version='1.1.8',
+    [string]$Version='',
     [switch]$StageOnly,
     [string]$Iscc='',
     [string]$ChineseMessages='',
@@ -18,13 +17,19 @@ $validation=Join-Path $project 'x64\validation'
 if(-not $work.StartsWith($validation+'\',[StringComparison]::OrdinalIgnoreCase)){
     throw 'Use an isolated subdirectory of x64/validation.'
 }
-if($Version -notmatch '^\d+\.\d+\.\d+(\.\d+)?$'){throw 'Invalid installer version.'}
+$Edition=if($Edition -eq 'Customer'){'Customer'}else{'Normal'}
 $payload=Join-Path $work 'payload'
 $exe='触想工作台.exe'
-$desktopFiles=@($exe)
-$imagingSchemes=(Get-Content -LiteralPath (Join-Path $project 'DCTS_APP.json') -Raw | ConvertFrom-Json).imaging_schemes
-$expectedImagingSchemes='host_assisted_depth','board_native_tof48_1200k','board_native_tof48_high_accuracy_1200k'
-if(($imagingSchemes -join ',') -cne ($expectedImagingSchemes -join ',')){throw 'Unsupported desktop imaging menu.'}
+$product=Get-Content -LiteralPath (Join-Path $project 'DCTS_APP.json') -Raw | ConvertFrom-Json -AsHashtable
+if(!$Version){$Version=$product.version}
+if($Version -notmatch '^\d+\.\d+\.\d+(\.\d+)?$'){throw 'Invalid installer version.'}
+$profile=if($Edition -eq 'Customer'){$product.customer}else{$product}
+$imagingSchemes=$profile.imaging_schemes
+if(!$imagingSchemes -or $profile.measurement_capture -isnot [bool]){throw 'Invalid desktop edition settings.'}
+if($Edition -eq 'Customer' -and @($imagingSchemes | Where-Object {$_ -cnotlike 'board_native_*'}).Count){
+    throw 'The customer edition requires native board imaging schemes.'
+}
+$editionLabel=if($Edition -eq 'Customer'){'客户版'}else{'内测版'}
 $desktopReceipt=Join-Path $work 'desktop-imaging.json'
 
 function Invoke-Native([string]$Program,[string[]]$Arguments){
@@ -46,29 +51,70 @@ function Write-Json([string]$Path,$Value){
     $Value | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $Path -Encoding utf8NoBOM
 }
 
-function Assert-BoardCapturePayload([string]$Worker,$WorkerManifest,[switch]$Staged){
-    $boardImport=Get-Content -LiteralPath (Join-Path $Worker 'board-import.json') -Raw | ConvertFrom-Json -AsHashtable
-    $expectedCapture=@('rv_capture/dtof-host.sh','rv_capture/native_gui.sh','rv_capture/native-fov6.bin')
-    $captureFiles=@($WorkerManifest.payload_files.Keys | Where-Object {$_ -like 'rv_capture/*'})
-    if($WorkerManifest.transport_test_fixture -or ($boardImport.supported_capture_modes -join ',') -ne '14,24,25' -or
-       $boardImport.models_required -ne $false -or $captureFiles.Count -ne $expectedCapture.Count -or
-       @($expectedCapture | Where-Object {$captureFiles -cnotcontains $_}).Count){
-        throw 'The board capture payload does not match the desktop imaging menu.'
+function Get-SourceSnapshot {
+    if(!(Test-Path -LiteralPath (Join-Path $project '.git'))){return @{commit=$null; fingerprint=$null; dirty=$null}}
+    $commit=& git -C $project rev-parse --verify HEAD
+    if($LASTEXITCODE){throw 'Cannot identify the source commit.'}
+    $tracked=@(& git -C $project -c core.quotepath=false diff --name-only --no-renames HEAD --)
+    if($LASTEXITCODE){throw 'Cannot identify modified source files.'}
+    $untracked=@(& git -C $project -c core.quotepath=false ls-files --others --exclude-standard)
+    if($LASTEXITCODE){throw 'Cannot identify new source files.'}
+    $paths=@(($tracked+$untracked) | Sort-Object -CaseSensitive -Unique)
+    $files=foreach($relative in $paths){
+        $path=Join-Path $project $relative
+        $hash=if(Test-Path -LiteralPath $path -PathType Leaf){Digest $path}else{'deleted'}
+        "$relative $hash"
     }
-    $boardFiles=@($WorkerManifest.payload_files.Keys | Where-Object {$_ -match '^(rv_capture|rv1103_bootstrap|dtof_tuner)/'})
-    if($boardImport.files.Count -ne $boardFiles.Count){throw 'The board import file list is incomplete.'}
-    foreach($name in $boardFiles){
-        $file=Join-Path $Worker $name
-        if($boardImport.files[$name] -cne $WorkerManifest.payload_files[$name] -or
-           !(Test-Path -LiteralPath $file -PathType Leaf) -or (Digest $file) -cne $boardImport.files[$name]){
-            throw "Board import fingerprint mismatch: $name"
+    $bytes=[Text.Encoding]::UTF8.GetBytes((@($commit)+@($files)) -join "`n")
+    $fingerprint=[Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($bytes)).ToLowerInvariant()
+    return @{commit=$commit; fingerprint=$fingerprint; dirty=($paths.Count -gt 0)}
+}
+
+function Assert-EditionInfo($Info){
+    if($Info.edition -cne $Edition -or ($Info.imaging_schemes -join ',') -cne ($imagingSchemes -join ',') -or
+        $Info.version -cne $product.version -or $Info.sdk_version -cne '3.1.0' -or $Info.sdk_abi -ne 3 -or
+        $Info.default_imaging_scheme -cne $imagingSchemes[0] -or $Info.measurement_capture -isnot [bool] -or
+        $Info.measurement_capture -cne $profile.measurement_capture){
+        throw 'The desktop edition or its compiled features do not match the requested installer.'
+    }
+}
+
+function Get-DesktopFiles {
+    $sdk=Join-Path $payload 'cxwl-depth-sdk'
+    $manifest=Join-Path $sdk 'sdk-manifest.json'
+    if(!(Test-Path -LiteralPath $manifest -PathType Leaf) -or
+        (Digest $manifest) -cne 'a88713c5063b1083d9d9ce88dd525b2f8c5f66a69960f5a7e9708a5d2feca6ae'){
+        throw 'The staged SDK must match the published Windows SDK 3.1.0 manifest.'
+    }
+    $hashes=(Get-Content -LiteralPath $manifest -Raw | ConvertFrom-Json -AsHashtable).sha256
+    $files=@($exe,'cxwl-depth-sdk/sdk-manifest.json')
+    foreach($entry in $hashes.GetEnumerator()){
+        $path=$entry.Key
+        $installed = switch -Regex ($path) {
+            '^SDK/bin/CxwlDepthSdk\.dll$' { 'CxwlDepthSdk.dll'; break }
+            '^SDK/bin/(avcodec-61|avformat-61|avutil-59|swresample-5|swscale-8)\.dll$' {
+                'cxwl-depth-sdk/'+(Split-Path $path -Leaf); break
+            }
+            '^SDK/bin/(networkinformation|tls)/' { $path.Substring('SDK/bin/'.Length); break }
+            '^(LICENSE$|Licenses/)' { 'cxwl-depth-sdk/'+$path; break }
         }
+        if(!$installed){continue}
+        $file=Join-Path $payload $installed
+        if(!(Test-Path -LiteralPath $file -PathType Leaf) -or (Digest $file) -cne $entry.Value){
+            throw "The staged runtime does not match the Windows SDK 3.1.0 file: $installed"
+        }
+        $files+=$installed
     }
-    if($Staged){
-        $captureRoot=Join-Path $Worker 'rv_capture'
-        foreach($file in Get-ChildItem -LiteralPath $captureRoot -File -Recurse){
-            $relative=[IO.Path]::GetRelativePath($Worker,$file.FullName).Replace('\','/')
-            if($expectedCapture -cnotcontains $relative){throw "Unexpected capture payload: $relative"}
+    return $files
+}
+
+function Assert-DesktopFiles($Files){
+    $expected=@(Get-DesktopFiles)
+    if(!$Files -or $Files.Count -ne $expected.Count){throw 'The staged desktop file list changed.'}
+    foreach($name in $expected){
+        $file=Join-Path $payload $name
+        if(!(Test-Path -LiteralPath $file -PathType Leaf) -or (Digest $file) -cne $Files[$name]){
+            throw "Staged desktop fingerprint mismatch: $name"
         }
     }
 }
@@ -78,34 +124,29 @@ if($UseStagedPayload){
         throw 'Stage the desktop from current source before reusing this payload.'
     }
     $receipt=Get-Content -LiteralPath $desktopReceipt -Raw | ConvertFrom-Json -AsHashtable
-    if(($receipt.imaging_schemes -join ',') -cne ($imagingSchemes -join ',')){
-        throw 'The staged desktop has a different imaging menu. Stage it again from current source.'
+    Assert-EditionInfo $receipt
+    $source=Get-SourceSnapshot
+    if(!$receipt.source -or $receipt.source.commit -cne $source.commit -or
+        $receipt.source.fingerprint -cne $source.fingerprint){
+        throw 'The staged desktop was built from different sources. Stage it again from current source.'
     }
-    foreach($name in $desktopFiles){
-        $file=Join-Path $payload $name
-        if(-not (Test-Path -LiteralPath $file -PathType Leaf) -or (Digest $file) -ne $receipt.files[$name]){
-            throw "Staged desktop fingerprint mismatch: $name"
-        }
-    }
-    $stagedWorker=Join-Path $payload 'rv_control'
-    $stagedWorkerManifest=Get-Content -LiteralPath (Join-Path $stagedWorker 'implementation.json') -Raw | ConvertFrom-Json -AsHashtable
-    Assert-BoardCapturePayload $stagedWorker $stagedWorkerManifest -Staged
+    Assert-DesktopFiles $receipt.files
 }
 
 if(-not $UseStagedPayload){
-    if(-not $VlcRoot){throw 'Provide the verified official VLC x64 directory.'}
     if(Test-Path -LiteralPath $payload){throw 'The payload already exists. Choose a fresh build directory.'}
     $toolchain=Resolve-Vs2022Toolchain -MSBuild $MSBuild -RequireMSBuild -RequireRedist
     $qt=Resolve-Qt611Root -QtRoot $QtRoot -MSBuild $toolchain.MSBuild
-    if(-not $PlatformTools){$PlatformTools=Join-Path $project 'x64/Release/platform-tools'}
     $desktop=Join-Path $work 'desktop'
     New-Item -ItemType Directory -Force -Path $desktop | Out-Null
 
     Invoke-Native (Join-Path $qt 'bin/lrelease.exe') @(
         (Join-Path $project 'translations/hand_zh_CN.ts'),'-qm',(Join-Path $project 'translations/hand_zh_CN.qm'))
+    $source=Get-SourceSnapshot
     Invoke-Native $toolchain.MSBuild @(
         (Join-Path $project 'Depth Camera and Tactile Sensor.sln'),'/t:Build','/p:Configuration=Release','/p:Platform=x64',
-        "/p:QtInstall=$qt",'/p:DctsInstallerBuild=true','/p:NativeWorkersBuild=true',"/p:OutDir=$desktop/","/p:IntDir=$work/obj/",
+        "/p:QtInstall=$qt","/p:DctsEdition=$Edition",'/p:DctsInstallerBuild=true',
+        "/p:OutDir=$desktop/","/p:IntDir=$work/obj/",
         '/m:2','/nologo','/v:minimal',"/flp:logfile=$work/build.log;verbosity=normal")
 
     New-Item -ItemType Directory -Path $payload | Out-Null
@@ -114,32 +155,21 @@ if(-not $UseStagedPayload){
         '--release','--no-translations','--no-compiler-runtime',(Join-Path $payload $exe))
     Copy-Relative $desktop $payload 'CxwlDepthSdk.dll'
     Copy-Item -LiteralPath (Join-Path $desktop 'cxwl-depth-sdk') -Destination $payload -Recurse
+    foreach($pluginDirectory in 'networkinformation','tls'){
+        foreach($plugin in Get-ChildItem -LiteralPath (Join-Path $desktop $pluginDirectory) -File){
+            Copy-Relative $desktop $payload "$pluginDirectory/$($plugin.Name)"
+        }
+    }
     Get-ChildItem -LiteralPath $toolchain.RedistDirectories[0] -Filter '*.dll' | Copy-Item -Destination $payload
     foreach($name in 'avcodec-61.dll','avformat-61.dll','avutil-59.dll','swresample-5.dll','swscale-8.dll'){
         if(-not (Test-Path -LiteralPath (Join-Path $payload $name) -PathType Leaf)){throw "Missing Qt FFmpeg library $name"}
     }
-
-    $worker=Join-Path $project 'x64/rv_control/Release/runtime'
-    $workerPayload=Join-Path $payload 'rv_control'
-    $workerManifest=Get-Content -LiteralPath (Join-Path $worker 'implementation.json') -Raw | ConvertFrom-Json -AsHashtable
-    $workerFiles=@{'RvControlWorker.exe'=$workerManifest.executable_sha256}
-    foreach($table in $workerManifest.dependencies,$workerManifest.payload_files){
-        foreach($name in $table.Keys){$workerFiles[$name]=$table[$name]}
-    }
-    Assert-BoardCapturePayload $worker $workerManifest
-    foreach($name in $workerFiles.Keys){
-        Copy-Relative $worker $workerPayload $name
-        if((Digest (Join-Path $workerPayload $name)) -ne $workerFiles[$name]){throw "Worker fingerprint mismatch: $name"}
-    }
-    Copy-Relative $worker $workerPayload 'implementation.json'
-    Assert-BoardCapturePayload $workerPayload $workerManifest -Staged
-    foreach($name in 'adb.exe','AdbWinApi.dll','AdbWinUsbApi.dll','libwinpthread-1.dll','NOTICE.txt','source.properties'){
-        Copy-Relative $PlatformTools (Join-Path $payload 'platform-tools') $name
-    }
-
-    Write-Json (Join-Path $payload 'runtime-paths.json') @{
-        RV_CONTROL_CPP='rv_control/RvControlWorker.exe'
-    }
+    $editionReport=Join-Path $work 'compiled-edition.json'
+    $infoProcess=Start-Process -FilePath (Join-Path $payload $exe) -WorkingDirectory $payload -WindowStyle Hidden -Wait -PassThru `
+        -ArgumentList ('--edition-info "{0}"' -f $editionReport)
+    if($infoProcess.ExitCode -ne 0){throw "Cannot read the compiled desktop edition ($($infoProcess.ExitCode))."}
+    $compiled=Get-Content -LiteralPath $editionReport -Raw | ConvertFrom-Json -AsHashtable
+    Assert-EditionInfo $compiled
 
     $notices=Join-Path $payload 'licenses'
     Copy-Relative (Join-Path $project 'third_party/ffmpeg_7_1_3') $notices 'COPYING.LGPLv2.1'
@@ -152,60 +182,25 @@ if(-not $UseStagedPayload){
     }
 }
 
-$vlcPayload=Join-Path $payload 'vlc'
-if($VlcRoot){
-    if(Test-Path -LiteralPath $vlcPayload){throw 'VLC already staged. Use the verified payload or build in a fresh directory.'}
-    $vlcSource=(Resolve-Path -LiteralPath $VlcRoot).Path
-    $vlcVersion=(Get-Item -LiteralPath (Join-Path $vlcSource 'libvlc.dll')).VersionInfo.FileVersion
-    if($vlcVersion -notmatch '^3\.0\.\d+$'){throw "Unsupported libVLC version: $vlcVersion"}
-    foreach($name in 'libvlc.dll','libvlccore.dll'){
-        Copy-Relative $vlcSource $vlcPayload $name
-    }
-    $plugins=Join-Path $vlcSource 'plugins'
-    Get-ChildItem -LiteralPath $plugins -File -Recurse | Where-Object {
-        $_.Extension -eq '.dll'
-    } | ForEach-Object {
-        $relative=[IO.Path]::GetRelativePath($vlcSource,$_.FullName).Replace('\','/')
-        if(($relative -split '/')[1] -notin 'gui','visualization'){
-            Copy-Relative $vlcSource $vlcPayload $relative
-        }
-    }
-    Invoke-Native (Join-Path $vlcSource 'vlc-cache-gen.exe') @((Join-Path $vlcPayload 'plugins'))
-    $vlcNotices=Join-Path $payload 'licenses/VLC'
-    foreach($name in 'COPYING.txt','AUTHORS.txt'){
-        Copy-Relative $vlcSource $vlcNotices $name
-    }
-    @(
-        "VideoLAN VLC $vlcVersion x64",
-        "Corresponding upstream release source: https://download.videolan.org/pub/videolan/vlc/$vlcVersion/vlc-$vlcVersion.tar.xz",
-        'Module licensing information and dependencies: https://www.videolan.org/legal.html'
-    ) | Set-Content -LiteralPath (Join-Path $vlcNotices 'Source.txt') -Encoding utf8NoBOM
-}
-foreach($name in 'libvlc.dll','libvlccore.dll','plugins/codec/libavcodec_plugin.dll','plugins/access/liblive555_plugin.dll'){
-    if(-not (Test-Path -LiteralPath (Join-Path $vlcPayload $name) -PathType Leaf)){
-        throw "Missing VLC x64 managed H.265 runtime ($name). Supply an official VLC 3 Windows distribution with -VlcRoot."
-    }
-}
-
-foreach($name in $desktopFiles){
-    if(-not (Test-Path -LiteralPath (Join-Path $payload $name) -PathType Leaf)){
-        throw "Missing application executable in staged payload ($name)."
-    }
-}
-
 # The research model is prepared locally with tools/depthpro2/build.ps1.
 $legacyInference = Get-ChildItem -LiteralPath $payload -Directory | Where-Object { $_.Name -match '^(UniDepthRuntime.*|DepthPro2Runtime)$' }
 if ($legacyInference) { throw 'Build the installer from a fresh payload without local inference assets.' }
 $unexpected=Get-ChildItem -LiteralPath $payload -File -Recurse | Where-Object {
-    $_.Name -match '^(README|AGENTS)(\..*)?$|^(PackModelCopy|DctsInferenceWorker|DctsDepthPro2Worker)\.exe$|model_key_material' -or
+    $_.Name -match '^(README|AGENTS)(\..*)?$|^(PackModelCopy|DctsInferenceWorker|DctsDepthPro2Worker|RvControlWorker|adb)\.exe$|^libssh2\.dll$|model_key_material' -or
     $_.Name -match '^(onnxruntime_providers_cuda|cudnn.*|cublas.*|cufft.*|nvrtc.*|zlibwapi|RvAssistTensorRtRtx)\.(dll|exe)$' -or
+    $_.Name -match '^(DctsDepthPro2Runtime|nvinfer.*|cudart64_.*)\.dll$' -or
     $_.Extension -match '^\.(onnx|ovm|rknn|pt|pth|engine|safetensors|dctsm|pdb|ilk|lib|exp|vcxproj|py)$'
 }
+$retired=@(Get-ChildItem -LiteralPath $payload -Directory -Recurse | Where-Object { $_.Name -in 'rv_control','platform-tools','vlc' })
+if($retired){throw 'An obsolete SSH, ADB or RTSP runtime was staged.'}
 if($unexpected){throw "Unexpected payload content: $($unexpected.FullName -join ', ')"}
 if(-not $UseStagedPayload){
+    if((Get-SourceSnapshot).fingerprint -cne $source.fingerprint){throw 'The application sources changed during staging.'}
     $desktopHashes=@{}
-    foreach($name in $desktopFiles){$desktopHashes[$name]=Digest (Join-Path $payload $name)}
-    Write-Json $desktopReceipt @{imaging_schemes=$imagingSchemes;files=$desktopHashes}
+    foreach($name in (Get-DesktopFiles)){$desktopHashes[$name]=Digest (Join-Path $payload $name)}
+    $compiled.source=$source
+    $compiled.files=$desktopHashes
+    Write-Json $desktopReceipt $compiled
 }
 if($StageOnly){return}
 if(-not $Iscc -or -not $ChineseMessages){throw 'Provide -Iscc and -ChineseMessages for installer compilation.'}
@@ -213,8 +208,8 @@ $out=Join-Path $work 'delivery'
 New-Item -ItemType Directory -Force $out | Out-Null
 $icon=(Resolve-Path -LiteralPath (Join-Path $project 'assets/cx.ico')).Path
 Invoke-Native (Resolve-Path -LiteralPath $Iscc).Path @(
-    "/DVersion=$Version","/DOutput=$out","/DPayload=$payload","/DIconPath=$icon",
+    "/DVersion=$Version","/DEdition=$Edition","/DOutput=$out","/DPayload=$payload","/DIconPath=$icon",
     "/DChineseMessages=$((Resolve-Path -LiteralPath $ChineseMessages).Path)",(Join-Path $PSScriptRoot 'Dcts.iss'))
-$installer=Join-Path $out "触想工作台-内测版-v$Version-x64.exe"
+$installer=Join-Path $out "触想工作台-$editionLabel-v$Version-x64.exe"
 "$(Digest $installer) *$(Split-Path $installer -Leaf)" | Set-Content -LiteralPath "$installer.sha256" -Encoding utf8NoBOM
 Get-Item -LiteralPath $installer

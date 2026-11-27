@@ -1,4 +1,5 @@
 #include "DepthMapWidget.h"
+#include "../AppEdition.h"
 #include "RvCameraView.h"
 #include "../UiStyle.h"
 #include "RvDtofCandidates.h"
@@ -89,9 +90,8 @@ DepthMapWidget::DepthMapWidget(QWidget *parent)
     m_rvModelCaption->setObjectName("rvDepthModelLabel");
     m_rvModel = new QComboBox(m_rvControls);
     m_rvModel->setObjectName("rvDepthModel");
-    m_rvModel->addItem(QString(),QLatin1String(RvSessionController::HostAssistImagingScheme));
-    m_rvModel->addItem(QString(),QLatin1String(RvSessionController::Native48ExtendedIntegrationScheme));
-    m_rvModel->addItem(QString(),QLatin1String(RvSessionController::Native48HighAccuracy1200KScheme));
+    for (const auto &scheme : AppEdition::imagingSchemes())
+        m_rvModel->addItem(QString(), scheme);
     m_rvModel->setMinimumWidth(0);
     m_rvModel->setSizeAdjustPolicy(QComboBox::AdjustToContents);
     m_rvModel->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Preferred);
@@ -173,14 +173,16 @@ DepthMapWidget::DepthMapWidget(QWidget *parent)
     saveControls->addWidget(fpsLabel);
     saveControls->addWidget(m_saveCamera);
     saveControls->addWidget(m_saveButton);
-    m_monocularButton=new QPushButton(this);
-    m_monocularButton->setObjectName("depthMonocularOnly");
-    m_monocularButton->setCheckable(true);
-    m_monocularButton->hide();
-    saveControls->addWidget(m_monocularButton);
-    connect(m_monocularButton,&QPushButton::toggled,this,[this](bool enabled){
-        if(m_session)m_session->setMonocularDisplay(enabled);
-    });
+    if (!AppEdition::Customer) {
+        m_monocularButton=new QPushButton(this);
+        m_monocularButton->setObjectName("depthMonocularOnly");
+        m_monocularButton->setCheckable(true);
+        m_monocularButton->hide();
+        saveControls->addWidget(m_monocularButton);
+        connect(m_monocularButton,&QPushButton::toggled,this,[this](bool enabled){
+            if(m_session)m_session->setMonocularDisplay(enabled);
+        });
+    }
     m_colorMode = new QComboBox(statusRow);
     m_colorMode->setObjectName("rvDepthColorMode");
     m_colorMode->addItems({QString(), QString()});
@@ -270,45 +272,48 @@ DepthMapWidget::DepthMapWidget(QWidget *parent)
     connect(m_rvStop, &QPushButton::clicked, this, [this]{if (m_session) m_session->stop();});
     connect(m_rvReconnect, &QPushButton::clicked, this, [this]{if (m_session) m_session->reconnectNow();});
     layout->addWidget(statusRow);
-    m_diagnosticsRow = new QWidget(this);
-    auto *diagnostics = UiStyle::wrappingRow(m_diagnosticsRow,ImagePresentation::Spacing);
-    m_tofPointsButton = new QPushButton(m_diagnosticsRow);
-    m_tofPointsButton->setObjectName("depthPairedTofPoints");
-    m_tofPointsButton->setCheckable(true);
-    diagnostics->addWidget(m_tofPointsButton);
-    connect(m_tofPointsButton,&QPushButton::toggled,this,[this](bool visible) {
-        m_assistCanvas->setTofPointsVisible(visible);
-        m_tofPointsButton->setText(visible?tr("Hide ToF points"):tr("Show ToF points"));
-    });
-    m_pairedRgbButton = new QPushButton(m_diagnosticsRow);
-    m_pairedRgbButton->setObjectName("depthPairedRgb");
-    m_pairedRgbButton->setCheckable(true);
-    diagnostics->addWidget(m_pairedRgbButton);
-    connect(m_pairedRgbButton,&QPushButton::toggled,this,[this](bool visible) {
-        m_assistCanvas->setPairedRgbVisible(visible);
-        m_pairedRgbButton->setText(visible?tr("Return to depth"):tr("ToF / RGB alignment"));
-        updateRvPresentation();
-    });
-    m_recordButton = new QPushButton(m_diagnosticsRow);
-    m_recordButton->setObjectName("depthDiagnosticRecord");
-    diagnostics->addWidget(m_recordButton);
-    connect(m_recordButton,&QPushButton::clicked,this,&DepthMapWidget::chooseDiagnosticRecordingFolder);
-    m_openRecording = new QPushButton(m_diagnosticsRow);
-    m_openRecording->setEnabled(false);
-    diagnostics->addWidget(m_openRecording);
-    connect(m_openRecording,&QPushButton::clicked,this,[this] {
-        QDesktopServices::openUrl(QUrl::fromLocalFile(m_recordingFolder));
-    });
-    m_diagnosticsRow->hide();
-    layout->addWidget(m_diagnosticsRow);
-    m_recordStatus = new QLabel(this);
-    m_recordStatus->setObjectName("depthDiagnosticStatus");
-    m_recordStatus->setWordWrap(true);
-    m_recordStatus->hide();
-    layout->addWidget(m_recordStatus);
-    m_recordTimer = new QTimer(this);
-    m_recordTimer->setInterval(100);
-    connect(m_recordTimer,&QTimer::timeout,this,&DepthMapWidget::updateDiagnosticRecording);
+    if (!AppEdition::Customer) {
+        m_diagnosticsRow = new QWidget(this);
+        auto *diagnostics = UiStyle::wrappingRow(m_diagnosticsRow,ImagePresentation::Spacing);
+        m_tofPointsButton = new QPushButton(m_diagnosticsRow);
+        m_tofPointsButton->setObjectName("depthPairedTofPoints");
+        m_tofPointsButton->setCheckable(true);
+        diagnostics->addWidget(m_tofPointsButton);
+        connect(m_tofPointsButton,&QPushButton::toggled,this,[this](bool visible) {
+            m_assistCanvas->setTofPointsVisible(visible);
+            m_tofPointsButton->setText(visible?tr("Hide ToF points"):tr("Show ToF points"));
+        });
+        m_pairedRgbButton = new QPushButton(m_diagnosticsRow);
+        m_pairedRgbButton->setObjectName("depthPairedRgb");
+        m_pairedRgbButton->setCheckable(true);
+        diagnostics->addWidget(m_pairedRgbButton);
+        connect(m_pairedRgbButton,&QPushButton::toggled,this,[this](bool visible) {
+            m_assistCanvas->setPairedRgbVisible(visible);
+            m_pairedRgbButton->setText(visible?tr("Return to depth"):tr("ToF / RGB alignment"));
+            updateRvPresentation();
+        });
+        m_recordButton = new QPushButton(m_diagnosticsRow);
+        m_recordButton->setObjectName("depthDiagnosticRecord");
+        diagnostics->addWidget(m_recordButton);
+        connect(m_recordButton,&QPushButton::clicked,this,&DepthMapWidget::chooseDiagnosticRecordingFolder);
+        m_openRecording = new QPushButton(m_diagnosticsRow);
+        m_openRecording->setObjectName("depthOpenRecordingFolder");
+        m_openRecording->setEnabled(false);
+        diagnostics->addWidget(m_openRecording);
+        connect(m_openRecording,&QPushButton::clicked,this,[this] {
+            QDesktopServices::openUrl(QUrl::fromLocalFile(m_recordingFolder));
+        });
+        m_diagnosticsRow->hide();
+        layout->addWidget(m_diagnosticsRow);
+        m_recordStatus = new QLabel(this);
+        m_recordStatus->setObjectName("depthDiagnosticStatus");
+        m_recordStatus->setWordWrap(true);
+        m_recordStatus->hide();
+        layout->addWidget(m_recordStatus);
+        m_recordTimer = new QTimer(this);
+        m_recordTimer->setInterval(100);
+        connect(m_recordTimer,&QTimer::timeout,this,&DepthMapWidget::updateDiagnosticRecording);
+    }
     connect(m_saveButton,&QPushButton::clicked,this,&DepthMapWidget::saveCurrentFrame);
 
     syncDisplayColors();
@@ -319,14 +324,16 @@ DepthMapWidget::DepthMapWidget(QWidget *parent)
 int DepthMapWidget::selectedWidth() const
 {
     if(m_depthTabs->currentIndex()==1&&m_session)return RvCameraView::outputProfile(m_session->assistHostModel()).outputWidth;
-    if(m_session&&RvDtofCandidates::isNativeDepth(m_session->dtofCandidateMode()))return 48;
+    if(m_session&&RvDtofCandidates::isNativeDepth(m_session->dtofCandidateMode()))
+        return RvDtofCandidates::nativeDepthGrid(m_session->dtofCandidateMode()).width();
     return m_session ? m_session->depthWidth() : m_snapshot.metadata["width"].toInt(144);
 }
 
 int DepthMapWidget::selectedHeight() const
 {
     if(m_depthTabs->currentIndex()==1&&m_session)return RvCameraView::outputProfile(m_session->assistHostModel()).outputHeight;
-    if(m_session&&RvDtofCandidates::isNativeDepth(m_session->dtofCandidateMode()))return 32;
+    if(m_session&&RvDtofCandidates::isNativeDepth(m_session->dtofCandidateMode()))
+        return RvDtofCandidates::nativeDepthGrid(m_session->dtofCandidateMode()).height();
     if (!m_session) return m_snapshot.metadata["height"].toInt(81);
     switch (m_session->depthWidth()) {
     case 288: return 162;
@@ -384,15 +391,17 @@ void DepthMapWidget::retranslateUi()
     m_colorMaximumLabel->setText(tr("Maximum (m)"));
     m_applyColorRange->setText(tr("Apply"));
     m_saveButton->setText(tr("Save depth map"));
-    m_monocularButton->setToolTip(tr("Show the same frame before ToF correction in the depth map and point cloud."));
-    m_monocularButton->setText(m_monocularButton->isChecked()?tr("Restore corrected depth"):tr("Show monocular depth only"));
-    m_tofPointsButton->setText(m_tofPointsButton->isChecked()?tr("Hide ToF points"):tr("Show ToF points"));
-    m_tofPointsButton->setToolTip(tr("Point centers use the measured depth color. White outlines mark points used to correct this frame."));
-    m_pairedRgbButton->setText(m_pairedRgbButton->isChecked()?tr("Return to depth"):tr("ToF / RGB alignment"));
-    m_pairedRgbButton->setToolTip(tr("Show projected ToF points on the RGB image paired with this depth frame."));
-    if(!m_recorder)m_recordButton->setText(tr("Record diagnostic (10 s)"));
-    m_recordButton->setToolTip(tr("Record paired RGB, native ToF, monocular and corrected depth for 10 seconds (about 1 GB)."));
-    m_openRecording->setText(tr("Open recording folder"));
+    if (m_recordButton) {
+        m_monocularButton->setToolTip(tr("Show the same frame before ToF correction in the depth map and point cloud."));
+        m_monocularButton->setText(m_monocularButton->isChecked()?tr("Restore corrected depth"):tr("Show monocular depth only"));
+        m_tofPointsButton->setText(m_tofPointsButton->isChecked()?tr("Hide ToF points"):tr("Show ToF points"));
+        m_tofPointsButton->setToolTip(tr("Point centers use the measured depth color. White outlines mark points used to correct this frame."));
+        m_pairedRgbButton->setText(m_pairedRgbButton->isChecked()?tr("Return to depth"):tr("ToF / RGB alignment"));
+        m_pairedRgbButton->setToolTip(tr("Show projected ToF points on the RGB image paired with this depth frame."));
+        if(!m_recorder)m_recordButton->setText(tr("Record diagnostic (10 s)"));
+        m_recordButton->setToolTip(tr("Record paired RGB, native ToF, monocular and corrected depth for 10 seconds (about 1 GB)."));
+        m_openRecording->setText(tr("Open recording folder"));
+    }
     m_saveCamera->setText(tr("Save camera image too"));
     m_rvModelCaption->setText(tr("Imaging scheme:"));
     m_rvStart->setText(tr("Start"));
@@ -400,10 +409,15 @@ void DepthMapWidget::retranslateUi()
     m_rvReconnect->setText(tr("Reconnect now"));
     for (auto *button : {m_rvStart, m_rvStop, m_rvReconnect})
         button->setToolTip(tr("Start, Stop and Reconnect apply to the shared camera + depth stream."));
-    auto label=[this](const char* id,const QString& text){m_rvModel->setItemText(m_rvModel->findData(id),text);};
+    auto label=[this](const char* id,const QString& text){
+        const int index = m_rvModel->findData(QLatin1String(id));
+        if (index >= 0) m_rvModel->setItemText(index,text);
+    };
     label(RvSessionController::HostAssistImagingScheme,tr("Host-assisted inference"));
     label(RvSessionController::Native48ExtendedIntegrationScheme,tr("Board inference"));
     label(RvSessionController::Native48HighAccuracy1200KScheme,tr("Board inference high accuracy"));
+    for (const auto &preset : RvDtofCandidates::SensorDepthPresets)
+        label(preset.id, (preset.highAccuracy ? tr("%1×%1 ToF high accuracy") : tr("%1×%1 ToF standard")).arg(preset.grid));
     m_depthTabs->setTabText(0,tr("Board depth"));m_depthTabs->setTabText(1,tr("Host assisted depth"));
     m_rvModel->setAccessibleName(tr("Imaging scheme:"));
     m_rvModel->setToolTip(tr("Select the imaging scheme for the shared depth and camera session."));
@@ -548,7 +562,7 @@ void DepthMapWidget::setSessionController(RvSessionController *controller)
                 this, &DepthMapWidget::clearRvDepth);
         connect(m_session,&RvSessionController::dtofCandidateSelectionChanged,this,&DepthMapWidget::syncSessionControls);
         connect(m_session,&RvSessionController::assistStateChanged,this,&DepthMapWidget::syncSessionControls);
-        connect(m_session,&RvSessionController::monocularDisplayChanged,this,[this](bool enabled){
+        if (m_monocularButton) connect(m_session,&RvSessionController::monocularDisplayChanged,this,[this](bool enabled){
             const QSignalBlocker block(m_monocularButton);
             m_monocularButton->setChecked(enabled);
             m_monocularButton->setText(enabled?tr("Restore corrected depth"):tr("Show monocular depth only"));
@@ -583,8 +597,8 @@ RvSessionController *DepthMapWidget::sessionController() const
 
 void DepthMapWidget::syncSessionControls()
 {
-    m_nativeTofAngle->setVisible(m_session&&!m_session->hostHdAssist()
-        &&RvDtofCandidates::isNativeDepth(m_session->dtofCandidateMode()));
+    m_nativeTofAngle->setVisible(m_session && !m_session->hostHdAssist()
+        && RvDtofCandidates::isNativeDepth(m_session->dtofCandidateMode()));
     const bool available = !m_session.isNull();
     const bool connecting = available && m_session->automaticConnecting();
     const bool busy = available && (m_session->busy() || connecting);
@@ -595,14 +609,17 @@ void DepthMapWidget::syncSessionControls()
     if(m_switchUiActive&&(!m_session||m_session->userStopped()))cancelImagingSwitchUi();
     const bool assisting=m_session&&m_session->hostHdAssist()&&m_session->assistDepthEnabled();
     const bool monocular=m_session&&m_session->monocularDisplay();
-    m_monocularButton->setVisible(assisting);
-    if(monocular!=m_monocularButton->isChecked()){
-        const QSignalBlocker block(m_monocularButton);
-        m_monocularButton->setChecked(monocular);
-        m_monocularButton->setText(monocular?tr("Restore corrected depth"):tr("Show monocular depth only"));
+    if (m_monocularButton) {
+        m_monocularButton->setVisible(assisting);
+        if(monocular!=m_monocularButton->isChecked()){
+            const QSignalBlocker block(m_monocularButton);
+            m_monocularButton->setChecked(monocular);
+            m_monocularButton->setText(monocular?tr("Restore corrected depth"):tr("Show monocular depth only"));
+        }
     }
     const QStringList key{QString::number(available), QString::number(assisting),
-        QString::number(m_session?m_session->dtofCandidateMode():-1), QString::number(busy), QString::number(m_switchUiActive), QString::number(connecting),
+        QString::number(m_session?m_session->dtofCandidateMode():-1), QString::number(busy), QString::number(stopped),
+        QString::number(m_switchUiActive), QString::number(connecting),
         QString::number(m_session&&m_session->controlledSource()),
         QString::number(m_session?m_session->assistLoadingState():0),
         m_session?m_session->assistHostModel():QString(),
@@ -613,6 +630,8 @@ void DepthMapWidget::syncSessionControls()
     m_sessionControlsKey=key;
     const QSignalBlocker modelBlocker(m_rvModel);
     const bool offerAssist=m_session&&m_session->controlledSource();
+    const auto nativeGrid = m_session ? RvDtofCandidates::nativeDepthGrid(m_session->dtofCandidateMode()) : QSize();
+    m_rvCanvas->setNativeGridSize(nativeGrid.isValid() ? nativeGrid : QSize(48, 32));
     m_depthTabs->setCurrentIndex(assisting?1:0);
     setProperty("dtofComputeLocation",assisting?"host":"native_sensor");
     const int loading=assisting&&!m_switchUiActive&&!connecting?m_session->assistLoadingState():0;
@@ -623,7 +642,11 @@ void DepthMapWidget::syncSessionControls()
     if(auto* items=qobject_cast<QStandardItemModel*>(m_rvModel->model())){
         for(int i=0;i<m_rvModel->count();++i){
             const auto id=m_rvModel->itemData(i).toString();
-            if(id.startsWith("board_native_")){
+            if(const auto *preset=RvDtofCandidates::sensorDepthPreset(id)){
+                items->item(i)->setEnabled(true);
+                items->item(i)->setToolTip(tr("Native %1×%1 ToF radial depth and RGB video.").arg(preset->grid));
+            }
+            else if(id.startsWith("board_native_")){
                 items->item(i)->setEnabled(true);
                 QString tooltip=tr("Native 48×32 ToF radial depth; no neural inference.");
                 if(id==QLatin1String(RvSessionController::Native48ExtendedIntegrationScheme))
@@ -692,19 +715,20 @@ void DepthMapWidget::clearAssistDepth(const QString &reason)
 
 void DepthMapWidget::updateRvPresentation()
 {
-    if(!m_recordButton)return;
-
-    const bool assisting=m_session&&m_session->hostHdAssist()&&m_session->assistDepthEnabled();
-    const bool diagnosticsReady=assisting&&m_depthTabs->currentIndex()==1&&!m_switchUiActive;
-    const bool hasFreshRgb=diagnosticsReady&&m_assistCanvas->hasPairedRgb();
-    const bool viewingRgb=m_pairedRgbButton->isChecked();
-    m_diagnosticsRow->setVisible(assisting);
-    m_recordStatus->setVisible(assisting&&!m_recordStatus->text().isEmpty());
-    m_pairedRgbButton->setEnabled(hasFreshRgb||(assisting&&viewingRgb));
-    m_tofPointsButton->setEnabled(hasFreshRgb&&!viewingRgb);
-    m_recordButton->setEnabled(hasFreshRgb&&!m_recorder&&!m_session->retainingRecoveryDisplay());
-    m_monocularButton->setEnabled(m_depthTabs->currentIndex()==1&&!m_switchUiActive&&!viewingRgb
-        &&(m_monocularButton->isChecked()||!m_assistSnapshot.metresFloat32LE.isEmpty()));
+    if (!m_saveButton) return;
+    if (m_recordButton) {
+        const bool assisting=m_session&&m_session->hostHdAssist()&&m_session->assistDepthEnabled();
+        const bool diagnosticsReady=assisting&&m_depthTabs->currentIndex()==1&&!m_switchUiActive;
+        const bool hasFreshRgb=diagnosticsReady&&m_assistCanvas->hasPairedRgb();
+        const bool viewingRgb=m_pairedRgbButton->isChecked();
+        m_diagnosticsRow->setVisible(assisting);
+        m_recordStatus->setVisible(assisting&&!m_recordStatus->text().isEmpty());
+        m_pairedRgbButton->setEnabled(hasFreshRgb||(assisting&&viewingRgb));
+        m_tofPointsButton->setEnabled(hasFreshRgb&&!viewingRgb);
+        m_recordButton->setEnabled(hasFreshRgb&&!m_recorder&&!m_session->retainingRecoveryDisplay());
+        m_monocularButton->setEnabled(m_depthTabs->currentIndex()==1&&!m_switchUiActive&&!viewingRgb
+            &&(m_monocularButton->isChecked()||!m_assistSnapshot.metresFloat32LE.isEmpty()));
+    }
     m_saveCamera->setEnabled(!m_session||m_session->hostHdAssist()
         ||!RvDtofCandidates::isNativeDepth(m_session->dtofCandidateMode()));
     const auto &snapshot = m_depthTabs->currentIndex()==1 ? m_assistSnapshot : m_snapshot;
@@ -730,7 +754,7 @@ void DepthMapWidget::chooseDiagnosticRecordingFolder()
 
 QString DepthMapWidget::startDiagnosticRecording(const QString &folder,QString *error)
 {
-    if(folder.isEmpty()||m_recorder||!m_recordButton->isEnabled()){
+    if(!m_recordButton||folder.isEmpty()||m_recorder||!m_recordButton->isEnabled()){
         if(error)*error=tr("Wait for a fresh host-assisted depth frame.");
         return {};
     }

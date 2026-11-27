@@ -26,10 +26,13 @@
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props"/>
   <PropertyGroup>
+    <DctsEdition Condition="'$(DctsEdition)' == ''">Normal</DctsEdition>
     <OutDir>$(MSBuildProjectDirectory)\x64\$(Configuration)\</OutDir>
     <IntDir>$(MSBuildProjectDirectory)\x64\obj_$(Configuration)\</IntDir>
+    <OutDir Condition="'$(DctsEdition)' == 'Customer'">$(MSBuildProjectDirectory)\x64\Customer\$(Configuration)\</OutDir>
+    <IntDir Condition="'$(DctsEdition)' == 'Customer'">$(MSBuildProjectDirectory)\x64\Customer\obj_$(Configuration)\</IntDir>
     <TargetName>触想工作台</TargetName>
-    <CxwlDepthSdkRoot Condition="'$(CxwlDepthSdkRoot)' == ''">$(MSBuildProjectDirectory)\x64\sdk-dependencies\CXWLDepthSDK-2.2.2-win64</CxwlDepthSdkRoot>
+    <CxwlDepthSdkRoot Condition="'$(CxwlDepthSdkRoot)' == ''">$(MSBuildProjectDirectory)\x64\sdk-dependencies\Cxwl-Depth-Camera-SDK-v3.1.0-windows-x64</CxwlDepthSdkRoot>
   </PropertyGroup>
   <Import Project="$(QtMsBuild)\qt_defaults.props"/>
   <PropertyGroup Label="QtSettings" Condition="'$(Configuration)' == 'Debug'">
@@ -61,6 +64,9 @@
   <ItemDefinitionGroup Condition="'$(DctsInstallerBuild)' == 'true'">
     <ClCompile><PreprocessorDefinitions>DCTS_INSTALLER_BUILD;%(PreprocessorDefinitions)</PreprocessorDefinitions></ClCompile>
   </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(DctsEdition)' == 'Customer'">
+    <ClCompile><PreprocessorDefinitions>DCTS_CUSTOMER_BUILD;%(PreprocessorDefinitions)</PreprocessorDefinitions></ClCompile>
+  </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)' == 'Debug'">
     <ClCompile>
       <Optimization>Disabled</Optimization>
@@ -76,6 +82,8 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="main.cpp"/>
+    <ClCompile Include="AppEdition.cpp"/>
+    <ClInclude Include="AppEdition.h"/>
     <ClCompile Include="SensorMainWindow.cpp"/>
     <ClCompile Include="RuntimeDiscovery.cpp">
     </ClCompile>
@@ -103,7 +111,6 @@
     <ClCompile Include="sensors\RvDepthView.cpp"/>
     <ClCompile Include="sensors\RvDeviceManagerDialog.cpp"/>
     <ClCompile Include="sensors\RvDeviceStore.cpp"/>
-    <ClCompile Include="sensors\RvUsbEnrollment.cpp"/>
     <ClCompile Include="sensors\RvImportDiagnostics.cpp"/>
     <ClCompile Include="sensors\RvDtofBoardStream.cpp"/>
     <ClCompile Include="sensors\RvDtofCandidates.cpp"/>
@@ -158,7 +165,6 @@
     <QtMoc Include="sensors\RvDeviceManagerDialog.h"/>
     <ClInclude Include="sensors\RvDeviceStore.h"/>
     <ClInclude Include="sensors\RvCalibration.h" />
-    <ClInclude Include="sensors\RvUsbEnrollment.h"/>
     <ClInclude Include="sensors\RvImportDiagnostics.h"/>
     <ClInclude Include="sensors\RvDtofBoardStream.h"/>
     <ClInclude Include="sensors\RvDtofCandidates.h"/>
@@ -186,17 +192,14 @@
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets"/>
   <Import Project="$(QtMsBuild)\qt.targets"/>
-  <PropertyGroup>
-    <NativeWorkersBuild Condition="'$(NativeWorkersBuild)' == ''">true</NativeWorkersBuild>
-  </PropertyGroup>
+  <Target Name="ValidateDctsEdition" BeforeTargets="PrepareForBuild">
+    <Error Condition="'$(DctsEdition)' != 'Normal' and '$(DctsEdition)' != 'Customer'" Text="DctsEdition must be Normal or Customer."/>
+  </Target>
   <Target Name="PrepareCxwlDepthSdk" BeforeTargets="PrepareForBuild" Condition="'$(DesignTimeBuild)' != 'true'">
     <Exec Command="&quot;$(MSBuildProjectDirectory)\tools\prepare_depth_sdk.cmd&quot; -SdkRoot &quot;$(CxwlDepthSdkRoot)&quot;" />
   </Target>
   <Target Name="DeployCxwlDepthSdk" AfterTargets="Build" Condition="'$(DesignTimeBuild)' != 'true'">
     <Exec Command="&quot;$(MSBuildProjectDirectory)\tools\prepare_depth_sdk.cmd&quot; -SdkRoot &quot;$(CxwlDepthSdkRoot)&quot; -DeployDirectory &quot;$(TargetDir).&quot;" />
-  </Target>
-  <Target Name="BuildSensorRvWorker" BeforeTargets="PrepareForBuild" Condition="'$(NativeWorkersBuild)' == 'true' and '$(DesignTimeBuild)' != 'true'">
-    <Exec Command="&quot;$(MSBuildProjectDirectory)/tools/build_rv_worker.cmd&quot; &quot;$(Configuration)&quot; &quot;$(QtInstall)&quot; &quot;$(MSBuildBinPath)/MSBuild.exe&quot;"/>
   </Target>
   <ItemGroup>
     <ClCompile Include="tests\LiveValidation.cpp"/>

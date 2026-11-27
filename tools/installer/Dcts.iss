@@ -1,8 +1,21 @@
-﻿#define AppName "触想工作台"
-#define AppExe "触想工作台.exe"
+﻿#define AppExe "触想工作台.exe"
+#ifndef Edition
+  #define Edition "Normal"
+#endif
+#if Edition == "Customer"
+  #define AppName "触想工作台-客户版"
+  #define SetupName AppName
+#else
+  #define AppName "触想工作台"
+  #define SetupName "触想工作台-内测版"
+#endif
 
 [Setup]
+#if Edition == "Customer"
+AppId={{782875EB-5F59-4117-AD83-F4BE96E724A3}
+#else
 AppId={{E927DDB5-704F-4F63-AEC3-54D67D2B1177}
+#endif
 AppName={#AppName}
 AppVersion={#Version}
 DefaultDirName={autopf}\{#AppName}
@@ -15,7 +28,7 @@ WizardStyle=modern
 DisableProgramGroupPage=yes
 ShowLanguageDialog=no
 OutputDir={#Output}
-OutputBaseFilename={#AppName}-内测版-v{#Version}-x64
+OutputBaseFilename={#SetupName}-v{#Version}-x64
 Compression=lzma2/fast
 SolidCompression=yes
 UninstallDisplayIcon={app}\{#AppExe}

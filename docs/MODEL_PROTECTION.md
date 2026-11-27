@@ -2,11 +2,11 @@
 
 ## 当前安装包
 
-`tools/installer/build.ps1` 使用 Release 主工程构建一份 `触想工作台.exe`。安装载荷包含 CXWL Depth Camera SDK 2.2.2、F6 原生采集与工程控制 worker、ADB、Qt 6.11.1、FFmpeg、VC++ x64 运行库、VLC 3 x64 的 RTSP/H.265 组件和对应许可。采集载荷按 `implementation.json` 和 `board-import.json` 校验文件及 SHA-256。
+`tools/installer/build.ps1` 使用 Release 主工程构建 `触想工作台.exe`。安装载荷包含 CXWL Depth Camera SDK 3.1.0（ABI v3）、Qt 6.11.1、FFmpeg、VC++ x64 运行库及对应许可。打包时按固定的 SDK 清单核对直连运行库、解码器、插件及许可的 SHA-256。
 
-构建检查会拒绝暂存目录内的模型运行包、伴随推理程序、模型文件和编译中间产物。Depth Pro 2-S 研究运行包使用 `tools/depthpro2/build.ps1` 独立组装，模型许可随 `DepthPro2Runtime/` 保存。主机推理不可用时，首次实际选档为普通板端档，配置保留 `host_assisted_depth` 偏好。安装版用户配置位于 `%LOCALAPPDATA%/DepthCameraAndTactileSensor/config`。
+构建检查会拒绝暂存目录内的模型运行包、伴随推理程序、模型文件和编译中间产物。Depth Pro 2-S 研究运行包使用 `tools/depthpro2/build.ps1` 独立组装，模型许可随 `DepthPro2Runtime/` 保存。`-Edition Normal` 是默认值，主机推理不可用时，首次实际选档为普通板端档，配置保存 `host_assisted_depth` 偏好。`-Edition Customer` 只提供 48×32 板端普通及高精度两个档位，首次使用普通档。两种安装版分别使用 `%LOCALAPPDATA%/DepthCameraAndTactileSensor/config` 和 `%LOCALAPPDATA%/DepthCameraAndTactileSensorCustomer/config`。
 
-在 PowerShell 7 中从项目根目录运行。需要 VS 2022 v143、Qt 6.11.1 MSVC x64 及对应 Qt 源码许可、ADB、官方 VLC 3 x64 解包目录、Inno Setup 和简体中文消息文件。SDK ZIP 可以通过 `DCTS_DEPTH_SDK_ZIP` 指定，主工程按固定摘要校验。ADB 默认取 `x64/Release/platform-tools`，可用 `-PlatformTools` 指定位置。构建目录使用 `x64/validation/` 下的新子目录。
+在 PowerShell 7 中从项目根目录运行。需要 VS 2022 v143、Qt 6.11.1 MSVC x64 及对应 Qt 源码许可、Inno Setup 和简体中文消息文件。首次构建时，将 `DCTS_DEPTH_SDK_DIR` 指向已解包的官方 Windows SDK 3.1.0。每版使用 `x64/validation/` 下的独立构建目录。
 
 ```powershell
 $work = Join-Path $PWD ('x64/validation/installer-' + (Get-Date -Format 'yyyyMMdd-HHmmss'))
@@ -14,18 +14,18 @@ $installerTools = Join-Path $PWD 'x64/validation/installer_tools'
 $installerArgs = @{
     BuildDirectory = $work
     QtRoot = 'E:/Qt/6.11.1/msvc2022_64'
-    VlcRoot = Join-Path $installerTools 'vlc-3024-verified/vlc-3.0.24'
     Iscc = Join-Path $installerTools 'InnoSetup/ISCC.exe'
     ChineseMessages = Join-Path $installerTools 'ChineseSimplified.isl'
-    Version = '1.1.8'
 }
-.\tools\installer\build.ps1 @installerArgs
+.\tools\installer\build.ps1 -Edition Customer @installerArgs
 .\tools\installer\prepare-sandbox.ps1 -BuildDirectory $work
 ```
 
-`-StageOnly` 只生成暂存载荷。使用 `-UseStagedPayload` 复用同一目录时，脚本重新核对成像方案、桌面 EXE 的 SHA-256 及板端采集清单。复用已含 VLC 的载荷时沿用暂存的 VLC 路径。安装程序 `触想工作台-内测版-v<版本>-x64.exe` 及其 `.sha256` 文件均生成在 `delivery/`。
+`-StageOnly` 生成暂存载荷。脚本从编译好的桌面 EXE 读取版本及功能，并将其与源配置、Git 提交、工作区指纹和 EXE 的 SHA-256 一并记录。使用 `-UseStagedPayload` 时传入相同的 `-Edition`，脚本会复核上述记录和 SDK 运行载荷。安装版本从 `DCTS_APP.json` 读取。`触想工作台-客户版-v<版本>-x64.exe` 或 `触想工作台-内测版-v<版本>-x64.exe` 与各自的 `.sha256` 生成在 `delivery/`。
 
-打开 `DctsCleanInstall.wsb` 可在关闭网络和 vGPU 的 Windows Sandbox 中执行离线安装检查，报告写入 `sandbox-results/`。完整检查包含三档菜单、主机推理不可用时的板端默认选档、八组离线专项、原生 worker 自检、普通窗口启动和卸载。`-SmokeOnly` 使用较短的安装、启动、关闭及卸载检查。真实设备验证使用 [测试文档](TESTING.md#实机专项) 中的入口。
+打开 `DctsCleanInstall.wsb` 可在关闭网络和 vGPU 的 Windows Sandbox 中执行离线安装检查，报告写入 `sandbox-results/`。完整检查覆盖安装器和 EXE 摘要、对应版本的成像菜单、SDK 版本、八组离线专项、窗口启动、重装和卸载。`-SmokeOnly` 执行较短的安装、启动、关闭及卸载检查。
+
+本机 Windows 可在管理员 PowerShell 运行同一 `sandbox-test.ps1`，传入 `-InputDirectory`、`-ResultsDirectory` 和全新的 `-NativeInstallDirectory`。脚本核对同一安装器的摘要，运行安装后的离线专项并卸载测试副本。实机验证见 [测试文档](TESTING.md#实机专项)。
 
 ## 携带模型的历史交付与保护约定
 

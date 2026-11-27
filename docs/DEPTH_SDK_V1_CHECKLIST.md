@@ -13,7 +13,7 @@
 | 三种成像方案 | 上位机辅助推理和板端推理使用 mode24。板端推理高精度使用 mode25。三个方案共享 RV1103 采集链路和默认 F6 标定。 | 在同一会话接口上选择方案，按设备能力和配套文件的校验结果开放档位。 |
 | 多种主机推理设备 | 同一主机模型支持 TensorRT-RTX、DirectML、OpenVINO GPU／CPU 和 ONNX Runtime CPU。混合 INT8 由用户手动选择。 | 统一枚举、选择和报告实际后端。按后端组织模型和运行库，继续用子进程隔离现有运行时。 |
 
-当前深度产品以 RV1103 和配套采集协议为设备范围。拆成多套 SDK 会重复维护档案、USB 登记、标定、启停和上位机接入。未来新增协议不同的深度相机时，可以在同一接口下增加设备实现和能力声明。磁触觉设备继续由上位机的串口模块管理。[设备档案](../sensors/RvDeviceStore.h) · [会话绑定](../SensorMainWindow.cpp) · [USB 发现](../sensors/RvUsbEnrollment.cpp) · [推理设备](MULTI_BACKEND_INFERENCE.md)
+当时以 RV1103 和配套采集协议为设备范围。拆成多套 SDK 会重复维护档案、USB 登记、标定、启停和上位机接入。未来新增协议不同的深度相机时，可以在同一接口下增加设备实现和能力声明。磁触觉设备继续由上位机的串口模块管理。现行 USB 实现见 [SDK 同步记录](../SDK_SYNC_CHECKLIST.md)。
 
 ## 开发清单
 
@@ -23,7 +23,7 @@
 
 - [ ] **从上位机入口抽出可独立运行的会话。** 复用 `RvSessionController`、视频与 ToF 接收、`RvControlWorker` 和主机推理链路。SDK 初始化显式接收运行资源和设备库位置。界面偏好、翻译和回调转发到 UI 线程由上位机适配层负责。内部可继续使用 Qt，公开接口使用普通 C/C++ 数据类型，明确内部事件循环的初始化和退出方式。首版基线曾由主程序复制生成 `DctsInferenceWorker.exe`，候选探测也会重新启动上位机 EXE。[共享会话](../sensors/RvSessionController.h) · [构建定义](../Depth%20Camera%20and%20Tactile%20Sensor.vcxproj) · [当前推理入口](../sensors/RvAssistDepth.cpp) · [运行资源定位](../RuntimeDiscovery.cpp)
 
-- [ ] **接入设备管理和 USB 登记。** 沿用现有档案、SSH 身份校验和 Windows 凭据引用，兼容已有档案的编辑、默认设备和导入导出。提供 USB 发现与只读检查、确认后执行登记或修复所需的操作和进度。上位机处理确认提示和自动启动策略。SDK 复核同一 USB transport、序列号、公钥和 boot ID，保留 F6 标定、整套板端载荷校验、长期参数和失败回滚。切换设备或用户停止后，使过期的检查、导入后自动启动和帧事件失效。[设备管理](../sensors/RvDeviceManagerDialog.cpp) · [USB 登记](../sensors/RvUsbEnrollment.cpp) · [默认标定](DEFAULT_CALIBRATION_NATIVE_TOF.md)
+- [ ] **接入设备管理和 USB 登记。** 沿用当时的档案、SSH 身份校验和 Windows 凭据引用，兼容已有档案的编辑、默认设备和导入导出。提供 USB 发现与只读检查、确认后执行登记或修复所需的操作和进度。上位机处理确认提示和自动启动策略。SDK 复核同一 USB transport、序列号、公钥和 boot ID，保留 F6 标定、整套板端载荷校验、长期参数和失败回滚。切换设备或用户停止后，使过期的检查、导入后自动启动和帧事件失效。现行设备管理见 [SDK 同步记录](../SDK_SYNC_CHECKLIST.md)。
 
 - [ ] **接入推理后端。** 提供候选枚举、选择、实际后端及失败状态和手动测速入口。上位机从现有偏好恢复选择，SDK 负责兼容性检查和运行时回退。保持启动轻量检测和 INT8 手动选择。模型身份、密文认证或依赖完整性校验失败时报告错误，保持现有受保护运行包的加载约束。[多后端行为](MULTI_BACKEND_INFERENCE.md) · [模型保护](MODEL_PROTECTION.md)
 

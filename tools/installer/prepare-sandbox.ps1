@@ -11,17 +11,24 @@ $results=Join-Path $work "sandbox-results$suffix"
 if((Test-Path -LiteralPath $inputFolder) -or (Test-Path -LiteralPath $results)){
     throw 'Sandbox evidence directories already exist. Preserve them before generating a new run.'
 }
-$installer=@(Get-ChildItem -LiteralPath (Join-Path $work 'delivery') -Filter '触想工作台-内测版-v*-x64.exe' -File)
+$receipt=Join-Path $work 'desktop-imaging.json'
+$edition=(Get-Content -LiteralPath $receipt -Raw | ConvertFrom-Json).edition
+if($edition -cnotin 'Normal','Customer'){throw 'Expected a staged Normal or Customer desktop.'}
+$label=if($edition -eq 'Customer'){'客户版'}else{'内测版'}
+$installer=@(Get-ChildItem -LiteralPath (Join-Path $work 'delivery') -Filter "触想工作台-$label-v*-x64.exe" -File)
 if($installer.Count -ne 1){throw 'Expected a single setup EXE.'}
 New-Item -ItemType Directory -Path $inputFolder,$results | Out-Null
 Copy-Item -LiteralPath $installer[0].FullName -Destination $inputFolder
+Copy-Item -LiteralPath ($installer[0].FullName+'.sha256') -Destination $inputFolder
+Copy-Item -LiteralPath $receipt -Destination $inputFolder
 # The clean VM runs Windows PowerShell 5.1: preserve Chinese paths with a BOM.
 [IO.File]::WriteAllText((Join-Path $inputFolder 'sandbox-test.ps1'),
     [IO.File]::ReadAllText((Join-Path $PSScriptRoot 'sandbox-test.ps1')),
     [Text.UTF8Encoding]::new($true))
 $inputFolder=[Security.SecurityElement]::Escape($inputFolder)
 $results=[Security.SecurityElement]::Escape($results)
-$testArguments=if($SmokeOnly){' -SmokeOnly'}else{''}
+$testArguments=" -Edition $edition"
+if($SmokeOnly){$testArguments+=' -SmokeOnly'}
 @"
 <Configuration>
   <MemoryInMB>8192</MemoryInMB>

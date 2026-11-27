@@ -1,4 +1,5 @@
 #include "../SensorMainWindow.h"
+#include "../AppEdition.h"
 #include "../LanguageManager.h"
 #include "../RuntimeDiscovery.h"
 #include "../TactileDockWidget.h"
@@ -49,6 +50,7 @@
 #include <QProgressBar>
 #include <QSpinBox>
 #include <QSettings>
+#include <QSet>
 #include <QTextStream>
 #include <QThread>
 #include <QTimer>
@@ -73,9 +75,13 @@ int runPortSmokeTests(SensorMainWindow &window,LanguageManager &language,const Q
         auto *page = window.findChild<MeasurementCaptureDialog *>("measurementCaptureDialog");
         auto *source = page ? page->findChild<QComboBox *>("measurementSource") : nullptr;
         auto *duration = page ? page->findChild<QSpinBox *>("measurementDuration") : nullptr;
-        check("MEASUREMENT_PAGE_HAS_TWO_SOURCES_AND_DURATION_RANGE",
-            source && source->count() == 2 && source->findData("rv1103") >= 0 && source->findData("gemini335") >= 0
-            && duration && duration->minimum() == 30 && duration->maximum() == 60 && duration->value() == 30);
+        if (AppEdition::measurementCaptureEnabled()) {
+            check("MEASUREMENT_PAGE_HAS_TWO_SOURCES_AND_DURATION_RANGE",
+                source && source->count() == 2 && source->findData("rv1103") >= 0 && source->findData("gemini335") >= 0
+                && duration && duration->minimum() == 30 && duration->maximum() == 60 && duration->value() == 30);
+        } else {
+            check("MEASUREMENT_PAGE_ABSENT", !action && !page);
+        }
         if (page)
             page->hide();
         QTemporaryDir output(QFileInfo(path).absolutePath() + "/measurement-test-XXXXXX");
@@ -185,9 +191,89 @@ int runPortSmokeTests(SensorMainWindow &window,LanguageManager &language,const Q
     auto *models=window.findChild<QComboBox *>("rvDepthModel");
     const QString visibleHostModel=QLatin1String(RvCameraView::DepthPro2Model);
     const QString visibleHostScheme=QLatin1String(RvSessionController::HostAssistImagingScheme);
-    check("EXACT_IMAGING_SCHEMES",models&&models->count()==3&&models->itemData(0)==visibleHostScheme
+    if (AppEdition::Customer) {
+        const QString ordinary=QLatin1String(RvSessionController::Native48ExtendedIntegrationScheme);
+        const QString high=QLatin1String(RvSessionController::Native48HighAccuracy1200KScheme);
+        auto *session=window.session();
+        QSettings settings;
+        check("EXACT_IMAGING_SCHEMES", models && models->count()==2
+            && models->itemData(0)==ordinary && models->itemData(1)==high);
+        check("FIRST_RUN_USES_AVAILABLE_DEFAULT", session->currentImagingScheme()==ordinary
+            && models && models->currentData()==ordinary && settings.value("depth/imagingScheme")==ordinary
+            && session->userStopped() && !session->controlledSource());
+        check("CUSTOMER_WINDOW_LABEL", window.windowTitle()==QStringLiteral("触想工作台（客户版）"));
+        bool diagnosticsAbsent=true;
+        for (const auto *name : {"depthPairedTofPoints", "depthPairedRgb", "depthDiagnosticRecord", "depthMonocularOnly"})
+            diagnosticsAbsent &= !window.depth()->findChild<QWidget *>(name);
+        check("CUSTOMER_HOST_DIAGNOSTICS_ABSENT", diagnosticsAbsent
+            && window.depth()->startDiagnosticRecording(QFileInfo(path).absolutePath()).isEmpty());
+
+        RvDeviceStore devices;
+        const auto fixture=offlineRvDevice();
+        devices.save({fixture}, fixture.id);
+        session->reloadDeviceProfiles();
+        auto *deviceAction=window.findChild<QAction *>("rvDeviceManagerAction");
+        if (deviceAction) deviceAction->trigger();
+        auto *manager=window.findChild<RvDeviceManagerDialog *>();
+        check("CUSTOMER_USB_WITHOUT_HOST_ROTATION", manager && manager->findChild<QPushButton *>("rvDeviceConnectUsb")
+            && !manager->findChild<QComboBox *>("rvDeviceRotation"));
+        if (manager) manager->hide();
+
+        session->selectImagingScheme(high, {});
+        bool rejected=session->currentImagingScheme()==high;
+        QStringList excluded{visibleHostScheme};
+        for (const auto &preset : RvDtofCandidates::SensorDepthPresets)
+            excluded.append(QLatin1String(preset.id));
+        for (const auto &scheme : excluded) {
+            session->selectImagingScheme(scheme, {});
+            rejected &= models && models->findData(scheme)==-1 && session->currentImagingScheme()==high
+                && settings.value("depth/imagingScheme")==high;
+            settings.setValue("depth/imagingScheme", scheme);
+            RvSessionController reopened;
+            check("CUSTOMER_SAVED_SCHEME_FALLBACK_"+scheme, reopened.currentImagingScheme()==ordinary
+                && settings.value("depth/imagingScheme")==ordinary && !reopened.assistDepthEnabled());
+            settings.setValue("depth/imagingScheme", high);
+        }
+        check("OTHER_IMAGING_SCHEMES_ABSENT", rejected && !session->setDtofCandidate(RvCaptureContract::Native8, {}));
+        session->setAssistDepthEnabled(true);
+        session->setMonocularDisplay(true);
+        RvAssistDepth inference;
+        inference.setEnabled(true);
+        check("CUSTOMER_HOST_RUNTIME_DISABLED", !session->assistDepthEnabled() && !session->monocularDisplay()
+            && !inference.enabled() && !RvAssistDepth::hostModelAvailable(visibleHostModel));
+
+        settings.setValue("depth/imagingScheme", "board_native_tof48_high_accuracy");
+        RvSessionController legacy;
+        check("CUSTOMER_SAVED_BOARD_HIGH_ACCURACY", legacy.currentImagingScheme()==high
+            && settings.value("depth/imagingScheme")==high);
+        for (const auto &scheme : {ordinary, high}) {
+            session->selectImagingScheme(scheme, {});
+            QByteArray metres(48*32*4, 0);
+            qToLittleEndian<quint32>(0x3f800000, metres.data());
+            window.depth()->acceptRvDepth(metres, {{"width",48},{"height",32},
+                {"depth_unit","sensor_radial_m_float32"},{"frame_id",1},{"generation",1}});
+            const auto snapshot=window.depth()->snapshot();
+            const auto *save=window.depth()->findChild<QPushButton *>("depthMapSave");
+            check("CUSTOMER_NATIVE_DEPTH_AND_SAVE_"+scheme, models && models->currentData()==scheme
+                && snapshot.metresFloat32LE==metres && snapshot.depthImage.size()==QSize(48,32)
+                && save && save->isEnabled());
+        }
+        language.setLanguage(LanguageManager::Language::SimplifiedChinese, false);
+        settle(100);
+        check("CHINESE_IMAGING_SCHEMES", models && models->itemText(0)==QStringLiteral("板端推理")
+            && models->itemText(1)==QStringLiteral("板端推理高精度"));
+        language.setLanguage(LanguageManager::Language::English, false);
+        settle(100);
+        check("ENGLISH_IMAGING_SCHEMES", models && models->itemText(0)=="Board inference"
+            && models->itemText(1)=="Board inference high accuracy");
+        out<<"RESULT "<<(pass?"PASS":"FAIL")<<Qt::endl;
+        return pass?0:1;
+    }
+    check("EXACT_IMAGING_SCHEMES",models&&models->count()==7&&models->itemData(0)==visibleHostScheme
         &&models->itemData(1)==QLatin1String(RvSessionController::Native48ExtendedIntegrationScheme)
-        &&models->itemData(2)==QLatin1String(RvSessionController::Native48HighAccuracy1200KScheme));
+        &&models->itemData(2)==QLatin1String(RvSessionController::Native48HighAccuracy1200KScheme)
+        &&models->itemData(3)=="board_native_tof8"&&models->itemData(4)=="board_native_tof8_high_accuracy"
+        &&models->itemData(5)=="board_native_tof16"&&models->itemData(6)=="board_native_tof16_high_accuracy");
     check("OTHER_IMAGING_SCHEMES_ABSENT",models
         &&models->findData("host_unidepth_wide_576_fp16_tof16")==-1
         &&models->findData("board_litesr_near_full_host_contour_hd")==-1
@@ -267,6 +353,60 @@ int runPortSmokeTests(SensorMainWindow &window,LanguageManager &language,const Q
         RvSessionController savedHighAccuracy;
         check("UNAVAILABLE_HOST_PRESERVES_SAVED_HIGH_ACCURACY",savedHighAccuracy.currentImagingScheme()==highAccuracyScheme
             &&!savedHighAccuracy.assistDepthEnabled()&&savedHighAccuracy.dtofCandidateMode()==RvDtofCandidates::Native48HighAccuracy);
+        auto *sdkAdapter = session->depthSdk();
+        const auto restoreSdkMode = qScopeGuard([&] {
+            if (sdkAdapter) sdkAdapter->setMode(RvDtofCandidates::sdkMode(session->dtofCandidateMode()));
+        });
+        for (const auto &preset : RvDtofCandidates::SensorDepthPresets) {
+            const QString id = QLatin1String(preset.id);
+            fallback.selectImagingScheme(id, {});
+            RvSessionController restored;
+            fallback.start();
+            const bool sdkSelected = sdkAdapter && sdkAdapter->setMode(RvDtofCandidates::sdkMode(preset.mode))
+                && sdkAdapter->currentImagingScheme() == id;
+            check(QString("NATIVE_SENSOR_SCHEME_%1").arg(preset.sensorMode),
+                fallback.currentImagingScheme() == id && restored.currentImagingScheme() == id
+                && sdkSelected
+                && fallbackMenu->currentData() == id && !fallback.hostHdAssist()
+                && fallbackView.selectedWidth() == preset.grid && fallbackView.selectedHeight() == preset.grid
+                && fallback.userStopped() && !fallback.busy());
+        }
+        auto *canvas = static_cast<RvDepthView *>(fallbackView.findChild<QWidget *>("rvNativeDepthCanvas"));
+        check("NATIVE_TOF_GRID_CANVAS_AVAILABLE", canvas != nullptr);
+        for (const int index : {0, 2}) {
+            if (!canvas) break;
+            const auto &preset = RvDtofCandidates::SensorDepthPresets[index];
+            fallback.selectImagingScheme(QLatin1String(preset.id), {});
+            const int width = preset.grid;
+            QByteArray depth(width * width * 4, 0);
+            for (int i = 0; i < width * width; ++i) {
+                const float metres = i % width < width / 2 ? .5f : 2.5f;
+                quint32 word;
+                std::memcpy(&word, &metres, sizeof(word));
+                qToLittleEndian(word, depth.data() + i * 4);
+            }
+            canvas->resize(320, 320);
+            fallbackView.acceptRvDepth(depth, {{"width", width}, {"height", width},
+                {"depth_unit", "sensor_radial_m_float32"}, {"native_order", true}, {"frame_id", 1}, {"generation", 1}});
+            const auto snapshot = fallbackView.snapshot();
+            const auto colors = canvas->presentationImage();
+            const auto rendered = canvas->grab().toImage();
+            const auto viewport = canvas->property("presentationRect").toRectF().adjusted(2, 2, -2, -2);
+            const qreal pixelRatio = rendered.devicePixelRatio();
+            const auto interior = QRectF(viewport.topLeft() * pixelRatio, viewport.size() * pixelRatio)
+                .toAlignedRect().intersected(rendered.rect());
+            QSet<QRgb> renderedColors;
+            for (int y = interior.top(); y <= interior.bottom(); ++y)
+                for (int x = interior.left(); x <= interior.right(); ++x)
+                    renderedColors.insert(rendered.pixel(x, y));
+            check(QString("SDK_TOF_%1_PAINTS_AND_SAVES_ORIGINAL_GRID").arg(width),
+                colors.size() == QSize(width, width) && renderedColors.size() == 2
+                && renderedColors == QSet<QRgb>{colors.pixel(0, 0), colors.pixel(width - 1, 0)}
+                && snapshot.metresFloat32LE == depth && snapshot.depthImage.size() == QSize(width, width));
+        }
+        fallback.selectImagingScheme(highAccuracyScheme, {});
+        check("NATIVE_SENSOR_SELECTION_RETURNS_TO_SDK_SCHEME", fallback.currentImagingScheme() == highAccuracyScheme
+            && fallback.native48ExtendedIntegration() && fallbackView.selectedWidth() == 48 && fallbackView.selectedHeight() == 32);
     }
     {
         const auto &calibration=RvCameraStream::hdVgaCalibration();
@@ -1005,26 +1145,10 @@ int runPortSmokeTests(SensorMainWindow &window,LanguageManager &language,const Q
         RvSessionController reopened;
         check(QString("NATIVE_MODE_PERSISTS_")+scheme,reopened.currentImagingScheme()==scheme&&!reopened.assistDepthEnabled()&&reopened.userStopped()
             &&reopened.dtofCandidateMode()==expectedMode&&reopened.native48ExtendedIntegration());
-#ifdef Q_OS_WIN
-        const QTemporaryDir launchFixture;
-        auto *control=reopened.m_previewControl;
-        const auto missingWorker=QDir(launchFixture.path()).filePath("missing-worker.exe").toStdWString();
-        bool intercepted=false;
-        if(launchFixture.isValid()){
-            // Observe the real launch arguments without starting a worker or reaching a device.
-            control->setCreateProcessArgumentsModifier([&](QProcess::CreateProcessArguments *process){
-                intercepted=true;
-                process->applicationName=missingWorker.c_str();
-            });
-            reopened.start();
-            control->setCreateProcessArgumentsModifier({});
-            reopened.stop();
-        }
-        const auto arguments=control->arguments();
-        check(QString("NATIVE_MODE_START_USES_SELECTED_INTEGRATION_")+scheme,intercepted
-            &&arguments.value(0)=="--dtof"&&arguments.value(1)==QString::number(expectedMode)
-            &&arguments.count("--native48-1200k")==1);
-#endif
+        const auto *sdk=session->depthSdk();
+        check(QString("NATIVE_MODE_CONFIGURES_SDK_WHILE_STOPPED_")+scheme,
+            sdk&&sdk->available()&&sdk->currentImagingScheme()==RvDtofCandidates::name(expectedMode)
+            &&sdk->userStopped());
     }
     session->selectImagingScheme(visibleHostScheme,{});
     check("NO_BOARD_DEPTH_OR_REPAIR_UI",!window.depth()->findChild<QWidget*>("rvDtofFastDepthCanvas")&&!window.depth()->findChild<QWidget*>("rvLiteSrRepairSettings")&&!window.depth()->findChild<QWidget*>("rvBoardLiteSrHostContour"));
@@ -1039,26 +1163,16 @@ int runPortSmokeTests(SensorMainWindow &window,LanguageManager &language,const Q
         &&!depthStop->isEnabled()&&!cameraStop->isEnabled()&&depthReconnect->isEnabled()&&cameraReconnect->isEnabled());
     if(controlsPresent){
         session->selectImagingScheme(visibleHostScheme,{});
-        const auto checkSharedStop=[&](const QString &name,QPushButton *begin,QPushButton *stop){
-            bool linked=false;
-            QMetaObject::Connection observation;
-            observation=QObject::connect(session,&RvSessionController::configurationChanged,&window,[&]{
-                if(session->userStopped())return;
-                QObject::disconnect(observation);
-                linked=!depthStart->isEnabled()&&!cameraStart->isEnabled()
-                    &&depthStop->isEnabled()&&cameraStop->isEnabled()
-                    &&!depthReconnect->isEnabled()&&!cameraReconnect->isEnabled();
-                stop->click();
-            });
-            begin->click();
-            QObject::disconnect(observation);
-            check(name,linked&&session->userStopped()&&depthStart->isEnabled()&&cameraStart->isEnabled());
-        };
-        if(session->hostInferencePreflightError().isEmpty()){
-            checkSharedStop("DEPTH_START_CAMERA_STOP",depthStart,cameraStop);
-            checkSharedStop("CAMERA_RECONNECT_DEPTH_STOP",cameraReconnect,depthStop);
-        }
         if(qEnvironmentVariable("RV_TEST_OFFLINE_ONLY")=="1"){
+            const auto remainsIdle=[&] {
+                return session->userStopped()&&!session->busy()&&session->depthSdk()->userStopped()
+                    &&depthStart->isEnabled()&&cameraStart->isEnabled()
+                    &&!depthStop->isEnabled()&&!cameraStop->isEnabled();
+            };
+            depthStart->click();
+            check("DEPTH_START_STAYS_OFFLINE",remainsIdle());
+            cameraReconnect->click();
+            check("CAMERA_RECONNECT_STAYS_OFFLINE",remainsIdle());
             session->startAutomatically();
             session->startAutomatically(true);
             settle(50);
@@ -1186,9 +1300,6 @@ int runPortSmokeTests(SensorMainWindow &window,LanguageManager &language,const Q
     check("FP16_SELECTION_STOPPED",session->dtofCandidateMode()==RvDtofCandidates::Native48&&session->userStopped()&&session->assistDepthEnabled()&&session->assistExperiment()=="B");
     bool idle=true;for(auto *process:window.findChildren<QProcess *>())idle&=process->state()==QProcess::NotRunning;
     check("NO_WORKER_OR_HARDWARE_STARTED",idle);
-    const auto worker=RuntimeDiscovery::rvControlForLaunch();
-    check("NATIVE_WORKER_MANIFEST_VALID",worker.ok()&&worker.error.isEmpty());
-    check("NATIVE_WORKER_OWN_PROJECT",worker.executable.startsWith(RuntimeDiscovery::applicationRoot(),Qt::CaseInsensitive));
     for(const auto *name:{"renderModeMenu","languageMenu","layoutPresetMenu"})
         check(QString("MENU_")+name,window.findChild<QMenu *>(name)!=nullptr);
     auto *rendering=RenderingSettings::instance();const auto prior=rendering->lowCostRendering();
@@ -1217,15 +1328,17 @@ int runPortSmokeTests(SensorMainWindow &window,LanguageManager &language,const Q
     if(aboutDialog){
         for(auto *label:aboutDialog->findChildren<QLabel *>()){
             aboutName |= label->text()==QStringLiteral("触想工作台");
-            aboutVersion |= label->text()==QStringLiteral("v1.0 · 内测版");
+            aboutVersion |= label->text()==QStringLiteral("v%1 · 内测版").arg(AppEdition::version());
             aboutLogo |= !label->pixmap().isNull();
         }
     }
     check("ABOUT_BRANDING",aboutDialog && aboutDialog->windowTitle()==QStringLiteral("关于")
         && aboutName && aboutVersion && aboutLogo && !window.windowIcon().isNull());
     if(aboutDialog)aboutDialog->reject();
-    check("CHINESE_IMAGING_SCHEMES",models&&models->count()==3&&models->itemText(0)==QStringLiteral("上位机辅助推理")
-        &&models->itemText(1)==QStringLiteral("板端推理")&&models->itemText(2)==QStringLiteral("板端推理高精度"));
+    check("CHINESE_IMAGING_SCHEMES",models&&models->count()==7&&models->itemText(0)==QStringLiteral("上位机辅助推理")
+        &&models->itemText(1)==QStringLiteral("板端推理")&&models->itemText(2)==QStringLiteral("板端推理高精度")
+        &&models->itemText(3)==QStringLiteral("原生 ToF 8×8 普通")&&models->itemText(4)==QStringLiteral("原生 ToF 8×8 高精度")
+        &&models->itemText(5)==QStringLiteral("原生 ToF 16×16 普通")&&models->itemText(6)==QStringLiteral("原生 ToF 16×16 高精度"));
     check("CHINESE_SHARED_CONTROL_LABELS",controlsPresent&&depthStart->text()==cameraStart->text()
         &&depthStop->text()==cameraStop->text()&&depthReconnect->text()==cameraReconnect->text());
     check("CHINESE_IMAGING_SCHEME_TOOLTIP",models&&models->toolTip()==QString::fromUtf8("选择深度图和原视频共享会话的成像方案。"));
@@ -1596,9 +1709,10 @@ int runPortSmokeTests(SensorMainWindow &window,LanguageManager &language,const Q
         const auto *grid=devices.findChild<QPushButton *>("rvDeviceCheckRgbLsc");
         const auto *recover=devices.findChild<QPushButton *>("rvDeviceRecover");
         const auto *maintain=devices.findChild<QPushButton *>("rvDeviceMaintainCapture");
+        const auto sdk=session->depthSdk()->captureDiagnostics();
         check("SDK_DEVICE_MANAGER_READY",session->depthSdk()->available()
-            &&session->depthSdk()->captureDiagnostics()["sdk_version"]=="2.2.2");
-        check("SDK_DEVICE_MANAGER_HAS_USB_GRID_AND_REPAIR",usb&&grid&&recover&&maintain);
+            &&sdk["sdk_version"]=="3.1.0"&&sdk["abi_version"]==3);
+        check("SDK_DEVICE_MANAGER_HAS_USB_AND_REPAIR",usb&&!grid&&recover&&maintain);
         check("DEVICE_MANAGER_NO_MANUAL_TRUST_FIELDS",!devices.findChild<QWidget *>("rvDeviceConfirm")
             &&!devices.findChild<QWidget *>("rvDeviceCameraMount")&&!devices.findChild<QWidget *>("rvDeviceTemporaryFov"));
         check("DEVICE_MANAGER_SHOWS_EFFECTIVE_DIRECTION",direction&&direction->count()==2
@@ -1611,8 +1725,10 @@ int runPortSmokeTests(SensorMainWindow &window,LanguageManager &language,const Q
     language.setLanguage(LanguageManager::Language::English);settle(100);
     check("ENGLISH_WINDOW",window.windowTitle()==QStringLiteral("触想工作台（内测版）"));
     check("ENGLISH_ABOUT_MENU",about && about->text()=="About");
-    check("ENGLISH_IMAGING_SCHEMES",models&&models->count()==3&&models->itemText(0)=="Host-assisted inference"
-        &&models->itemText(1)=="Board inference"&&models->itemText(2)=="Board inference high accuracy");
+    check("ENGLISH_IMAGING_SCHEMES",models&&models->count()==7&&models->itemText(0)=="Host-assisted inference"
+        &&models->itemText(1)=="Board inference"&&models->itemText(2)=="Board inference high accuracy"
+        &&models->itemText(3)==QStringLiteral("8×8 ToF standard")&&models->itemText(4)==QStringLiteral("8×8 ToF high accuracy")
+        &&models->itemText(5)==QStringLiteral("16×16 ToF standard")&&models->itemText(6)==QStringLiteral("16×16 ToF high accuracy"));
     check("ENGLISH_IMAGING_SCHEME_TOOLTIP",models&&models->toolTip()=="Select the imaging scheme for the shared depth and camera session.");
     {
         QSettings settings;

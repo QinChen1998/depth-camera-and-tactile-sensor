@@ -1,4 +1,5 @@
 #include "DepthSdkClient.h"
+#include "RvDtofCandidates.h"
 #include <QCoreApplication>
 #include <QEventLoop>
 #include <QJsonDocument>
@@ -12,8 +13,6 @@
 #include <utility>
 
 namespace {
-constexpr auto Board = "board_native_tof48";
-constexpr auto HighAccuracy = "board_native_tof48_high_accuracy";
 constexpr auto Offline = "RV_TEST_OFFLINE_ONLY";
 
 template <typename Read>
@@ -35,12 +34,17 @@ bool validImage(const CxwlDepthImage &image, uint32_t pixelBytes)
 
 RvTofFrame DepthSdkFrames::nativeMeasurement(const CxwlDepthFrameEx &frame, const QByteArray &depth, QJsonObject metadata)
 {
-    if (depth.size() != CXWL_DEPTH_WIDTH * CXWL_DEPTH_HEIGHT * 4) return {};
+    const auto grid = RvDtofCandidates::nativeDepthGrid(RvDtofCandidates::modeForSdkMode(frame.frame.mode));
+    if (grid.isEmpty()) return {};
+    const auto width = uint32_t(grid.width()), height = uint32_t(grid.height());
+    if (frame.frame.image.width != width || frame.frame.image.height != height
+        || depth.size() != qsizetype(width) * height * 4
+        || metadata["dtof_width"] != grid.width() || metadata["dtof_height"] != grid.height()) return {};
     const auto &snr = frame.snr;
     const auto &mask = frame.valid_mask;
     for (const auto *plane : {&snr, &mask}) {
-        if (plane->pixel_format != CXWL_DEPTH_PIXEL_U8 || plane->width != CXWL_DEPTH_WIDTH
-            || plane->height != CXWL_DEPTH_HEIGHT || !validImage(*plane, 1)) return {};
+        if (plane->pixel_format != CXWL_DEPTH_PIXEL_U8 || plane->width != width
+            || plane->height != height || !validImage(*plane, 1)) return {};
     }
     if (metadata["source_generation"] != QString::fromUtf8(frame.frame.capture_generation_utf8)
         || metadata["generation"].toInteger(-1) != qint64(frame.frame.session_epoch)
@@ -49,11 +53,11 @@ RvTofFrame DepthSdkFrames::nativeMeasurement(const CxwlDepthFrameEx &frame, cons
     metadata["generation"] = metadata["source_generation"];
     metadata["native_range_source"] = "sdk_radial_f32_and_quality";
     QByteArray samples(depth.size(), Qt::Uninitialized);
-    for (uint32_t y = 0; y < CXWL_DEPTH_HEIGHT; ++y) {
+    for (uint32_t y = 0; y < height; ++y) {
         const auto *snrRow = static_cast<const char *>(snr.data) + quint64(y) * snr.row_stride_bytes;
         const auto *maskRow = static_cast<const char *>(mask.data) + quint64(y) * mask.row_stride_bytes;
-        for (uint32_t x = 0; x < CXWL_DEPTH_WIDTH; ++x) {
-            const auto offset = (y * CXWL_DEPTH_WIDTH + x) * 4;
+        for (uint32_t x = 0; x < width; ++x) {
+            const auto offset = (y * width + x) * 4;
             const auto bits = qFromLittleEndian<quint32>(depth.constData() + offset);
             float metres;
             std::memcpy(&metres, &bits, sizeof(metres));
@@ -83,8 +87,8 @@ DepthSdkClient::DepthSdkClient(const QString &deviceStore, QObject *parent)
     });
     CxwlDepthVersionInfo version{};
     version.size = sizeof(version);
-    if (CxwlDepth_GetVersionInfo(&version) != CXWL_DEPTH_OK || version.abi_version != CXWL_DEPTH_ABI_VERSION
-        || QByteArray(version.version_utf8) != "2.2.2") {
+    if (CxwlDepth_AbiVersion() != CXWL_DEPTH_ABI_VERSION || CxwlDepth_GetVersionInfo(&version) != CXWL_DEPTH_OK
+        || version.abi_version != CXWL_DEPTH_ABI_VERSION || QByteArray(version.version_utf8) != CXWL_DEPTH_VERSION) {
         rememberCaptureFailure("CxwlDepth_GetVersionInfo", CXWL_DEPTH_UNAVAILABLE, false);
         return;
     }
@@ -106,12 +110,12 @@ DepthSdkClient::~DepthSdkClient()
 
 QString DepthSdkClient::currentImagingScheme() const
 {
-    return m_mode == CXWL_DEPTH_BOARD_HIGH_ACCURACY ? QLatin1String(HighAccuracy) : QLatin1String(Board);
+    return RvDtofCandidates::name(RvDtofCandidates::modeForSdkMode(m_mode));
 }
 
 bool DepthSdkClient::setMode(uint32_t mode)
 {
-    if (mode != CXWL_DEPTH_BOARD && mode != CXWL_DEPTH_BOARD_HIGH_ACCURACY) return false;
+    if (RvDtofCandidates::modeForSdkMode(mode) < 0) return false;
     if (mode == m_mode) return true;
     if (m_session) {
         const auto result = CxwlDepth_SetMode(m_session, mode);
@@ -183,39 +187,6 @@ CxwlDepthResult DepthSdkClient::maintainBoardFiles(const QString &id, uint32_t o
     return CxwlDepth_MaintainBoardFiles(m_manager, id.toUtf8().constData(), operation);
 }
 
-CxwlDepthResult DepthSdkClient::checkRgbLsc(const QString &id)
-{
-    return CxwlDepth_CheckRgbLsc(m_manager, id.toUtf8().constData());
-}
-
-CxwlDepthResult DepthSdkClient::startRgbLscCalibration(const QString &id)
-{
-    return CxwlDepth_StartRgbLscCalibration(m_manager, id.toUtf8().constData());
-}
-
-bool DepthSdkClient::finishUsbGridOffer(const QString &id, bool calibrate)
-{
-    if (!m_session || m_stopping || m_shuttingDown || id.isEmpty() || activeDeviceId() != id
-        || !m_managerState["usb"].toObject()["rgb_lsc_offer"].toBool()) return false;
-    m_resumeUsbDevice = id;
-    m_calibrateUsbAfterDisconnect = calibrate;
-    m_status = CaptureStatus::Stopping;
-    beginDisconnect();
-    return true;
-}
-
-void DepthSdkClient::resumeRegisteredUsb()
-{
-    const auto id = std::exchange(m_resumeUsbDevice, {});
-    if (m_shuttingDown || id.isEmpty() || activeDeviceId() != id) return;
-    const auto result = requestConnection({CXWL_DEPTH_TARGET_SAVED, 0, id});
-    if (result != CXWL_DEPTH_OK) {
-        m_status = CaptureStatus::Failed;
-        emit stateChanged();
-        emit captureError("capture_failed", {});
-    }
-}
-
 void DepthSdkClient::scanUsb()
 {
     if (!m_manager || m_shuttingDown || m_stopping || m_session || m_request || m_scanning
@@ -265,7 +236,7 @@ CxwlDepthResult DepthSdkClient::connectRequested()
     options.size = sizeof(options); options.abi_version = CXWL_DEPTH_ABI_VERSION;
     options.mode = m_mode; options.target = request.target; options.usb_check_id = request.checkId;
     options.policy = request.target == CXWL_DEPTH_TARGET_SAVED ? CXWL_DEPTH_CONNECT_SAVED_ONLY
-        : CXWL_DEPTH_CONNECT_PREPARE_OFFER_RGB_LSC;
+                                                               : CXWL_DEPTH_CONNECT_PREPARE;
     const auto id = request.deviceId.toUtf8();
     options.device_id_utf8 = id.isEmpty() ? nullptr : id.constData();
     const auto result = CxwlDepth_ConnectWithOptions(&options, receiveFrame, captureEvent, this, &m_session);
@@ -307,7 +278,6 @@ void DepthSdkClient::stop()
     ++m_stopRevision;
     m_suppressNextAttachment = m_seenAttachment.isEmpty();
     m_pendingBoardRepair.clear();
-    m_resumeUsbDevice.clear();
     if (m_stopping || m_shuttingDown) return;
     const bool wasActive = !userStopped();
     m_request.reset();
@@ -339,7 +309,6 @@ bool DepthSdkClient::shutdown()
         m_shuttingDown = true;
         m_request.reset();
         m_pendingBoardRepair.clear();
-        m_resumeUsbDevice.clear();
         if (m_session) m_stopping = true;
     }
     return drain();
@@ -359,11 +328,6 @@ bool DepthSdkClient::drain()
             rememberCaptureFailure("CxwlDepth_Disconnect", result);
             m_status = CaptureStatus::StopFailed;
             m_pendingBoardRepair.clear();
-            if (!m_resumeUsbDevice.isEmpty()) {
-                const auto id = std::exchange(m_resumeUsbDevice, {});
-                emit rgbLscChanged({{"state", "error"}, {"operation", "calibrate"}, {"device_id", id},
-                    {"result", "capture_failed"}});
-            }
         } else if (m_status == CaptureStatus::Stopping) {
             m_status = CaptureStatus::Stopped;
         }
@@ -372,15 +336,6 @@ bool DepthSdkClient::drain()
         if (!m_shuttingDown) emit stateChanged();
         if (result == CXWL_DEPTH_OK && !m_pendingBoardRepair.isEmpty())
             emit boardFilesRequired(std::exchange(m_pendingBoardRepair, {}));
-        if (result == CXWL_DEPTH_OK && !m_resumeUsbDevice.isEmpty() && !m_shuttingDown) {
-            if (!std::exchange(m_calibrateUsbAfterDisconnect, false)) {
-                resumeRegisteredUsb();
-            } else if (startRgbLscCalibration(m_resumeUsbDevice) != CXWL_DEPTH_OK) {
-                emit rgbLscChanged({{"state", "error"}, {"operation", "calibrate"}, {"device_id", m_resumeUsbDevice},
-                    {"result", "inspection_failed"}});
-                resumeRegisteredUsb();
-            }
-        }
         if (m_shuttingDown && m_session) {
             m_stopping = true;
             m_drain.start();
@@ -416,16 +371,20 @@ void DepthSdkClient::receive(const CxwlDepthFrame &value, const CxwlDepthFrameEx
     if (m_stopping || m_shuttingDown || m_status == CaptureStatus::StopFailed
         || frame->size < sizeof(*frame) || frame->mode != m_mode || frame->sequence == 0) return;
     const auto &image = frame->image;
+    const auto grid = RvDtofCandidates::nativeDepthGrid(RvDtofCandidates::modeForSdkMode(m_mode));
     if (frame->stream == CXWL_DEPTH_STREAM_DEPTH && frame->coordinate == CXWL_DEPTH_COORDINATE_SENSOR_RADIAL
-        && image.pixel_format == CXWL_DEPTH_PIXEL_F32_LE && image.width == CXWL_DEPTH_WIDTH
-        && image.height == CXWL_DEPTH_HEIGHT && validImage(image, sizeof(float))) {
-        constexpr uint32_t rowBytes = CXWL_DEPTH_WIDTH * sizeof(float);
-        m_depth.resize(rowBytes * CXWL_DEPTH_HEIGHT);
+        && image.pixel_format == CXWL_DEPTH_PIXEL_F32_LE && !grid.isEmpty()
+        && image.width == uint32_t(grid.width()) && image.height == uint32_t(grid.height())
+        && validImage(image, sizeof(float))) {
+        const auto rowBytes = image.width * sizeof(float);
+        m_depth.resize(rowBytes * image.height);
         const auto *pixels = static_cast<const char *>(image.data);
-        for (uint32_t y = 0; y < CXWL_DEPTH_HEIGHT; ++y)
+        for (uint32_t y = 0; y < image.height; ++y)
             std::memcpy(m_depth.data() + y * rowBytes, pixels + uint64_t(y) * image.row_stride_bytes, rowBytes);
         m_depthMetadata = frame->metadata_json_utf8
             ? QJsonDocument::fromJson(QByteArray(frame->metadata_json_utf8)).object() : QJsonObject{};
+        m_depthMetadata["width"] = grid.width();
+        m_depthMetadata["height"] = grid.height();
         m_native = quality && frame->clock_domain == CXWL_DEPTH_CLOCK_BOARD_MONOTONIC
             ? DepthSdkFrames::nativeMeasurement(*quality, m_depth, m_depthMetadata) : RvTofFrame{};
     } else if (frame->stream == CXWL_DEPTH_STREAM_VIDEO && image.pixel_format == CXWL_DEPTH_PIXEL_RGB8
@@ -470,7 +429,6 @@ void CXWL_DEPTH_CALL DepthSdkClient::managerEvent(void *user, uint32_t event)
     if (event == CXWL_DEPTH_EVENT_DEVICES_CHANGED) client.m_devicesDirty = true;
     if (event == CXWL_DEPTH_EVENT_MAINTENANCE_CHANGED) client.m_maintenanceDirty = true;
     if (event == CXWL_DEPTH_EVENT_RECOVERY_CHANGED) client.m_recoveryDirty = true;
-    if (event == CXWL_DEPTH_EVENT_RGB_LSC_CHANGED) client.m_rgbLscDirty = true;
     if (!client.m_dispatch.isActive()) client.m_dispatch.start();
 }
 
@@ -567,15 +525,6 @@ void DepthSdkClient::dispatch()
     if (std::exchange(m_maintenanceDirty, false)) emit maintenanceChanged(maintenance);
     const auto recovery = m_managerState.value("recovery").toObject();
     if (std::exchange(m_recoveryDirty, false) || recovery != oldManager.value("recovery").toObject()) emit deviceRecoveryChanged(recovery);
-    const auto rgbLsc = m_managerState["rgb_lsc"].toObject();
-    if (std::exchange(m_rgbLscDirty, false) || rgbLsc != oldManager["rgb_lsc"].toObject()) {
-        emit rgbLscChanged(rgbLsc);
-        if (!m_resumeUsbDevice.isEmpty() && !m_stopping && rgbLsc["device_id"] == m_resumeUsbDevice
-            && rgbLsc["operation"] == "calibrate" && (rgbLsc["state"] == "ready" || rgbLsc["state"] == "error")) {
-            resumeRegisteredUsb();
-        }
-    }
-
     if (m_capture.value("switch_active").toBool() && !previous["switch_active"].toBool())
         emit imagingSwitchStarted(currentImagingScheme(), m_capture.value("switch_estimated_ms").toInt());
     if (!m_capture.value("switch_active").toBool() && previous["switch_active"].toBool()) {

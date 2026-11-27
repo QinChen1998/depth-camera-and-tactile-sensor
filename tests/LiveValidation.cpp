@@ -1,6 +1,7 @@
 #include "../sensors/RvCaptureCalibration.h"
 #include <QtWidgets/QDockWidget>
 #include "../SensorMainWindow.h"
+#include "../AppEdition.h"
 #include "../sensors/DepthMapWidget.h"
 #include "../sensors/MeasurementCaptureDialog.h"
 #include "../sensors/PointCloudColorScale.h"
@@ -8,7 +9,6 @@
 #include "../sensors/RvDtofBoardStream.h"
 #include "../sensors/RvCameraView.h"
 #include "../sensors/RvDepthDiagnostic.h"
-#include "../sensors/RvTunerController.h"
 #include "../sensors/DepthSdkClient.h"
 #include "../sensors/RvDeviceManagerDialog.h"
 #include "../sensors/SceneInstanceBuffer.h"
@@ -214,26 +214,42 @@ int runUsbEnrollmentLiveValidation(SensorMainWindow &window,const QString &path)
         if(!depthClock.isValid())depthClock.start();
         generation=current;lastFrame=id;lastDepth=metadata;++depthFrames;positiveFrames+=positive>0;
     };
-    QObject::connect(session,&RvSessionController::assistDepthSnapshotReady,&depthObserver,[&](const QByteArray &b,const QJsonObject &m){acceptDepth(b,m);});
+    if (AppEdition::Customer)
+        QObject::connect(session,&RvSessionController::depthSnapshotReady,&depthObserver,
+                         [&](const QByteArray &b,const QJsonObject &m){acceptDepth(b,m);});
+    else
+        QObject::connect(session,&RvSessionController::assistDepthSnapshotReady,&depthObserver,
+                         [&](const QByteArray &b,const QJsonObject &m){acceptDepth(b,m);});
     const auto painted=[&](const QJsonObject &m){const auto id=m["frame_id"].toInteger();if(id!=lastPaint){lastPaint=id;++paintedFrames;}};
     depthCanvas->performanceFramePainted=painted;hostCanvas->performanceFramePainted=painted;
     const auto clearCallbacks=qScopeGuard([&]{depthCanvas->performanceFramePainted={};hostCanvas->performanceFramePainted={};});
     QTimer render;render.setInterval(50);
-    QObject::connect(&render,&QTimer::timeout,&depthObserver,[&]{hostCanvas->grab();});render.start();
+    QObject::connect(&render,&QTimer::timeout,&depthObserver,[&]{(AppEdition::Customer?depthCanvas:hostCanvas)->grab();});render.start();
     bool failed=false;QObject context;QTimer responder;
+    QObject::connect(session->depthSdk(), &DepthSdkClient::usbStatusChanged, &context, [&](const QJsonObject &status) {
+        report["usb_state"]=status.value("state");
+        report["usb_error"]=status.value("error");
+        save(path,report);
+    });
     QObject::connect(&responder,&QTimer::timeout,&context,[&]{
         auto *dialog=qobject_cast<QDialog*>(QApplication::activeModalWidget());
         if(!dialog)return;
         if(auto *message=qobject_cast<QMessageBox*>(dialog)){
-            if(message->objectName()=="rvRgbLscPrompt"){message->done(QMessageBox::Cancel);return;}
             report["error"]=message->text()+"\n"+message->informativeText();
             failed=true;message->done(QMessageBox::Close);
         }
     });
+    report["usb_state"]="starting";save(path,report);
     responder.start(20);connectButton->click();
-    const bool registered=waitFor([&]{return failed||(!manager->operationPending()
-        &&manager->property("rvUsbRuntimeReplaced").isValid()&&session->deviceProfile().serial==serial);},240000)&&!failed
-        &&session->deviceProfile().serial==serial;
+    const auto directProfileReady=[&] {
+        const auto profile=session->deviceProfile();
+        return profile.serial==serial && !profile.serviceInstance.isEmpty() && profile.publicKey.isEmpty();
+    };
+    const auto registeredInUi=[&] {
+        return !manager->operationPending() && manager->property("rvUsbRuntimeReplaced").isValid()
+            && directProfileReady();
+    };
+    const bool registered=waitFor([&]{return failed||registeredInUi();},240000)&&!failed;
     report["parameters_requested"]=false;report["registered"]=registered;
     report["first_runtime_replaced"]=manager->property("rvUsbRuntimeReplaced").toBool();
     const auto stopped=[&]{return session->userStopped()&&!session->automaticConnecting();};
@@ -262,19 +278,15 @@ int runUsbEnrollmentLiveValidation(SensorMainWindow &window,const QString &path)
         report["profile"]=session->deviceProfile().json();
         report["registry_exported"]=QFile::copy(session->deviceStorePath(),path+".devices.json");
     }
+    report["sdk"]=session->depthSdk()->captureDiagnostics();
     const auto stopAndInspect=[&]{
         waitFor([&]{return !session->busy();},60000);
-        session->stop();if(!waitFor([&]{return !session->busy();},35000))return false;
-        auto *tuner=session->tuner();QElapsedTimer timer;timer.start();
-        do {
-            tuner->read();
-            if(!waitFor([&]{return !tuner->pending();},95000))return false;
-            if(tuner->state()==RvTunerController::Idle&&tuner->inspection()["owner"]=="idle"){
-                report["inspection"]=tuner->inspection();return true;
-            }
-            waitFor([]{return false;},200);
-        }while(timer.elapsed()<35000);
-        report["error"]=tuner->detail();return false;
+        session->stop();
+        const auto *sdk=session->depthSdk();
+        const bool released=waitFor([&]{return session->userStopped()&&!session->busy()&&sdk->canManageDevices();},35000)
+            &&sdk->captureStatus()!=DepthSdkClient::CaptureStatus::StopFailed;
+        report["stop_diagnostics"]=sdk->captureDiagnostics();
+        return released;
     };
     bool idle=registered&&stopAndInspect();
     bool reconnected=false;
@@ -310,11 +322,13 @@ int runUsbEnrollmentLiveValidation(SensorMainWindow &window,const QString &path)
     responder.stop();
     report["normal_stop"]=idle;
     const bool expectedRepair=qEnvironmentVariable("DCTS_USB_EXPECT_REPAIR")!="1"||report["first_runtime_replaced"].toBool();
+    const bool expectedNative=!AppEdition::Customer || (lastDepth["width"]==48 && lastDepth["height"]==32
+        && lastDepth["depth_unit"]=="sensor_radial_m_float32" && !session->assistDepthEnabled());
     report["depth_frames"]=depthFrames;report["positive_depth_frames"]=positiveFrames;report["painted_frames"]=paintedFrames;
     report["depth_width"]=lastDepth["width"];report["depth_height"]=lastDepth["height"];report["depth_unit"]=lastDepth["depth_unit"];
     report["model_sha256"]=lastDepth["model_sha256"];
     report["passed"]=registered&&firstDepth&&idle&&reconnected&&expectedRepair&&recovered
-        &&deferredStopHonored&&report["registry_exported"].toBool();
+        &&deferredStopHonored&&expectedNative&&report["registry_exported"].toBool();
     if(!registered&&!report.contains("error"))report["error"]="USB registration did not complete";
     save(path,report);manager->close();window.close();return report["passed"].toBool()?0:2;
 }
@@ -323,7 +337,7 @@ int runUsbEnrollmentLiveValidation(SensorMainWindow &window,const QString &path)
 // Uses ordinary session selection/start/switch/stop, never tuner.persist().
 static int runHostLiveValidation(SensorMainWindow &window,const QString &path,bool thermalOnly=false){
     constexpr bool hostOnly=true;
-    auto *s=window.session();auto *t=s->tuner();
+    auto *s=window.session();auto *sdk=s->depthSdk();
     QJsonObject report{{"passed",false},{"images_saved",false},{"measurement_arrays_saved",false},{"saved_sensor_settings_written",false}};
     const auto diagnosticDirectory=thermalOnly?QString():qEnvironmentVariable("DCTS_HOST_DIAGNOSTIC_DIRECTORY");
     const QString hostModel=QLatin1String(RvCameraView::DepthPro2Model);
@@ -333,9 +347,13 @@ static int runHostLiveValidation(SensorMainWindow &window,const QString &path,bo
     report["execution_device"]=executionDevice;
     if(thermalOnly){report["thermal_only"]=true;report["measurement_seconds"]=600;report["sample_interval_seconds"]=1;}
     if(qEnvironmentVariable("DCTS_LIVE_ENABLE")!="1"||s->deviceProfile().serial!=qEnvironmentVariable("DCTS_LIVE_SERIAL")||qEnvironmentVariable("RV_TEST_OFFLINE_ONLY")=="1")return 3;
-    const auto inspect=[&](QJsonObject &o){t->read();if(!waitFor([&]{return !t->pending();},95000)||t->state()!=RvTunerController::Idle)return false;o=t->inspection();return o["owner"]=="idle";};
+    const auto inspect=[&](QJsonObject &o){
+        o=sdk->captureDiagnostics();
+        return s->userStopped()&&!s->busy()&&sdk->canManageDevices()
+            &&sdk->captureStatus()!=DepthSdkClient::CaptureStatus::StopFailed;
+    };
     QJsonObject before,after;
-    if(!inspect(before)){report["error"]="Idle preflight failed: "+t->detail();save(path,report);return 2;}
+    if(!inspect(before)){report["error"]="The SDK did not report an idle capture session.";report["before"]=before;save(path,report);return 2;}
     report["before"]=before;
     auto *menu=window.findChild<QComboBox*>("rvDepthModel");
     auto *host=static_cast<RvDepthView*>(window.depth()->findChild<QWidget*>("rvAssistDepthCanvas"));
@@ -591,20 +609,21 @@ static int runHostLiveValidation(SensorMainWindow &window,const QString &path,bo
             while(!released&&releaseClock.elapsed()<25000);
             report["restart_stop_idle"]=released;
             report["restart_stop_wait_ms"]=releaseClock.elapsed();
-            if(!released){report["error"]="Board owner did not become idle before restart: "+t->detail();success=false;break;}
+            if(!released){report["error"]="The SDK did not release capture before restart.";success=false;break;}
         }
     }
     host->performanceFramePainted={};
     int late=0;QObject stopObserver;
     QObject::connect(s,&RvSessionController::assistDepthSnapshotReady,&stopObserver,[&](const QByteArray &,const QJsonObject &){++late;});
     s->stop();waitFor([&]{return !s->busy();},30000);waitFor([]{return false;},1500);
-    bool idle=false;QElapsedTimer stopClock;stopClock.start(); do { idle=inspect(after);if(!idle)waitFor([]{return false;},500); } while(!idle&&stopClock.elapsed()<25000);const bool unchanged=idle&&before["settings"]==after["settings"]&&before["capture_settings"]==after["capture_settings"]&&before["service_sha"]==after["service_sha"]&&before["capture_sha"]==after["capture_sha"];
-    report["after"]=after;report["normal_stop"]=idle&&s->userStopped();report["late_results_after_stop"]=late;report["saved_sensor_files_unchanged"]=unchanged;
-    report["passed"]=success&&stage==sequence.size()&&idle&&unchanged&&late==0;save(path,report);window.close();return report["passed"].toBool()?0:2;
+    const bool idle=waitFor([&]{return inspect(after);},25000);
+    report["after"]=after;report["normal_stop"]=idle;report["late_results_after_stop"]=late;
+    report["passed"]=success&&stage==sequence.size()&&idle&&late==0;save(path,report);window.close();return report["passed"].toBool()?0:2;
 }
 
 int runHostAssistLiveValidation(SensorMainWindow &w,const QString &p){return runHostLiveValidation(w,p);}
 int runHostThermalLiveValidation(SensorMainWindow &w,const QString &p){return runHostLiveValidation(w,p,true);}
+
 int runImagingSwitchValidation(SensorMainWindow &window,const QString &path){
     auto *session=window.session();
     if(qEnvironmentVariable("DCTS_LIVE_ENABLE")!="1"||qEnvironmentVariable("RV_TEST_OFFLINE_ONLY")=="1"
@@ -616,13 +635,47 @@ int runImagingSwitchValidation(SensorMainWindow &window,const QString &path){
     const QString h=QLatin1String(RvSessionController::HostAssistImagingScheme);
     const QString ordinary=QLatin1String(RvSessionController::Native48ExtendedIntegrationScheme);
     const QString high=QLatin1String(RvSessionController::Native48HighAccuracy1200KScheme);
-    const QStringList schemes{h,ordinary,high,ordinary,high,h,high,ordinary,h};
-    QJsonObject report{{"passed",false},{"calibration_release",RvCalibration::Release},{"rendering","offscreen_widget_grab"}};
+    QStringList schemes{h,ordinary,high,ordinary,high,h,high,ordinary,h};
+    if (AppEdition::Customer) {
+        schemes = {ordinary,high,ordinary};
+    } else if (qEnvironmentVariable("DCTS_LIVE_NATIVE_SENSOR") == "1") {
+        schemes.clear();
+        for (const auto &preset : RvDtofCandidates::SensorDepthPresets) schemes << QLatin1String(preset.id);
+        schemes << ordinary << high << QLatin1String(RvDtofCandidates::SensorDepthPresets[0].id) << h;
+    }
+    QJsonObject report{{"passed",false},{"edition",QLatin1String(AppEdition::Name)},
+        {"calibration_release",RvCalibration::Release},{"rendering","offscreen_widget_grab"}};
+    if (qEnvironmentVariable("DCTS_LIVE_PREPARE_BOARD") == "1") {
+        auto *sdk = session->depthSdk();
+        QObject scope;
+        QJsonObject preparation;
+        QObject::connect(sdk, &DepthSdkClient::maintenanceChanged, &scope,
+                         [&](const QJsonObject &status) { preparation = status; });
+        report["board_preparation"] = QJsonObject{{"state", "starting"}};
+        save(path, report);
+        const bool idle = waitFor([&] { return session->userStopped() && sdk->canManageDevices(); }, 10000);
+        const auto result = idle ? sdk->maintainBoardFiles(sdk->activeDeviceId(), CXWL_DEPTH_BOARD_REPAIR)
+                                 : CXWL_DEPTH_BUSY;
+        const bool ready = result == CXWL_DEPTH_OK && waitFor([&] {
+            return preparation["state"] == "ready" || preparation["state"] == "error";
+        }, 245000) && preparation["state"] == "ready";
+        report["board_preparation"] = QJsonObject{{"passed", ready}, {"request_code", int(result)},
+            {"runtime_replaced", preparation["runtime_replaced"]}, {"error", preparation["error"]}};
+        save(path, report);
+        if (!ready) { window.close(); return 2; }
+    }
     QJsonArray stages;bool all=true;
     for(const auto &scheme:schemes){
+        const auto *preset = RvDtofCandidates::sensorDepthPreset(scheme);
+        const int columns = preset ? preset->grid : 48, rows = preset ? preset->grid : 32;
+        const int sensorMode = preset ? preset->sensorMode : (scheme == high ? 12 : 11);
+        const int depthBytes = scheme == h ? 640 * 480 * 4 : columns * rows * 4;
+        report["active_scheme"] = scheme;
+        save(path, report);
         const auto previousPresentation=session->presentationEpoch();
-        QObject scope;int frames=0,painted=0,videos=0,rawFrames=0;bool invalid=false,measuring=false;
+        QObject scope;int frames=0,painted=0,videos=0,rawFrames=0,positiveRawFrames=0;bool invalid=false,measuring=false;
         QByteArray rawDepth;QJsonObject last,rawMeta;QString generation;double maxDelta=0;
+        qint64 tofSequence=0,tofStamp=0;
         auto *canvas=scheme==h?host:native;
         qint64 lastPaint=-1;
         canvas->performanceFramePainted=[&](const QJsonObject &m){
@@ -634,19 +687,27 @@ int runImagingSwitchValidation(SensorMainWindow &window,const QString &path){
         QObject::connect(&render,&QTimer::timeout,&scope,[&]{if(measuring)canvas->grab();});render.start();
         QObject::connect(session,&RvSessionController::cameraFrameReady,&scope,[&](const QImage&){if(measuring)++videos;});
         QObject::connect(session,&RvSessionController::tofFrameReady,&scope,[&](const RvTofFrame &f){
-            if(!measuring)return;++rawFrames;rawMeta=f.metadata;rawDepth=f.radialMetres();
-            invalid|=f.columns()!=48||f.rows()!=32||f.metadata["dtof_fov_correction"]!=6;
+            if(!measuring)return;
+            ++rawFrames;rawMeta=f.metadata;rawDepth=f.radialMetres();
+            const auto sequence = rawMeta["tof_sequence"].toInteger();
+            const auto stamp = rawMeta["tof_timestamp_ns"].toInteger();
+            invalid |= f.columns()!=columns || f.rows()!=rows || rawMeta["dtof_fov_correction"]!=RvCalibration::Fov
+                || sequence <= tofSequence || stamp <= tofStamp;
+            tofSequence=sequence;tofStamp=stamp;
+            for (int i=0;i<f.sampleCount();++i) {
+                if (f.valid(i) && f.rangeUq2(i) > 0) { ++positiveRawFrames; break; }
+            }
         });
         const auto accept=[&](const QByteArray &bytes,const QJsonObject &m){
             if(!measuring)return;++frames;last=m;generation=m["source_generation"].toString();
             if(generation.isEmpty())generation=m["generation"].toVariant().toString();
-            invalid|=bytes.size()!=(scheme==h?640*480*4:48*32*4);
+            invalid|=bytes.size()!=depthBytes;
             if(scheme!=h){
                 invalid|=session->assistDepthEnabled()||bytes!=rawDepth||m["tof_sequence"]!=rawMeta["tof_sequence"]
                     ||m["depth_unit"]!="sensor_radial_m_float32"||m["native_order"]!=true
-                    ||m["sensor_mode"]!=(scheme==high?12:11)||m["imaging_scheme"]!=scheme;
+                    ||m["sensor_mode"]!=sensorMode||m["imaging_scheme"]!=scheme;
                 const auto sensor=rawMeta["tof_sensor_readback"].toObject();
-                if(sensor.contains("main_iterations_k"))
+                if(!preset&&sensor.contains("main_iterations_k"))
                     invalid|=sensor["main_iterations_k"]!=RvCaptureContract::Native48ExtendedIntegrationK;
             }else{
                 invalid|=!RvCameraView::validOutputGrid(m);
@@ -671,11 +732,14 @@ int runImagingSwitchValidation(SensorMainWindow &window,const QString &path){
         measuring=false;canvas->performanceFramePainted={};
         const auto snap=window.depth()->snapshot();
         const bool valid=ready&&!invalid&&!session->userStopped()&&frames>=10&&painted>=10&&rawFrames>=10&&videos>=20
-            &&session->presentationEpoch()>previousPresentation&&snap.metresFloat32LE.size()==(scheme==h?640*480*4:48*32*4);
+            &&(!preset||positiveRawFrames>=10)
+            &&session->presentationEpoch()>previousPresentation&&snap.metresFloat32LE.size()==depthBytes;
         QJsonObject result{{"scheme",scheme},{"passed",valid},{"ready",ready},{"invalid_data",invalid},{"frames",frames},
-            {"painted",painted},{"raw_frames",rawFrames},{"video_frames",videos},{"seconds",clock.elapsed()/1000.},
+            {"painted",painted},{"raw_frames",rawFrames},{"positive_raw_frames",positiveRawFrames},
+            {"video_frames",videos},{"seconds",clock.elapsed()/1000.},
             {"width",last["width"]},{"height",last["height"]},{"depth_unit",last["depth_unit"]},{"generation",generation},
-            {"sensor_mode",last["sensor_mode"]},{"sensor_readback",rawMeta["tof_sensor_readback"]},
+            {"candidate_mode",rawMeta["candidate_mode"]},{"sensor_mode",last["sensor_mode"]},
+            {"sensor_readback",rawMeta["tof_sensor_readback"]},
             {"maximum_pair_delta_ms",maxDelta},{"state",session->stateText()},
             {"detail",session->detailText()},{"switch",session->imagingSwitchDiagnostics()}};
         stages.append(result);report["stages"]=stages;save(path,report);
@@ -687,6 +751,7 @@ int runImagingSwitchValidation(SensorMainWindow &window,const QString &path){
     QObject::connect(session,&RvSessionController::depthFrameReady,&stopScope,[&]{++late;});
     QObject::connect(session,&RvSessionController::assistDepthSnapshotReady,&stopScope,[&]{++late;});
     session->stop();const bool stopped=waitFor([&]{return !session->busy();},35000);waitFor([]{return false;},1500);
+    report.remove("active_scheme");
     report["normal_stop"]=stopped;report["late_depth_results"]=late;report["passed"]=all&&stages.size()==schemes.size()&&stopped&&late==0;
     save(path,report);window.close();return report["passed"].toBool()?0:2;
 }
@@ -726,7 +791,7 @@ int runPointCloudLiveValidation(SensorMainWindow &window, const QString &path)
     }
 
     QJsonArray stages;
-    QJsonObject report{{"passed", false}};
+    QJsonObject report{{"passed", false}, {"edition", QLatin1String(AppEdition::Name)}};
     QString previousGeneration;
     int previousMode = -1;
     bool all = true;
@@ -749,11 +814,15 @@ int runPointCloudLiveValidation(SensorMainWindow &window, const QString &path)
     double manualDistance = cameraDistance();
     const QString ordinary=QLatin1String(RvSessionController::Native48ExtendedIntegrationScheme);
     const QString high=QLatin1String(RvSessionController::Native48HighAccuracy1200KScheme);
-    const bool expectFallback=qEnvironmentVariable("DCTS_LIVE_EXPECT_BOARD_FALLBACK")=="1";
-    const QStringList schemes=expectFallback ? QStringList{ordinary, high} : QStringList{hostScheme, ordinary, high};
+    const bool expectFallback=!AppEdition::Customer&&qEnvironmentVariable("DCTS_LIVE_EXPECT_BOARD_FALLBACK")=="1";
+    const QStringList schemes=AppEdition::Customer || expectFallback
+        ? QStringList{ordinary, high} : QStringList{hostScheme, ordinary, high};
     const auto hostIndex=menu->model()->index(menu->findData(hostScheme),0);
     const auto hostDisabled=[&]{return hostIndex.isValid()&&!hostIndex.flags().testFlag(Qt::ItemIsEnabled);};
-    if(expectFallback){
+    if (AppEdition::Customer) {
+        all = !hostIndex.isValid() && !session->assistDepthEnabled();
+        report["host_menu_absent"] = !hostIndex.isValid();
+    } else if(expectFallback){
         report["initial_scheme"]=session->currentImagingScheme();
         report["initial_host_disabled"]=hostDisabled();
         const bool initiallyUnavailable=!session->hostInferencePreflightError().isEmpty();

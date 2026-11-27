@@ -47,9 +47,6 @@ public:
     CxwlDepthResult selectDevice(const QString &id);
     CxwlDepthResult removeDevice(const QString &id);
     CxwlDepthResult maintainBoardFiles(const QString &id, uint32_t operation);
-    CxwlDepthResult checkRgbLsc(const QString &id);
-    CxwlDepthResult startRgbLscCalibration(const QString &id);
-    bool finishUsbGridOffer(const QString &id, bool calibrate);
     CxwlDepthResult recoverDevice(const QString &id);
     CxwlDepthResult connectViaUsb(quint64 checkId = 0);
     void scanUsb();
@@ -72,7 +69,6 @@ signals:
     void imagingSwitchFinished();
     void imagingSwitchAborted();
     void usbStatusChanged(const QJsonObject &status);
-    void rgbLscChanged(const QJsonObject &status);
     void usbDiscovered(const QJsonObject &status);
     void maintenanceChanged(const QJsonObject &status);
     void deviceRecoveryChanged(const QJsonObject &status);
@@ -103,7 +99,6 @@ private:
     bool drain();
     void resetPresentation();
     void refreshManager();
-    void resumeRegisteredUsb();
     void rememberCaptureFailure(const char *operation, CxwlDepthResult result, bool fromSdk = true);
 
     CxwlDepthDeviceManager *m_manager = nullptr;
@@ -122,7 +117,6 @@ private:
     QString m_videoGeneration;
     QString m_seenAttachment;
     QString m_pendingBoardRepair;
-    QString m_resumeUsbDevice;
     CaptureStatus m_status = CaptureStatus::Idle;
     uint32_t m_mode = CXWL_DEPTH_BOARD;
     quint64 m_stopRevision = 0;
@@ -130,6 +124,5 @@ private:
     bool m_clearDepth = false, m_clearVideo = false, m_devicesDirty = false;
     bool m_maintenanceDirty = false;
     bool m_recoveryDirty = false;
-    bool m_rgbLscDirty = false, m_calibrateUsbAfterDisconnect = false;
     bool m_scanning = false, m_suppressNextAttachment = false;
 };

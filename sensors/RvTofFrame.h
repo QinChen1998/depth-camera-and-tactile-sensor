@@ -38,17 +38,20 @@ private:
                 && n <= 9007199254740991.0 && std::floor(n) == n;
         };
         const int mode=metadata["candidate_mode"].toInt(-1);
+        const bool m48=metadata["dtof_width"]==48&&metadata["dtof_height"]==32;
+        const bool m8=metadata["dtof_width"]==8&&metadata["dtof_height"]==8;
+        const bool m16=metadata["dtof_width"]==16&&metadata["dtof_height"]==16;
+        const bool sdkGrid=metadata["native_range_source"]=="sdk_radial_f32_and_quality"
+            && ((m8&&(mode==RvCaptureContract::Native8||mode==RvCaptureContract::Native8HighAccuracy))
+                ||(m16&&(mode==RvCaptureContract::Native16||mode==RvCaptureContract::Native16HighAccuracy)));
         const bool protocol=(metadata["protocol"]=="DTF3"&&mode>=0&&mode<10)
             ||((metadata["protocol"]==RvCaptureContract::Protocol||metadata["protocol"]==RvCaptureContract::PairedProtocol)
-                &&RvCaptureContract::supports(mode)&&metadata["engine"]==RvCaptureContract::NativeEngine
+                &&(RvCaptureContract::supports(mode)||sdkGrid)&&metadata["engine"]==RvCaptureContract::NativeEngine
                 &&metadata["model_sha256"]==""&&metadata["capture_only"]==true&&metadata["depth_present"]==false&&metadata["photon_enabled"]==false);
         const bool candidate = metadata["work_mode"]=="dtof_candidate" && protocol
             && QRegularExpression("^[0-9a-f]{32}$").match(metadata["generation"].toString()).hasMatch()
             && QRegularExpression("^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$").match(metadata["boot_id"].toString()).hasMatch()
             && metadata["candidate_mode"].isDouble() && integer("candidate_mode",0);
-        const bool m48=metadata["dtof_width"]==48&&metadata["dtof_height"]==32;
-        const bool m8=metadata["dtof_width"]==8&&metadata["dtof_height"]==8;
-        const bool m16=metadata["dtof_width"]==16&&metadata["dtof_height"]==16;
         const auto fov=metadata.contains("dtof_fov_correction")?metadata["dtof_fov_correction"]:metadata["tof_fov_correction"];
         if((m8||m16)&&(!fov.isDouble()||fov.toDouble()<0||fov.toDouble()>255||std::floor(fov.toDouble())!=fov.toDouble()))return false;
         if(m16&&metadata.contains("dtof_fov_correction")&&metadata.contains("tof_fov_correction")&&metadata["dtof_fov_correction"]!=metadata["tof_fov_correction"])return false;
@@ -104,10 +107,11 @@ public:
     quint8 snr(int index) const { return quint8(samples[index*4+2]); }
     bool valid(int index) const { return samples[index*4+3] == 1; }
     QByteArray radialMetres(const QByteArray& holeFillRanges={},QJsonArray* filledIndices=nullptr) const {
-        if(!isValid()||columns()!=48||rows()!=32)return {};
-        if(!holeFillRanges.isEmpty()&&holeFillRanges.size()!=RvCaptureContract::HoleFillBytes)return {};
-        QByteArray result(48*32*4,0);
-        for(int i=0;i<48*32;++i){
+        if(!isValid())return {};
+        if(!holeFillRanges.isEmpty()&&(columns()!=48||rows()!=32
+            ||holeFillRanges.size()!=RvCaptureContract::HoleFillBytes))return {};
+        QByteArray result(samples.size(),0);
+        for(int i=0;i<sampleCount();++i){
             quint16 range=valid(i)?rangeUq2(i):0;
             if(!range&&!holeFillRanges.isEmpty()){
                 range=qFromLittleEndian<quint16>(holeFillRanges.constData()+i*2);

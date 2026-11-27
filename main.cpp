@@ -1,18 +1,23 @@
 #include "SensorMainWindow.h"
+#include "AppEdition.h"
 #include "TactileDockWidget.h"
 #include "LanguageManager.h"
 #include "RuntimeDiscovery.h"
 #include "UiStyle.h"
 #include "sensors/RvAssistDepth.h"
+#include "sensors/DepthSdkClient.h"
 #include "sensors/RvDepthDiagnostic.h"
 #include "sensors/RvDeviceStore.h"
 #include "sensors/RvSessionController.h"
-#include "sensors/RvUsbEnrollment.h"
 #include <QApplication>
 #include <QDebug>
 #include <QDir>
 #include <QFile>
 #include <QIcon>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QSaveFile>
 #include <QSettings>
 #include <QStandardPaths>
 #include <QTemporaryDir>
@@ -38,12 +43,35 @@ int runUsbEnrollmentLiveValidation(SensorMainWindow &,const QString &);
 namespace {
 QString configurationDirectory()
 {
+    if (AppEdition::Customer)
+        return QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation)
+            + "/DepthCameraAndTactileSensorCustomer/config";
 #ifdef DCTS_INSTALLER_BUILD
     return QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation)
         + "/DepthCameraAndTactileSensor/config";
 #else
     return RuntimeDiscovery::applicationRoot() + "/config";
 #endif
+}
+
+int writeEditionInfo(const QString &path)
+{
+    const auto &schemes = AppEdition::imagingSchemes();
+    CxwlDepthVersionInfo sdk{};
+    sdk.size = sizeof(sdk);
+    if (CxwlDepth_AbiVersion() != CXWL_DEPTH_ABI_VERSION || CxwlDepth_GetVersionInfo(&sdk) != CXWL_DEPTH_OK)
+        return 3;
+    const QJsonObject info{
+        {"edition", QLatin1String(AppEdition::Name)},
+        {"version", AppEdition::version()},
+        {"sdk_version", QString::fromUtf8(sdk.version_utf8)}, {"sdk_abi", int(sdk.abi_version)},
+        {"imaging_schemes", QJsonArray::fromStringList(schemes)},
+        {"default_imaging_scheme", schemes.constFirst()},
+        {"measurement_capture", AppEdition::measurementCaptureEnabled()}
+    };
+    const auto bytes = QJsonDocument(info).toJson();
+    QSaveFile file(path);
+    return file.open(QIODevice::WriteOnly) && file.write(bytes) == bytes.size() && file.commit() ? 0 : 3;
 }
 
 void configureSettings(const QString &directory,bool seedDefaults,bool importOriginal=false)
@@ -70,6 +98,8 @@ void configureSettings(const QString &directory,bool seedDefaults,bool importOri
         }
         if(seedDefaults){
             const QSettings defaults(":/config/first-run-settings.ini",QSettings::IniFormat);
+            if(!current.contains("depth/imagingScheme"))
+                current.setValue("depth/imagingScheme", AppEdition::imagingSchemes().constFirst());
             for(const auto &key:defaults.allKeys())
                 if(!current.contains(key))current.setValue(key,defaults.value(key));
         }
@@ -83,16 +113,25 @@ void configureSettings(const QString &directory,bool seedDefaults,bool importOri
 
 int main(int argc,char **argv)
 {
+    if (AppEdition::imagingSchemes().isEmpty()) {
+        qWarning("The application edition has no imaging schemes.");
+        return 3;
+    }
+    if (argc > 1 && std::strcmp(argv[1], "--edition-info") == 0) {
+        QCoreApplication app(argc, argv);
+        const auto args = app.arguments();
+        return args.size() == 3 ? writeEditionInfo(args[2]) : 3;
+    }
     if(argc>1&&std::strcmp(argv[1],"--rv-assist-path-test")==0){
         QCoreApplication app(argc,argv);
         const auto args=app.arguments();
-        if(args.size()!=3||qEnvironmentVariable("RV_TEST_OFFLINE_ONLY")!="1")return 3;
+        if(AppEdition::Customer||args.size()!=3||qEnvironmentVariable("RV_TEST_OFFLINE_ONLY")!="1")return 3;
         extern int runRvAssistDepthTests(const QString &reportPath);
         return runRvAssistDepthTests(args[2]);
     }
     if(argc>1&&std::strcmp(argv[1],"--rv-depth-diagnostic-replay")==0){
         QCoreApplication app(argc,argv);const auto args=app.arguments();
-        if(args.size()<4)return 3;
+        if(AppEdition::Customer||args.size()<4)return 3;
         return RvDepthDiagnostic::replay(args[2],args[3],args.value(4));
     }
     if(argc>1&&std::strcmp(argv[1],"--import-settings")==0){
@@ -100,7 +139,7 @@ int main(int argc,char **argv)
     }
     QApplication app(argc,argv);app.setQuitOnLastWindowClosed(false);UiStyle::install(app);
     app.setApplicationDisplayName(QStringLiteral("触想工作台"));
-    app.setApplicationVersion(QStringLiteral("1.0"));
+    app.setApplicationVersion(AppEdition::version());
     app.setWindowIcon(QIcon(QStringLiteral(":/branding/cx.ico")));
     const auto arguments=app.arguments();const QString flag=arguments.value(1),report=arguments.value(2);
     const bool hostAssistLive=flag=="--host-assist-live-validation";
@@ -109,6 +148,8 @@ int main(int argc,char **argv)
     const bool imagingSwitchLive=flag=="--imaging-switch-validation";
     const bool pointCloudLive=flag=="--point-cloud-live-validation";
     const bool measurementLive=flag=="--measurement-live-validation";
+    if ((AppEdition::Customer && (hostAssistLive || hostThermalLive))
+        || (measurementLive && !AppEdition::measurementCaptureEnabled())) return 3;
     const bool live=usbEnrollmentLive||hostAssistLive||hostThermalLive||imagingSwitchLive||pointCloudLive||measurementLive||flag=="--live-validation";
     if(live&&(qEnvironmentVariable("DCTS_LIVE_ENABLE")!="1"||qEnvironmentVariable("DCTS_LIVE_SERIAL").isEmpty()
         ||(!usbEnrollmentLive&&!hostAssistLive&&!hostThermalLive&&qEnvironmentVariable("DCTS_ALLOW_SAVED_TOF_SWITCH")!="1")||qEnvironmentVariable("RV_TEST_OFFLINE_ONLY")=="1")){
@@ -130,14 +171,16 @@ int main(int argc,char **argv)
         }
     }
     if(live){
+        qputenv("CXWL_DEPTH_USB_SERIAL", qgetenv("DCTS_LIVE_SERIAL"));
         // Explicitly gated live tests may read an existing development profile
         // while keeping installed user settings and credentials untouched.
         const auto source=qEnvironmentVariable("DCTS_LIVE_CONFIG_SOURCE",configurationDirectory());
         const auto preferences="/preferences/DepthCameraAndTactileSensor/DepthCameraAndTactileSensor.ini";
         QDir().mkpath(temporary->path()+"/preferences/DepthCameraAndTactileSensor");
-        if(!QFile::copy(source+"/devices.json",temporary->path()+"/devices.json")
-            ||!QFile::copy(source+preferences,temporary->path()+preferences)){
-            qWarning("Cannot copy the registered devices and preferences into isolated live-test settings.");
+        const bool freshUsb=usbEnrollmentLive&&qEnvironmentVariable("DCTS_USB_TEST_NEW")=="1";
+        if((!freshUsb&&!QFile::copy(source+"/devices.json",temporary->path()+"/devices.json"))
+            ||(QFile::exists(source+preferences)&&!QFile::copy(source+preferences,temporary->path()+preferences))){
+            qWarning("Cannot copy the existing configuration into isolated live-test settings.");
             return 3;
         }
         if(!usbEnrollmentLive){
@@ -152,8 +195,9 @@ int main(int argc,char **argv)
     }
     configureSettings(testing?temporary->path():configurationDirectory(),
         !testing||flag=="--port-ui-smoke-test");
-    // USB validation selects host assisted depth in its temporary test store.
-    if(usbEnrollmentLive)QSettings().setValue("depth/imagingScheme",QLatin1String(RvSessionController::HostAssistImagingScheme));
+    if(usbEnrollmentLive)QSettings().setValue("depth/imagingScheme",AppEdition::imagingSchemes().constFirst());
+    if(imagingSwitchLive&&!AppEdition::Customer&&qEnvironmentVariable("DCTS_LIVE_NATIVE_SENSOR")=="1")
+        QSettings().setValue("depth/imagingScheme",QLatin1String(RvDtofCandidates::SensorDepthPresets[0].id));
     LanguageManager language;
     if(flag=="--tactile-3d-test")return runTactile3DTests(report);
     if(flag=="--tactile-render-test")return runTactileRenderSmoke(report);
@@ -162,7 +206,38 @@ int main(int argc,char **argv)
     if(flag=="--rv-assist-recovery-test")return runRvAssistRecoveryTests(report);
     if(flag=="--rv-tuner-test")return runRvTunerTests(report);
     if(flag=="--rv-usb-enrollment-test"){
-        const auto checks=checkRvUsbEnrollment();
+        if(qEnvironmentVariable("RV_TEST_OFFLINE_ONLY")!="1")return 3;
+        CxwlDepthVersionInfo version{};version.size=sizeof(version);
+        CxwlDepthCapabilities caps{};caps.size=sizeof(caps);
+        const bool currentAbi=CxwlDepth_AbiVersion()==3&&CxwlDepth_GetVersionInfo(&version)==CXWL_DEPTH_OK
+            &&QByteArray(version.version_utf8)=="3.1.0"&&version.abi_version==3;
+        const bool quality=currentAbi&&CxwlDepth_GetCapabilities(&caps)==CXWL_DEPTH_OK&&caps.mode_count==6
+            &&caps.depth_width==48&&caps.depth_height==32&&caps.video_width==2304&&caps.video_height==1296
+            &&caps.has_snr&&caps.has_valid_mask&&caps.max_sessions==1;
+        RvDeviceProfile fixture;
+        fixture.id=QStringLiteral("direct-test");
+        fixture.name=QStringLiteral("USB direct test");
+        fixture.serial=QStringLiteral("0123456789abcdef");
+        fixture.host=QStringLiteral("172.32.0.93");
+        fixture.serviceInstance=QString(32, QLatin1Char('a'));
+        const auto fixtureData=fixture.json();
+        const auto loaded=RvDeviceProfile::fromJson(fixtureData);
+        bool rejected=false;
+        try {
+            auto invalid=fixtureData;
+            invalid["service_instance"]="wrong";
+            RvDeviceProfile::fromJson(invalid);
+        } catch(const std::exception &) {
+            rejected=true;
+        }
+        DepthSdkClient sdk(RvDeviceStore::defaultPath());
+        bool enumerated=false;
+        const bool empty=sdk.savedDevices(&enumerated).isEmpty()&&enumerated;
+        const QJsonObject checks{{"SDK_3_1_0_ABI_3",currentAbi},{"SDK_SIX_MODES_AND_QUALITY",quality},
+            {"SDK_DIRECT_PROFILE_ROUND_TRIP",loaded.json()==fixtureData&&loaded.fingerprint().startsWith("SHA256:")},
+            {"SDK_MALFORMED_DIRECT_PROFILE_REJECTED",rejected},
+            {"SDK_EMPTY_DEVICE_STORE",sdk.available()&&empty},
+            {"SDK_OFFLINE_USB_CONNECTION_DENIED",sdk.connectViaUsb()==CXWL_DEPTH_UNAVAILABLE&&sdk.userStopped()}};
         QFile output(report);
         if(!output.open(QIODevice::WriteOnly|QIODevice::Text))return 3;
         bool passed=true;

@@ -1199,10 +1199,15 @@ int runTactileVisualizationTests(const QString &path)
             "open option popup wheels do not change the selected or highlighted option");
         combo->hidePopup();
         auto *scroll=options.findChild<QScrollArea *>("tactileDetailsScroll");
-        scroll->verticalScrollBar()->setValue(0);wait(10);
-        wheel(options.m_jumpThreshold,{},QPoint(0,-120),Qt::NoModifier);
-        report<<"option wheel page maximum="<<scroll->verticalScrollBar()->maximum()<<" value="<<scroll->verticalScrollBar()->value()<<'\n';
-        check(scroll->verticalScrollBar()->maximum()>0&&scroll->verticalScrollBar()->value()>0,
+        scroll->ensureWidgetVisible(options.m_jumpThreshold,0,0);wait(20);
+        auto *pageScroll=scroll->verticalScrollBar();
+        const int beforeWheel=pageScroll->value();
+        const bool down=beforeWheel<pageScroll->maximum();
+        const auto valueBeforeWheel=options.m_jumpThreshold->value();
+        wheel(options.m_jumpThreshold,{},QPoint(0,down?-120:120),Qt::NoModifier);
+        report<<"option wheel page maximum="<<pageScroll->maximum()<<" before="<<beforeWheel<<" value="<<pageScroll->value()<<'\n';
+        check((down?pageScroll->value()>beforeWheel:pageScroll->value()<beforeWheel)
+            &&options.m_jumpThreshold->value()==valueBeforeWheel,
             "wheel over an option scrolls the surrounding page without editing the value");
         const auto key=[](QWidget *target,int code){QKeyEvent event(QEvent::KeyPress,code,Qt::NoModifier);QApplication::sendEvent(target,&event);};
         options.m_jumpThreshold->setValue(5000);key(options.m_jumpThreshold,Qt::Key_Up);
@@ -1465,7 +1470,7 @@ int runTactileVisualizationTests(const QString &path)
         check(!widget.frame().valid&&!widget.m_adapter->valid()&&widget.history().samples().empty()
             &&widget.m_pointTable->rowCount()==(type==2?16:20)&&widget.m_pointTable->item(0,1)->text()=="--"
             &&unavailable&&unavailable->property("visible").toBool()
-            &&unavailable->property("text").toString()==QCoreApplication::translate("TactileView","Device disconnected / data unavailable"),
+            &&unavailable->property("text").toString()==TactileCanvas::tr("Device disconnected / data unavailable"),
             "every disconnected model keeps geometry with the unavailable message and no manufactured readings");
     }
     check(widget.refreshCount()==idleRefreshes,"idle view does not produce frames or curve samples");

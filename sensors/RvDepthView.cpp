@@ -173,7 +173,8 @@ bool RvDepthView::setDepth(const QByteArray &bytes,const QJsonObject &metadata,c
         &&metadata["assist_output_restored_to_calibrated_grid"]==true;
     if(!(RvCameraView::isHostDepth(model)?hostGrid:((width==144&&height==81)||(width==288&&height==162)
         ||(width==384&&height==256)||(width==576&&height==324)
-        ||(radial&&((width==48&&height==32)||(width==128&&height==128)||(width==256&&height==256)))))
+        ||(radial&&((width==48&&height==32)||((width==8||width==16)&&height==width)
+            ||(width==128&&height==128)||(width==256&&height==256)))))
         ||bytes.size()!=width*height*4||metadata["depth_unit"]!=(radial?"sensor_radial_m_float32":"camera-Z_m_float32")){
         clear();return false;
     }

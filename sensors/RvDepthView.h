@@ -132,7 +132,6 @@ protected:
       :ImagePresentation::fittedRect(QRectF(rect()).adjusted(8,8,-8,-8),rgbView?QSizeF(source.size()):presentationSize(),rotation);
   setProperty("presentationRect",target);
   const auto display=nativeRadial?shown.transformed(QTransform().rotate(-90)).flipped(Qt::Horizontal):shown;
-  p.setRenderHint(QPainter::SmoothPixmapTransform,radial&&depthSize!=QSize(48,32));
   if(nativeRotationEnabled){
    p.save();p.setTransform(nativePresentationTransform(),true);
    p.drawImage(QRectF(QPointF(),presentationSize()),display,nativeRadial?QRectF(display.rect()):QRectF(source));p.restore();

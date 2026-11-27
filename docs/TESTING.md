@@ -4,7 +4,7 @@
 
 ## 构建与离线专项
 
-构建 Release 和 Debug 的命令见 [README](../README.md#开发)。主工程默认构建原生控制 worker，并部署 Qt Widgets、SDK 及视频插件。主机推理依赖独立的 `DepthPro2Runtime/` 运行包。
+主工程部署 Qt Widgets、CXWL SDK 3.1.0 和视频插件。主机推理依赖独立的 `DepthPro2Runtime/` 运行包。构建命令见 [README](../README.md#开发)。
 
 ```powershell
 $qt = 'E:/Qt/6.11.1/msvc2022_64'
@@ -15,23 +15,23 @@ python -B tools/run_offline_tests.py --configuration Debug --qt-root $qt --outpu
 
 运行器默认执行八组，`--flags` 可以选择下表中的子集。用 `--executable` 检查同一程序的隔离构建，`--local-runtime` 让测试进程使用 EXE 目录部署的 Qt。
 
+客户版先用 `tools/build_desktop.ps1 -Edition Customer` 构建，再将 `--executable` 指向 `x64/Customer/<配置>/触想工作台.exe`。客户版界面专项检查两个 48×32 档位、旧配置回落、主机推理及诊断入口的禁用、米制深度保存和设备管理。
+
 | 标志 | 覆盖范围 |
 |---|---|
-| `port-ui-smoke-test` | 四个模块、成像入口、B 策略、单目深度图与点云联动、单帧点云替换、米制快照、点云坐标、色标和清屏 |
-| `rv-tuner-test` | 调参协议、互斥、异步停止、板端模式、Native16 分片与同帧校验 |
+| `port-ui-smoke-test` | 四个模块、七个成像入口及其设置恢复、B 策略、单目深度图与点云联动、单帧点云替换、米制快照、点云坐标、色标和清屏 |
+| `rv-tuner-test` | 调参协议、互斥、异步停止、板端模式、Native16 分片、8×8 和 16×16 原生 ToF 的设置映射、米制帧与停止释放 |
 | `tactile-serial-test` | 串口协议、型号、零点、失败与恢复 |
 | `tactile-visualization-test` | 触觉显示、面板可见性、选择、曲线和断开 |
 | `tactile-3d-test` | Qt Widgets 三维显示和生命周期 |
 | `tactile-render-test` | 三维渲染、交互、显示刷新和关闭 |
 | `rv-assist-recovery-test` | 480×640/F6 Native48 米制几何、配对边界、有效测点、尺度连续性及旧 H 诊断回放 |
-| `rv-usb-enrollment-test` | USB 身份、地址规划、已有设备复用、完整检查回执、设置交接身份及登记准入 |
+| `rv-usb-enrollment-test` | SDK 3.1.0 和 ABI v3、六档能力、空设备库、直连档案和离线 USB 禁用 |
 
-运行器清理继承的 RV、DCTS、Python 和 Qt 覆盖，并设置 `RV_TEST_OFFLINE_ONLY=1`。调参测试使用本机 TCP 回环，USB 与串口使用测试输入。通过需要退出码为 0、有独立 PASS 断言且无 FAIL。`BYPASS` 和 `RESULT PASS` 汇总行不计作断言。板端安装与回滚的 Python 测试使用临时文件系统。在 Windows 上运行这些 shell 夹具需要 Git Bash。
+运行器清理继承的 RV、DCTS、Python 和 Qt 覆盖，并设置 `RV_TEST_OFFLINE_ONLY=1`。历史调参测试使用离线夹具，SDK 加载测试禁止打开硬件，串口使用测试输入。通过需要退出码为 0、有独立 PASS 断言且无 FAIL。`BYPASS` 和 `RESULT PASS` 汇总行不计作断言。历史板端安装和回滚测试使用临时文件系统。在 Windows 上运行其 shell 夹具需要 Git Bash。
 
 ```powershell
-python -B -m unittest discover -s tests -p test_usb_network.py -v
 python -B -m unittest discover -s tests -p test_board_bootstrap.py -v
-.\x64\rv_control\Release\runtime\RvControlWorker.exe --self-test
 ```
 
 ## 主机推理与离线回放
@@ -57,9 +57,9 @@ Get-Content -LiteralPath $report
 
 | 主程序参数 | 验证内容 |
 |---|---|
-| `--usb-enrollment-live-validation` | SDK USB 接入、确认、登记及采集。可能写入板端配套文件 |
-| `--imaging-switch-validation` | 上位机辅助、普通和高精度三档往返切换、同帧深度及停采 |
-| `--point-cloud-live-validation` | 三档点云、有效测点、色标、操作及停采清屏 |
+| `--usb-enrollment-live-validation` | USB 直连登记、同设备复用、采集和停采 |
+| `--imaging-switch-validation` | 上位机辅助及 SDK 48×32 两档往返切换。设置 `DCTS_LIVE_NATIVE_SENSOR=1` 也覆盖 SDK 的四个 8×8 和 16×16 档。各阶段核对 RGB、深度和停采 |
+| `--point-cloud-live-validation` | 正常版三档或客户版两档点云、有效测点、色标、操作及停采清屏 |
 | `--host-assist-live-validation` | Depth Pro 2-S、同帧 ToF 配对、校正、渲染和停采 |
 | `--measurement-live-validation` | RV1103 和 Gemini 335 测量文件的帧序号、时长、索引与有效数据 |
 
@@ -78,11 +78,15 @@ $process.ExitCode
 Get-Content -LiteralPath $report
 ```
 
+原生 ToF 专项核对 SDK 档位、原始网格、有效米制深度、帧顺序、界面绘制及 RGB 收帧。设置 `DCTS_LIVE_PREPARE_BOARD=1` 时，先通过 SDK 检查和修复已登记设备的受管采集文件。离线界面专项核对 8×8 和 16×16 放大后的测区颜色、保存图像尺寸和米制数组。
+
+客户版的同一成像切换入口执行 48×32 普通、高精度、普通三段。点云入口检查两档的同帧板端点、RGB、停采清屏和晚到帧。用正常版的设备档案验证时，将 `DCTS_LIVE_CONFIG_SOURCE` 指向正常版配置目录。
+
 给 `--host-assist-live-validation` 设置 `DCTS_HOST_DIAGNOSTIC_DIRECTORY` 后，专项验证 ToF 测点、配对 RGB 对照、10 秒录制及重放。指定目录会保存 RGB 和测量数据。`DCTS_LIVE_SECONDS` 可设置每轮 30–300 秒的测量段。
 
 测量采集专项默认依次录制 RV1103 普通档 30 秒和 Gemini 335 60 秒。可用 `DCTS_MEASUREMENT_LIVE_SOURCE=rv1103` 或 `gemini335` 单选设备。Gemini 335 使用已安装的 Orbbec SDK v2。设置 `DCTS_MEASUREMENT_LIVE_1200K=1` 验证 RV1103 普通 1200K，设置为 `high_accuracy` 验证高精度 1200K。两档均核对模式、传感器回读主积分及帧序号。录制文件位于报告旁的独立目录。
 
-### 当前主机辅助推理温升
+### 历史 ADB 温升验证入口
 
 `tools/thermal/run.py` 启动 `--host-thermal-live-validation`，对已登记的 RV1103 测量 30 秒空闲、600 秒 Depth Pro 2-S 辅助推理及停采后的 60 秒。板端使用只读 ADB 采样，电脑侧记录 GPU 和 CPU 负载、温度与限频。报告区分测量序号、主机接收和实际绘制速率。该命令在单独的非离线 PowerShell 会话中执行。
 
